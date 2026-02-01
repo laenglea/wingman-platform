@@ -3,7 +3,7 @@ module github.com/adrianliechti/wingman
 go 1.25
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.19.0
+	github.com/anthropics/anthropic-sdk-go v1.20.0
 	github.com/aws/aws-sdk-go-v2 v1.41.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.7
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.48.0
@@ -33,8 +33,8 @@ require (
 	go.opentelemetry.io/otel/sdk/log v0.15.0
 	go.opentelemetry.io/otel/sdk/metric v1.39.0
 	golang.org/x/time v0.14.0
-	google.golang.org/api v0.263.0
-	google.golang.org/genai v1.43.0
+	google.golang.org/api v0.264.0
+	google.golang.org/genai v1.44.0
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
