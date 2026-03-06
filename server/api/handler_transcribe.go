@@ -11,7 +11,9 @@ import (
 
 func (h *Handler) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 	model := valueModel(r)
+
 	language := valueLanguage(r)
+	instructions := valueInput(r)
 
 	p, err := h.Transcriber(model)
 
@@ -55,7 +57,8 @@ func (h *Handler) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	options := &provider.TranscribeOptions{
-		Language: language,
+		Language:     language,
+		Instructions: instructions,
 	}
 
 	transcription, err := p.Transcribe(r.Context(), input, options)
