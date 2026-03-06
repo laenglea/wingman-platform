@@ -32,9 +32,6 @@ func (h *Handler) handleAudioTranscription(w http.ResponseWriter, r *http.Reques
 	prompt := r.FormValue("prompt")
 	language := r.FormValue("language")
 
-	_ = prompt
-	_ = language
-
 	file, header, err := r.FormFile("file")
 
 	if err != nil {
@@ -64,7 +61,11 @@ func (h *Handler) handleAudioTranscription(w http.ResponseWriter, r *http.Reques
 		ContentType: contentType,
 	}
 
-	options := &provider.TranscribeOptions{}
+	options := &provider.TranscribeOptions{
+		Instructions: prompt,
+
+		Language: language,
+	}
 
 	transcription, err := transcriber.Transcribe(r.Context(), input, options)
 
