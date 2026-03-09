@@ -58,6 +58,9 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 
 	if req.Reasoning != nil && req.Reasoning.Effort != nil {
 		switch *req.Reasoning.Effort {
+		case ReasoningEffortNone:
+			options.Effort = provider.EffortNone
+
 		case ReasoningEffortMinimal:
 			options.Effort = provider.EffortMinimal
 
@@ -67,8 +70,11 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		case ReasoningEffortMedium:
 			options.Effort = provider.EffortMedium
 
-		case ReasoningEffortHigh, ReasoningEffortXHigh:
+		case ReasoningEffortHigh:
 			options.Effort = provider.EffortHigh
+
+		case ReasoningEffortXHigh:
+			options.Effort = provider.EffortMax
 		}
 	}
 

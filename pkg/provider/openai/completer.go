@@ -141,6 +141,9 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 
 	if options.Effort != "" {
 		switch options.Effort {
+		case provider.EffortNone:
+			req.ReasoningEffort = openai.ReasoningEffortNone
+
 		case provider.EffortMinimal:
 			req.ReasoningEffort = openai.ReasoningEffortMinimal
 
@@ -152,6 +155,9 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 
 		case provider.EffortHigh:
 			req.ReasoningEffort = openai.ReasoningEffortHigh
+
+		case provider.EffortMax:
+			req.ReasoningEffort = openai.ReasoningEffortXhigh
 		}
 	}
 

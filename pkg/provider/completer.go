@@ -360,6 +360,7 @@ type Completion struct {
 type Effort string
 
 const (
+	EffortNone    Effort = "none"
 	EffortMinimal Effort = "minimal"
 	EffortLow     Effort = "low"
 	EffortMedium  Effort = "medium"

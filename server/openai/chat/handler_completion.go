@@ -72,21 +72,32 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch req.ReasoningEffort {
+	case ReasoningEffortNone:
+		options.Effort = provider.EffortNone
+
 	case ReasoningEffortMinimal:
 		options.Effort = provider.EffortMinimal
+
 	case ReasoningEffortLow:
 		options.Effort = provider.EffortLow
+
 	case ReasoningEffortMedium:
 		options.Effort = provider.EffortMedium
+
 	case ReasoningEffortHigh:
 		options.Effort = provider.EffortHigh
+
+	case ReasoningEffortXHigh:
+		options.Effort = provider.EffortMax
 	}
 
 	switch req.Verbosity {
 	case VerbosityLow:
 		options.Verbosity = provider.VerbosityLow
+
 	case VerbosityMedium:
 		options.Verbosity = provider.VerbosityMedium
+
 	case VerbosityHigh:
 		options.Verbosity = provider.VerbosityHigh
 	}

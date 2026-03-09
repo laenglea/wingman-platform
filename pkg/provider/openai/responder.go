@@ -282,7 +282,6 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		return nil, err
 	}
 
-
 	req := &responses.ResponseNewParams{
 		Model: r.model,
 
@@ -310,6 +309,9 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		req.Reasoning.Summary = responses.ReasoningSummaryAuto
 
 		switch options.Effort {
+		case provider.EffortNone:
+			req.Reasoning.Effort = responses.ReasoningEffortNone
+
 		case provider.EffortMinimal:
 			req.Reasoning.Effort = responses.ReasoningEffortMinimal
 
@@ -321,6 +323,9 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 
 		case provider.EffortHigh:
 			req.Reasoning.Effort = responses.ReasoningEffortHigh
+
+		case provider.EffortMax:
+			req.Reasoning.Effort = responses.ReasoningEffortXhigh
 		}
 	}
 
