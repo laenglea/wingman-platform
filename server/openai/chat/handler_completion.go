@@ -57,8 +57,18 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		Stop:  stops,
 		Tools: tools,
 
+		ToolOptions: toToolOptions(req.ToolChoice),
+
 		MaxTokens:   req.MaxCompletionTokens,
 		Temperature: req.Temperature,
+	}
+
+	if req.ParallelToolCalls != nil && !*req.ParallelToolCalls {
+		if options.ToolOptions == nil {
+			options.ToolOptions = &provider.ToolOptions{Choice: provider.ToolChoiceAuto}
+		}
+
+		options.ToolOptions.DisableParallelToolCalls = true
 	}
 
 	switch req.ReasoningEffort {

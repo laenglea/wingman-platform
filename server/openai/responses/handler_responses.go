@@ -38,18 +38,22 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tools, err := toTools(req.Tools)
-
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
+	tools := toTools(req.Tools)
 
 	options := &provider.CompleteOptions{
-		Tools: tools,
+		Tools:       tools,
+		ToolOptions: toToolOptions(req.ToolChoice),
 
 		MaxTokens:   req.MaxOutputTokens,
 		Temperature: req.Temperature,
+	}
+
+	if req.ParallelToolCalls != nil && !*req.ParallelToolCalls {
+		if options.ToolOptions == nil {
+			options.ToolOptions = &provider.ToolOptions{Choice: provider.ToolChoiceAuto}
+		}
+
+		options.ToolOptions.DisableParallelToolCalls = true
 	}
 
 	if req.Reasoning != nil && req.Reasoning.Effort != nil {
@@ -107,6 +111,115 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 	} else {
 		h.handleResponsesComplete(w, r, req, completer, messages, options)
 	}
+}
+
+func responseStatus(status provider.CompletionStatus) string {
+	switch status {
+	case provider.CompletionStatusIncomplete:
+		return "incomplete"
+	case provider.CompletionStatusFailed:
+		return "failed"
+	default:
+		return "completed"
+	}
+}
+
+func responseModel(defaultModel string, completion *provider.Completion) string {
+	if completion != nil && completion.Model != "" {
+		return completion.Model
+	}
+
+	return defaultModel
+}
+
+func responseUsage(usage *provider.Usage) *Usage {
+	if usage == nil {
+		return nil
+	}
+
+	return &Usage{
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+		TotalTokens:  usage.InputTokens + usage.OutputTokens,
+	}
+}
+
+func responseOutputs(message *provider.Message, messageID, status, text, reasoningSignature string) []ResponseOutput {
+	if message == nil {
+		return []ResponseOutput{}
+	}
+
+	output := []ResponseOutput{}
+
+	for _, content := range message.Content {
+		if content.Reasoning != nil && content.Reasoning.ID != "" {
+			reasoningItem := &ReasoningOutputItem{
+				ID:      content.Reasoning.ID,
+				Type:    "reasoning",
+				Status:  status,
+				Summary: []ReasoningOutputSummary{},
+				Content: []ReasoningOutputContentPart{},
+			}
+
+			if content.Reasoning.Summary != "" {
+				reasoningItem.Summary = append(reasoningItem.Summary, ReasoningOutputSummary{
+					Type: "summary_text",
+					Text: content.Reasoning.Summary,
+				})
+			}
+
+			if content.Reasoning.Text != "" {
+				reasoningItem.Content = append(reasoningItem.Content, ReasoningOutputContentPart{
+					Type: "reasoning_text",
+					Text: content.Reasoning.Text,
+				})
+			}
+
+			reasoningItem.EncryptedContent = content.Reasoning.Signature
+			if reasoningSignature != "" {
+				reasoningItem.EncryptedContent = reasoningSignature
+			}
+
+			output = append(output, ResponseOutput{
+				Type:                ResponseOutputTypeReasoning,
+				ReasoningOutputItem: reasoningItem,
+			})
+			break
+		}
+	}
+
+	for _, call := range message.ToolCalls() {
+		output = append(output, ResponseOutput{
+			Type: ResponseOutputTypeFunctionCall,
+			FunctionCallOutputItem: &FunctionCallOutputItem{
+				ID:        call.ID,
+				Type:      "function_call",
+				Status:    status,
+				Name:      call.Name,
+				CallID:    call.ID,
+				Arguments: call.Arguments,
+			},
+		})
+	}
+
+	if text != "" {
+		output = append(output, ResponseOutput{
+			Type: ResponseOutputTypeMessage,
+			OutputMessage: &OutputMessage{
+				ID:     messageID,
+				Role:   MessageRoleAssistant,
+				Status: status,
+				Contents: []OutputContent{
+					{
+						Type: "output_text",
+						Text: text,
+					},
+				},
+			},
+		})
+	}
+
+	return output
 }
 
 func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, req ResponsesRequest, completer provider.Completer, messages []provider.Message, options *provider.CompleteOptions) {
@@ -267,6 +380,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventReasoningItemAdded:
+			if event.ReasoningID == "" {
+				return nil
+			}
+
 			return writeEvent(w, "response.output_item.added", ReasoningOutputItemAddedEvent{
 				Type:           "response.output_item.added",
 				SequenceNumber: nextSeq(),
@@ -281,6 +398,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventReasoningContentPartAdded:
+			if event.ReasoningID == "" {
+				return nil
+			}
+
 			return writeEvent(w, "response.content_part.added", ReasoningContentPartAddedEvent{
 				Type:           "response.content_part.added",
 				SequenceNumber: nextSeq(),
@@ -294,6 +415,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventReasoningTextDelta:
+			if event.ReasoningID == "" {
+				return nil
+			}
+
 			return writeEvent(w, "response.reasoning_text.delta", ReasoningTextDeltaEvent{
 				Type:           "response.reasoning_text.delta",
 				SequenceNumber: nextSeq(),
@@ -304,6 +429,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventReasoningTextDone:
+			if event.ReasoningID == "" {
+				return nil
+			}
+
 			return writeEvent(w, "response.reasoning_text.done", ReasoningTextDoneEvent{
 				Type:           "response.reasoning_text.done",
 				SequenceNumber: nextSeq(),
@@ -314,6 +443,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventReasoningContentPartDone:
+			if event.ReasoningID == "" {
+				return nil
+			}
+
 			return writeEvent(w, "response.content_part.done", ReasoningContentPartDoneEvent{
 				Type:           "response.content_part.done",
 				SequenceNumber: nextSeq(),
@@ -327,6 +460,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventReasoningSummaryPartAdded:
+			if event.ReasoningID == "" {
+				return nil
+			}
+
 			return writeEvent(w, "response.reasoning_summary_part.added", ReasoningSummaryPartAddedEvent{
 				Type:           "response.reasoning_summary_part.added",
 				SequenceNumber: nextSeq(),
@@ -340,6 +477,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventReasoningSummaryDelta:
+			if event.ReasoningID == "" {
+				return nil
+			}
+
 			return writeEvent(w, "response.reasoning_summary_text.delta", ReasoningSummaryTextDeltaEvent{
 				Type:           "response.reasoning_summary_text.delta",
 				SequenceNumber: nextSeq(),
@@ -350,6 +491,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventReasoningSummaryDone:
+			if event.ReasoningID == "" {
+				return nil
+			}
+
 			return writeEvent(w, "response.reasoning_summary_text.done", ReasoningSummaryTextDoneEvent{
 				Type:           "response.reasoning_summary_text.done",
 				SequenceNumber: nextSeq(),
@@ -360,6 +505,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventReasoningSummaryPartDone:
+			if event.ReasoningID == "" {
+				return nil
+			}
+
 			return writeEvent(w, "response.reasoning_summary_part.done", ReasoningSummaryPartDoneEvent{
 				Type:           "response.reasoning_summary_part.done",
 				SequenceNumber: nextSeq(),
@@ -373,6 +522,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventReasoningItemDone:
+			if event.ReasoningID == "" {
+				return nil
+			}
+
 			item := &ReasoningOutputItem{
 				ID:     event.ReasoningID,
 				Type:   "reasoning",
@@ -422,99 +575,37 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventResponseCompleted:
-			model := req.Model
-			if event.Completion != nil && event.Completion.Model != "" {
-				model = event.Completion.Model
-			}
-
-			output := []ResponseOutput{}
-
-			if event.Completion != nil && event.Completion.Message != nil {
-				// Add reasoning output if present
-				for _, content := range event.Completion.Message.Content {
-					if content.Reasoning != nil {
-						reasoningItem := &ReasoningOutputItem{
-							ID:               event.ReasoningID,
-							Type:             "reasoning",
-							Status:           "completed",
-							Summary:          []ReasoningOutputSummary{},
-							Content:          []ReasoningOutputContentPart{},
-							EncryptedContent: event.ReasoningSignature,
-						}
-						if content.Reasoning.Summary != "" {
-							reasoningItem.Summary = append(reasoningItem.Summary, ReasoningOutputSummary{
-								Type: "summary_text",
-								Text: content.Reasoning.Summary,
-							})
-						}
-						if content.Reasoning.Text != "" {
-							reasoningItem.Content = append(reasoningItem.Content, ReasoningOutputContentPart{
-								Type: "reasoning_text",
-								Text: content.Reasoning.Text,
-							})
-						}
-						output = append(output, ResponseOutput{
-							Type:                ResponseOutputTypeReasoning,
-							ReasoningOutputItem: reasoningItem,
-						})
-						break
-					}
-				}
-
-				// Add function call outputs (they appear before messages)
-				for _, call := range event.Completion.Message.ToolCalls() {
-					output = append(output, ResponseOutput{
-						Type: ResponseOutputTypeFunctionCall,
-						FunctionCallOutputItem: &FunctionCallOutputItem{
-							ID:        call.ID,
-							Type:      "function_call",
-							Status:    "completed",
-							Name:      call.Name,
-							CallID:    call.ID,
-							Arguments: call.Arguments,
-						},
-					})
-				}
-
-				// Add message output only if there's text content
-				if event.Text != "" {
-					output = append(output, ResponseOutput{
-						Type: ResponseOutputTypeMessage,
-						OutputMessage: &OutputMessage{
-							ID:     messageID,
-							Role:   MessageRoleAssistant,
-							Status: "completed",
-							Contents: []OutputContent{
-								{
-									Type: "output_text",
-									Text: event.Text,
-								},
-							},
-						},
-					})
-				}
-			}
-
 			response := &Response{
 				ID:        responseID,
 				Object:    "response",
 				CreatedAt: createdAt,
 				Status:    "completed",
-				Model:     model,
-				Output:    output,
+				Model:     responseModel(req.Model, event.Completion),
+				Output:    responseOutputs(event.Completion.Message, messageID, "completed", event.Text, event.ReasoningSignature),
 			}
 
-			// Add usage statistics if requested and available
-			if event.Completion != nil && event.Completion.Usage != nil {
-				response.Usage = &Usage{
-					InputTokens:  event.Completion.Usage.InputTokens,
-					OutputTokens: event.Completion.Usage.OutputTokens,
-					TotalTokens:  event.Completion.Usage.InputTokens + event.Completion.Usage.OutputTokens,
-				}
-			}
+			response.Usage = responseUsage(event.Completion.Usage)
 
 			return writeEvent(w, "response.completed", ResponseCompletedEvent{
 				Type:           "response.completed",
+				SequenceNumber: nextSeq(),
+				Response:       response,
+			})
+
+		case StreamEventResponseIncomplete:
+			response := &Response{
+				ID:        responseID,
+				Object:    "response",
+				CreatedAt: createdAt,
+				Status:    "incomplete",
+				Model:     responseModel(req.Model, event.Completion),
+				Output:    responseOutputs(event.Completion.Message, messageID, "incomplete", event.Text, event.ReasoningSignature),
+			}
+
+			response.Usage = responseUsage(event.Completion.Usage)
+
+			return writeEvent(w, "response.incomplete", ResponseIncompleteEvent{
+				Type:           "response.incomplete",
 				SequenceNumber: nextSeq(),
 				Response:       response,
 			})
@@ -541,31 +632,32 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 		return nil
 	})
 
+	failed := false
+
 	// Iterate over completions from the provider
 	for completion, err := range completer.Complete(r.Context(), messages, options) {
 		if err != nil {
 			accumulator.Error(err)
-			return
+			failed = true
+			break
 		}
 
 		if err := accumulator.Add(*completion); err != nil {
 			accumulator.Error(err)
-			return
+			failed = true
+			break
 		}
 	}
 
 	// Emit final events
-	if err := accumulator.Complete(); err != nil {
-		accumulator.Error(err)
-		return
+	if !failed {
+		if err := accumulator.Complete(); err != nil {
+			accumulator.Error(err)
+		}
 	}
 
-	// Send done marker to signal end of stream
 	_, _ = w.Write([]byte("data: [DONE]\n\n"))
-
-	if rc := http.NewResponseController(w); rc != nil {
-		rc.Flush()
-	}
+	http.NewResponseController(w).Flush()
 }
 
 func (h *Handler) handleResponsesComplete(w http.ResponseWriter, r *http.Request, req ResponsesRequest, completer provider.Completer, messages []provider.Message, options *provider.CompleteOptions) {
@@ -590,110 +682,21 @@ func (h *Handler) handleResponsesComplete(w http.ResponseWriter, r *http.Request
 
 	result := Response{
 		Object: "response",
-		Status: "completed",
+		Status: responseStatus(completion.Status),
 
 		ID: responseID,
 
 		Model:     completion.Model,
 		CreatedAt: time.Now().Unix(),
 
-		Output: []ResponseOutput{},
+		Output: responseOutputs(completion.Message, "msg_"+uuid.NewString(), responseStatus(completion.Status), completion.Message.Text(), ""),
 	}
 
 	if result.Model == "" {
 		result.Model = req.Model
 	}
 
-	if completion.Message != nil {
-		// Add reasoning output first if present
-		for _, content := range completion.Message.Content {
-			if content.Reasoning != nil {
-				reasoningID := content.Reasoning.ID
-
-				if reasoningID == "" {
-					reasoningID = "rs_" + uuid.NewString()
-				}
-
-				reasoningItem := &ReasoningOutputItem{
-					ID:     reasoningID,
-					Type:   "reasoning",
-					Status: "completed",
-
-					Summary: []ReasoningOutputSummary{},
-					Content: []ReasoningOutputContentPart{},
-				}
-
-				if content.Reasoning.Summary != "" {
-					reasoningItem.Summary = append(reasoningItem.Summary, ReasoningOutputSummary{
-						Type: "summary_text",
-						Text: content.Reasoning.Summary,
-					})
-				}
-
-				if content.Reasoning.Text != "" {
-					reasoningItem.Content = append(reasoningItem.Content, ReasoningOutputContentPart{
-						Type: "reasoning_text",
-						Text: content.Reasoning.Text,
-					})
-				}
-
-				if content.Reasoning.Signature != "" {
-					reasoningItem.EncryptedContent = content.Reasoning.Signature
-				}
-
-				result.Output = append(result.Output, ResponseOutput{
-					Type:                ResponseOutputTypeReasoning,
-					ReasoningOutputItem: reasoningItem,
-				})
-				break // Only one reasoning block
-			}
-		}
-
-		// Add function call outputs
-		for _, call := range completion.Message.ToolCalls() {
-			result.Output = append(result.Output, ResponseOutput{
-				Type: ResponseOutputTypeFunctionCall,
-				FunctionCallOutputItem: &FunctionCallOutputItem{
-					ID:        call.ID,
-					Type:      "function_call",
-					Status:    "completed",
-					Name:      call.Name,
-					CallID:    call.ID,
-					Arguments: call.Arguments,
-				},
-			})
-		}
-
-		// Add message output only if there's text content
-		if text := completion.Message.Text(); text != "" {
-			messageID := "msg_" + uuid.NewString()
-
-			result.Output = append(result.Output, ResponseOutput{
-				Type: ResponseOutputTypeMessage,
-				OutputMessage: &OutputMessage{
-					ID:   messageID,
-					Role: "assistant",
-
-					Status: "completed",
-
-					Contents: []OutputContent{
-						{
-							Type: "output_text",
-							Text: text,
-						},
-					},
-				},
-			})
-		}
-	}
-
-	if completion.Usage != nil {
-		result.Usage = &Usage{
-			InputTokens:  completion.Usage.InputTokens,
-			OutputTokens: completion.Usage.OutputTokens,
-			TotalTokens:  completion.Usage.InputTokens + completion.Usage.OutputTokens,
-		}
-	}
+	result.Usage = responseUsage(completion.Usage)
 
 	writeJson(w, result)
 }

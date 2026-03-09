@@ -187,6 +187,21 @@ func TestStreamingAccumulatorReasoningSignature(t *testing.T) {
 	require.Equal(t, "encrypted_signature_data", reasoningItemDoneEvent.ReasoningSignature)
 }
 
+func TestStreamingAccumulatorSignatureOnlyReasoning(t *testing.T) {
+	acc, events := newTestAccumulator()
+
+	require.NoError(t, acc.Add(reasoningChunk("", "", "encrypted_signature_data")))
+	require.NoError(t, acc.Complete())
+
+	reasoningAddedEvent := findEvent(*events, StreamEventReasoningItemAdded)
+	require.NotNil(t, reasoningAddedEvent, "should have reasoning_item.added event")
+
+	reasoningItemDoneEvent := findEvent(*events, StreamEventReasoningItemDone)
+	require.NotNil(t, reasoningItemDoneEvent)
+	require.Equal(t, "encrypted_signature_data", reasoningItemDoneEvent.ReasoningSignature)
+	require.Equal(t, reasoningAddedEvent.OutputIndex, reasoningItemDoneEvent.OutputIndex)
+}
+
 func TestStreamingAccumulatorReasoningAndText(t *testing.T) {
 	acc, events := newTestAccumulator()
 
@@ -255,4 +270,155 @@ func TestStreamingAccumulatorReasoningOutputIndex(t *testing.T) {
 	outputItemDoneEvent := findEvent(*events, StreamEventOutputItemDone)
 	require.NotNil(t, outputItemDoneEvent)
 	require.Equal(t, 1, outputItemDoneEvent.OutputIndex, "output_item.done should reference output_index 1")
+}
+
+// toolCallChunk creates a completion chunk for a function call.
+// Pass a non-empty id+name for the opening chunk, then id+arguments for delta chunks.
+func toolCallChunk(id, name, arguments string) provider.Completion {
+	return provider.Completion{
+		Message: &provider.Message{
+			Role: provider.MessageRoleAssistant,
+			Content: []provider.Content{
+				provider.ToolCallContent(provider.ToolCall{
+					ID:        id,
+					Name:      name,
+					Arguments: arguments,
+				}),
+			},
+		},
+	}
+}
+
+func findEvents(events []StreamEvent, eventType StreamEventType) []StreamEvent {
+	var result []StreamEvent
+	for _, e := range events {
+		if e.Type == eventType {
+			result = append(result, e)
+		}
+	}
+	return result
+}
+
+func TestStreamingAccumulatorSingleToolCall(t *testing.T) {
+	acc, events := newTestAccumulator()
+
+	require.NoError(t, acc.Add(toolCallChunk("call_1", "get_weather", "")))
+	require.NoError(t, acc.Add(toolCallChunk("call_1", "", `{"city":`)))
+	require.NoError(t, acc.Add(toolCallChunk("call_1", "", `"London"}`)))
+	require.NoError(t, acc.Complete())
+
+	// function_call.added with name
+	addedEvent := findEvent(*events, StreamEventFunctionCallAdded)
+	require.NotNil(t, addedEvent)
+	require.Equal(t, "call_1", addedEvent.ToolCallID)
+	require.Equal(t, "get_weather", addedEvent.ToolCallName)
+
+	// two function_call_arguments.delta events
+	argDeltas := findEvents(*events, StreamEventFunctionCallArgumentsDelta)
+	require.Len(t, argDeltas, 2)
+	require.Equal(t, `{"city":`, argDeltas[0].Delta)
+	require.Equal(t, `"London"}`, argDeltas[1].Delta)
+
+	// function_call_arguments.done with full accumulated arguments
+	argsDone := findEvent(*events, StreamEventFunctionCallArgumentsDone)
+	require.NotNil(t, argsDone)
+	require.Equal(t, "call_1", argsDone.ToolCallID)
+	require.Equal(t, `{"city":"London"}`, argsDone.Arguments)
+
+	// function_call.done
+	callDone := findEvent(*events, StreamEventFunctionCallDone)
+	require.NotNil(t, callDone)
+	require.Equal(t, "call_1", callDone.ToolCallID)
+	require.Equal(t, "get_weather", callDone.ToolCallName)
+	require.Equal(t, `{"city":"London"}`, callDone.Arguments)
+}
+
+func TestStreamingAccumulatorParallelToolCalls(t *testing.T) {
+	acc, events := newTestAccumulator()
+
+	// Two interleaved tool calls (ID distinguishes them)
+	require.NoError(t, acc.Add(toolCallChunk("call_1", "get_weather", "")))
+	require.NoError(t, acc.Add(toolCallChunk("call_1", "", `{"city":"London"}`)))
+	require.NoError(t, acc.Add(toolCallChunk("call_2", "get_calendar", "")))
+	require.NoError(t, acc.Add(toolCallChunk("call_2", "", `{"date":"today"}`)))
+	require.NoError(t, acc.Complete())
+
+	addedEvents := findEvents(*events, StreamEventFunctionCallAdded)
+	require.Len(t, addedEvents, 2)
+	require.Equal(t, "call_1", addedEvents[0].ToolCallID)
+	require.Equal(t, "call_2", addedEvents[1].ToolCallID)
+
+	// Each call gets a unique output index
+	require.NotEqual(t, addedEvents[0].OutputIndex, addedEvents[1].OutputIndex)
+
+	doneEvents := findEvents(*events, StreamEventFunctionCallDone)
+	require.Len(t, doneEvents, 2)
+
+	argsDoneEvents := findEvents(*events, StreamEventFunctionCallArgumentsDone)
+	require.Len(t, argsDoneEvents, 2)
+	require.Equal(t, `{"city":"London"}`, argsDoneEvents[0].Arguments)
+	require.Equal(t, `{"date":"today"}`, argsDoneEvents[1].Arguments)
+}
+
+func TestStreamingAccumulatorToolCallOutputIndex(t *testing.T) {
+	acc, events := newTestAccumulator()
+
+	// Tool call should start at output_index 0 (no reasoning or message before it)
+	require.NoError(t, acc.Add(toolCallChunk("call_1", "get_weather", `{}`)))
+	require.NoError(t, acc.Complete())
+
+	addedEvent := findEvent(*events, StreamEventFunctionCallAdded)
+	require.NotNil(t, addedEvent)
+	require.Equal(t, 0, addedEvent.OutputIndex)
+
+	doneEvent := findEvent(*events, StreamEventFunctionCallDone)
+	require.NotNil(t, doneEvent)
+	require.Equal(t, 0, doneEvent.OutputIndex)
+}
+
+func TestStreamingAccumulatorEventOrdering_TextFlow(t *testing.T) {
+	acc, events := newTestAccumulator()
+
+	require.NoError(t, acc.Add(textChunk("Hello")))
+	require.NoError(t, acc.Complete())
+
+	types := make([]StreamEventType, len(*events))
+	for i, e := range *events {
+		types[i] = e.Type
+	}
+
+	// Verify canonical ordering
+	require.Equal(t, []StreamEventType{
+		StreamEventResponseCreated,
+		StreamEventResponseInProgress,
+		StreamEventOutputItemAdded,
+		StreamEventContentPartAdded,
+		StreamEventTextDelta,
+		StreamEventTextDone,
+		StreamEventContentPartDone,
+		StreamEventOutputItemDone,
+		StreamEventResponseCompleted,
+	}, types)
+}
+
+func TestStreamingAccumulatorIncompleteTerminalEvent(t *testing.T) {
+	acc, events := newTestAccumulator()
+
+	require.NoError(t, acc.Add(provider.Completion{
+		Status: provider.CompletionStatusIncomplete,
+		Usage: &provider.Usage{
+			InputTokens:  3,
+			OutputTokens: 5,
+		},
+	}))
+	require.NoError(t, acc.Complete())
+
+	require.Nil(t, findEvent(*events, StreamEventResponseCompleted))
+	incompleteEvent := findEvent(*events, StreamEventResponseIncomplete)
+	require.NotNil(t, incompleteEvent, "should have response.incomplete event")
+	require.NotNil(t, incompleteEvent.Completion)
+	require.Equal(t, provider.CompletionStatusIncomplete, incompleteEvent.Completion.Status)
+	require.NotNil(t, incompleteEvent.Completion.Usage)
+	require.Equal(t, 3, incompleteEvent.Completion.Usage.InputTokens)
+	require.Equal(t, 5, incompleteEvent.Completion.Usage.OutputTokens)
 }
