@@ -213,7 +213,7 @@ func toInputContent(items []InputContent) ([]provider.Content, error) {
 
 	for _, c := range items {
 		switch c.Type {
-		case InputContentText:
+		case InputContentText, OutputContentText:
 			result = append(result, provider.TextContent(c.Text))
 
 		case InputContentImage:

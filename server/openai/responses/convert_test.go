@@ -88,6 +88,16 @@ func assistantItem(text string) InputItem {
 	}
 }
 
+func assistantOutputTextItem(text string) InputItem {
+	return InputItem{
+		Type: InputItemTypeMessage,
+		InputMessage: &InputMessage{
+			Role:    MessageRoleAssistant,
+			Content: []InputContent{{Type: OutputContentText, Text: text}},
+		},
+	}
+}
+
 func functionCallItem(callID, name, arguments string) InputItem {
 	return InputItem{
 		Type: InputItemTypeFunctionCall,
@@ -235,6 +245,20 @@ func TestToMessages_ReasoningMergedIntoAssistantMessage(t *testing.T) {
 	require.Equal(t, "rs_1", msgs[1].Content[0].Reasoning.ID)
 	require.Equal(t, "encrypted_sig", msgs[1].Content[0].Reasoning.Signature)
 	require.Equal(t, "The answer is 42", msgs[1].Content[1].Text)
+}
+
+func TestToMessages_AssistantOutputTextIsPreserved(t *testing.T) {
+	items := []InputItem{
+		userItem("What did you do?"),
+		assistantOutputTextItem("I read go.mod."),
+	}
+
+	msgs, err := toMessages(items, "")
+	require.NoError(t, err)
+	require.Len(t, msgs, 2)
+	require.Equal(t, provider.MessageRoleAssistant, msgs[1].Role)
+	require.Len(t, msgs[1].Content, 1)
+	require.Equal(t, "I read go.mod.", msgs[1].Content[0].Text)
 }
 
 func TestToMessages_ReasoningFlushedWithFunctionCalls(t *testing.T) {

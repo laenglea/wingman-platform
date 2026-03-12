@@ -135,8 +135,9 @@ func (t *ToolChoice) UnmarshalJSON(data []byte) error {
 
 	// Handle {"type":"allowed_tools","mode":"...","tools":[...]} format from OpenAI SDK
 	var allowedTools struct {
-		Type  string                 `json:"type"`
-		Mode  ToolChoiceMode         `json:"mode"`
+		Type string `json:"type"`
+
+		Mode  ToolChoiceMode          `json:"mode"`
 		Tools []ToolChoiceAllowedTool `json:"tools"`
 	}
 
@@ -413,6 +414,8 @@ const (
 	InputContentText  InputContentType = "input_text"
 	InputContentImage InputContentType = "input_image"
 	InputContentFile  InputContentType = "input_file"
+
+	OutputContentText InputContentType = "output_text"
 )
 
 type Response struct {

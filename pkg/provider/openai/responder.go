@@ -495,6 +495,10 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 				}
 
 				if c.Reasoning != nil {
+					if c.Reasoning.ID == "" {
+						continue
+					}
+
 					reasoning := &responses.ResponseReasoningItemParam{
 						ID: c.Reasoning.ID,
 					}
