@@ -194,20 +194,6 @@ func responseOutputs(message *provider.Message, messageID, status, text, reasoni
 		}
 	}
 
-	for _, call := range message.ToolCalls() {
-		output = append(output, ResponseOutput{
-			Type: ResponseOutputTypeFunctionCall,
-			FunctionCallOutputItem: &FunctionCallOutputItem{
-				ID:        call.ID,
-				Type:      "function_call",
-				Status:    status,
-				Name:      call.Name,
-				CallID:    call.ID,
-				Arguments: call.Arguments,
-			},
-		})
-	}
-
 	if text != "" {
 		output = append(output, ResponseOutput{
 			Type: ResponseOutputTypeMessage,
@@ -221,6 +207,20 @@ func responseOutputs(message *provider.Message, messageID, status, text, reasoni
 						Text: text,
 					},
 				},
+			},
+		})
+	}
+
+	for _, call := range message.ToolCalls() {
+		output = append(output, ResponseOutput{
+			Type: ResponseOutputTypeFunctionCall,
+			FunctionCallOutputItem: &FunctionCallOutputItem{
+				ID:        "fc_" + call.ID,
+				Type:      "function_call",
+				Status:    status,
+				Name:      call.Name,
+				CallID:    call.ID,
+				Arguments: call.Arguments,
 			},
 		})
 	}
@@ -342,7 +342,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				SequenceNumber: nextSeq(),
 				OutputIndex:    event.OutputIndex,
 				Item: &FunctionCallOutputItem{
-					ID:        event.ToolCallID,
+					ID:        "fc_" + event.ToolCallID,
 					Type:      "function_call",
 					Status:    "in_progress",
 					CallID:    event.ToolCallID,
@@ -355,7 +355,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			return writeEvent(w, "response.function_call_arguments.delta", FunctionCallArgumentsDeltaEvent{
 				Type:           "response.function_call_arguments.delta",
 				SequenceNumber: nextSeq(),
-				ItemID:         event.ToolCallID,
+				ItemID:         "fc_" + event.ToolCallID,
 				OutputIndex:    event.OutputIndex,
 				Delta:          event.Delta,
 			})
@@ -364,7 +364,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			return writeEvent(w, "response.function_call_arguments.done", FunctionCallArgumentsDoneEvent{
 				Type:           "response.function_call_arguments.done",
 				SequenceNumber: nextSeq(),
-				ItemID:         event.ToolCallID,
+				ItemID:         "fc_" + event.ToolCallID,
 				Name:           event.ToolCallName,
 				OutputIndex:    event.OutputIndex,
 				Arguments:      event.Arguments,
@@ -376,7 +376,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				SequenceNumber: nextSeq(),
 				OutputIndex:    event.OutputIndex,
 				Item: &FunctionCallOutputItem{
-					ID:        event.ToolCallID,
+					ID:        "fc_" + event.ToolCallID,
 					Type:      "function_call",
 					Status:    "completed",
 					CallID:    event.ToolCallID,

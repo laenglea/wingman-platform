@@ -151,8 +151,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 							Content: []provider.Content{
 								provider.ToolCallContent(provider.ToolCall{
-									ID:   event.ID,
-									Name: event.Name,
+									ID:     event.ID,
+									Name:   event.Name,
 								}),
 							},
 						},
@@ -221,6 +221,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 							Content: []provider.Content{
 								provider.ToolCallContent(provider.ToolCall{
+									ID:        message.Content[len(message.Content)-1].ID,
 									Arguments: event.PartialJSON,
 								}),
 							},
