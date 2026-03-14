@@ -151,8 +151,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 							Content: []provider.Content{
 								provider.ToolCallContent(provider.ToolCall{
-									ID:     event.ID,
-									Name:   event.Name,
+									ID:   event.ID,
+									Name: event.Name,
 								}),
 							},
 						},
@@ -230,9 +230,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 					if options.Schema != nil {
 						delta.Message.Content = []provider.Content{
-							{
-								Text: event.PartialJSON,
-							},
+							provider.TextContent(event.PartialJSON),
 						}
 					}
 
@@ -277,7 +275,8 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	req := &anthropic.MessageNewParams{
 		Model: anthropic.Model(c.model),
 
-		MaxTokens: 64000,
+		MaxTokens:    64000,
+		CacheControl: anthropic.NewCacheControlEphemeralParam(),
 	}
 
 	isOpus46 := strings.Contains(c.model, "opus-4-6")
@@ -322,26 +321,14 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		req.Temperature = anthropic.Float(float64(*options.Temperature))
 	}
 
-	// First pass: collect system messages
 	for _, m := range input {
-		if m.Role == provider.MessageRoleSystem {
+		switch m.Role {
+		case provider.MessageRoleSystem:
 			for _, c := range m.Content {
 				if c.Text != "" {
 					system = append(system, anthropic.TextBlockParam{Text: c.Text})
 				}
 			}
-		}
-	}
-
-	// Add cache control to the last system block
-	if len(system) > 0 {
-		system[len(system)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
-	}
-
-	for _, m := range input {
-		switch m.Role {
-		case provider.MessageRoleSystem:
-			continue // Already processed above
 
 		case provider.MessageRoleUser:
 			var blocks []anthropic.ContentBlockParamUnion
@@ -391,9 +378,6 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 			message := anthropic.NewUserMessage(blocks...)
 			messages = append(messages, message)
-
-			// Mark user messages for potential cache control (will be set on the last one)
-			// The cache point will be added after all messages are processed
 
 		case provider.MessageRoleAssistant:
 			var blocks []anthropic.ContentBlockParamUnion
@@ -460,11 +444,6 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		tools = append(tools, anthropic.ToolUnionParam{OfTool: &tool})
 	}
 
-	// Add cache control to the last tool
-	if len(tools) > 0 {
-		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
-	}
-
 	if options.Schema != nil {
 		req.OutputConfig.Format = anthropic.JSONOutputFormatParam{Schema: options.Schema.Schema}
 	}
@@ -513,37 +492,10 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	}
 
 	if len(messages) > 0 {
-		// Add cache control to the last content block of the last user message
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Role == anthropic.MessageParamRoleUser {
-				if len(messages[i].Content) > 0 {
-					lastBlock := &messages[i].Content[len(messages[i].Content)-1]
-					setCacheControl(lastBlock)
-				}
-				break
-			}
-		}
-
 		req.Messages = messages
 	}
 
 	return req, nil
-}
-
-// setCacheControl sets the cache control on a content block
-func setCacheControl(block *anthropic.ContentBlockParamUnion) {
-	cacheControl := anthropic.NewCacheControlEphemeralParam()
-
-	switch {
-	case block.OfText != nil:
-		block.OfText.CacheControl = cacheControl
-	case block.OfImage != nil:
-		block.OfImage.CacheControl = cacheControl
-	case block.OfDocument != nil:
-		block.OfDocument.CacheControl = cacheControl
-	case block.OfToolResult != nil:
-		block.OfToolResult.CacheControl = cacheControl
-	}
 }
 
 func toUsage(usage anthropic.Usage) *provider.Usage {

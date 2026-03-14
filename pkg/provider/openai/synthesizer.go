@@ -42,11 +42,15 @@ func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *p
 		Model: s.model,
 		Input: content,
 
-		Voice: openai.AudioSpeechNewParamsVoiceAlloy,
+		Voice: openai.AudioSpeechNewParamsVoiceUnion{
+			OfString: openai.String(string(openai.AudioSpeechNewParamsVoiceStringAlloy)),
+		},
 	}
 
 	if options.Voice != "" {
-		params.Voice = openai.AudioSpeechNewParamsVoice(options.Voice)
+		params.Voice = openai.AudioSpeechNewParamsVoiceUnion{
+			OfString: openai.String(options.Voice),
+		}
 	}
 
 	if options.Speed != nil {
