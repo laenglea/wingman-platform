@@ -46,7 +46,6 @@ func TestEmbeddingSingle(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels() {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
@@ -79,7 +78,6 @@ func TestEmbeddingBatch(t *testing.T) {
 	}
 
 	for _, model := range testModels() {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
@@ -109,11 +107,8 @@ func TestEmbeddingDimensions(t *testing.T) {
 	client := newTestClient()
 
 	for model, dimensions := range testModelDimensions {
-		model := model
-		dimensions := dimensions
 		t.Run(model, func(t *testing.T) {
 			for _, dim := range dimensions {
-				dim := dim
 				t.Run(fmt.Sprintf("dim_%d", dim), func(t *testing.T) {
 					ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 					defer cancel()
@@ -257,7 +252,7 @@ func TestEmbeddingBase64Decode(t *testing.T) {
 	require.Len(t, decoded, dim)
 
 	// Values should be approximately equal (may have minor floating point differences)
-	for i := 0; i < dim; i++ {
+	for i := range dim {
 		require.InDelta(t, floatEmbedding.Data[0].Embedding[i], float64(decoded[i]), 1e-6,
 			"embedding values at index %d should match", i)
 	}

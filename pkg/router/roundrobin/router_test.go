@@ -122,7 +122,7 @@ func TestComplete(t *testing.T) {
 		messages := []provider.Message{provider.UserMessage("test")}
 
 		// Trigger failures to open circuit
-		for i := 0; i < router.DefaultFailureThreshold; i++ {
+		for range router.DefaultFailureThreshold {
 			for range c.Complete(ctx, messages, nil) {
 			}
 		}
@@ -146,7 +146,7 @@ func TestRandomDistribution(t *testing.T) {
 		messages := []provider.Message{provider.UserMessage("test")}
 
 		// Run many requests
-		for i := 0; i < 300; i++ {
+		for range 300 {
 			for range c.Complete(ctx, messages, nil) {
 			}
 		}
@@ -177,7 +177,7 @@ func TestCircuitBreaker(t *testing.T) {
 
 		// Open circuit on first provider by triggering failures
 		// We need to get the failing provider selected enough times
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			for range c.Complete(ctx, messages, nil) {
 			}
 		}
@@ -190,7 +190,7 @@ func TestCircuitBreaker(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 
 		// Next requests should only go to healthy provider
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			for range c.Complete(ctx, messages, nil) {
 			}
 		}
@@ -214,7 +214,7 @@ func TestCircuitBreaker(t *testing.T) {
 		messages := []provider.Message{provider.UserMessage("test")}
 
 		// Open circuit
-		for i := 0; i < router.DefaultFailureThreshold; i++ {
+		for range router.DefaultFailureThreshold {
 			for range c.Complete(ctx, messages, nil) {
 			}
 		}
@@ -266,7 +266,7 @@ func TestFallback(t *testing.T) {
 		messages := []provider.Message{provider.UserMessage("test")}
 
 		// Open both circuits
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			for range c.Complete(ctx, messages, nil) {
 			}
 		}
@@ -280,7 +280,7 @@ func TestFallback(t *testing.T) {
 
 		// Should eventually route to the fixed provider
 		var gotSuccess bool
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			for completion, err := range c.Complete(ctx, messages, nil) {
 				if err == nil && completion != nil {
 					gotSuccess = true

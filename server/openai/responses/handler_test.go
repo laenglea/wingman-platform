@@ -42,7 +42,6 @@ func TestResponses(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			tests := []struct {
 				name      string
@@ -109,18 +108,18 @@ func TestResponses(t *testing.T) {
 							Input: tt.input,
 						})
 
-						var content string
+						var content strings.Builder
 
 						for stream.Next() {
 							data := stream.Current()
-							content += data.Delta
+							content.WriteString(data.Delta)
 						}
 
 						require.NoError(t, stream.Err())
-						require.NotEmpty(t, content)
+						require.NotEmpty(t, content.String())
 
 						if tt.validator != nil {
-							tt.validator(t, content)
+							tt.validator(t, content.String())
 						}
 					})
 				})
@@ -133,7 +132,6 @@ func TestResponsesStreamingCompletedIncludesText(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
@@ -145,12 +143,12 @@ func TestResponsesStreamingCompletedIncludesText(t *testing.T) {
 				},
 			})
 
-			var streamed string
+			var streamed strings.Builder
 			var completedText string
 
 			for stream.Next() {
 				data := stream.Current()
-				streamed += data.Delta
+				streamed.WriteString(data.Delta)
 
 				if data.Response.Status == responses.ResponseStatusCompleted {
 					completedText = data.Response.OutputText()
@@ -158,10 +156,10 @@ func TestResponsesStreamingCompletedIncludesText(t *testing.T) {
 			}
 
 			require.NoError(t, stream.Err())
-			require.NotEmpty(t, streamed)
+			require.NotEmpty(t, streamed.String())
 			require.NotEmpty(t, completedText)
 
-			trimmedStreamed := strings.TrimSpace(streamed)
+			trimmedStreamed := strings.TrimSpace(streamed.String())
 			trimmedCompleted := strings.TrimSpace(completedText)
 			require.True(
 				t,
@@ -178,7 +176,6 @@ func TestResponsesWithInstructions(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			t.Run("responds in spanish with instructions", func(t *testing.T) {
 				t.Run("non-streaming", func(t *testing.T) {
@@ -222,16 +219,16 @@ func TestResponsesWithInstructions(t *testing.T) {
 						},
 					})
 
-					var content string
+					var content strings.Builder
 
 					for stream.Next() {
 						data := stream.Current()
-						content += data.Delta
+						content.WriteString(data.Delta)
 					}
 
 					require.NoError(t, stream.Err())
 
-					lower := strings.ToLower(content)
+					lower := strings.ToLower(content.String())
 					hasSpanish := strings.Contains(lower, "hola") ||
 						strings.Contains(lower, "soy") ||
 						strings.Contains(lower, "buenos") ||
@@ -239,7 +236,7 @@ func TestResponsesWithInstructions(t *testing.T) {
 						strings.Contains(lower, "estoy") ||
 						strings.Contains(lower, "puedo") ||
 						strings.Contains(lower, "ayudar")
-					require.True(t, hasSpanish, "expected Spanish response, got: %s", content)
+					require.True(t, hasSpanish, "expected Spanish response, got: %s", content.String())
 				})
 			})
 		})
@@ -250,7 +247,6 @@ func TestResponsesMultiTurnConversation(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			t.Run("remembers context", func(t *testing.T) {
 				t.Run("non-streaming", func(t *testing.T) {
@@ -331,15 +327,15 @@ func TestResponsesMultiTurnConversation(t *testing.T) {
 						},
 					})
 
-					var content string
+					var content strings.Builder
 
 					for stream.Next() {
 						data := stream.Current()
-						content += data.Delta
+						content.WriteString(data.Delta)
 					}
 
 					require.NoError(t, stream.Err())
-					require.Contains(t, content, "Alice")
+					require.Contains(t, content.String(), "Alice")
 				})
 			})
 		})
@@ -375,7 +371,6 @@ func TestResponsesToolCallingMultiTurn(t *testing.T) {
 	}
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			t.Run("non-streaming multi-turn", func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -395,7 +390,7 @@ func TestResponsesToolCallingMultiTurn(t *testing.T) {
 				var finalContent string
 				maxIterations := 10 // Safety limit to prevent infinite loops
 
-				for i := 0; i < maxIterations; i++ {
+				for range maxIterations {
 					resp, err := client.Responses.New(ctx, responses.ResponseNewParams{
 						Model: model,
 						Input: responses.ResponseNewParamsInputUnion{
@@ -472,7 +467,7 @@ func TestResponsesToolCallingMultiTurn(t *testing.T) {
 				var finalContent string
 				maxIterations := 10 // Safety limit to prevent infinite loops
 
-				for i := 0; i < maxIterations; i++ {
+				for range maxIterations {
 					stream := client.Responses.NewStreaming(ctx, responses.ResponseNewParams{
 						Model: model,
 						Input: responses.ResponseNewParamsInputUnion{
@@ -482,7 +477,7 @@ func TestResponsesToolCallingMultiTurn(t *testing.T) {
 					})
 
 					// Accumulate the response
-					var textContent string
+					var textContent strings.Builder
 					var functionCalls []struct {
 						CallID    string
 						Name      string
@@ -491,7 +486,7 @@ func TestResponsesToolCallingMultiTurn(t *testing.T) {
 
 					for stream.Next() {
 						data := stream.Current()
-						textContent += data.Delta
+						textContent.WriteString(data.Delta)
 
 						// Check for function calls in the completed response
 						if data.Response.Status == "completed" {
@@ -515,7 +510,7 @@ func TestResponsesToolCallingMultiTurn(t *testing.T) {
 
 					// If no function calls, we're done
 					if len(functionCalls) == 0 {
-						finalContent = textContent
+						finalContent = textContent.String()
 						break
 					}
 
@@ -604,7 +599,6 @@ func TestResponsesToolChoiceE2E(t *testing.T) {
 	}
 
 	for _, model := range testModels {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			tests := []struct {
 				name           string
@@ -704,7 +698,6 @@ func TestResponsesStreamOptions(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			t.Run("include usage", func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -742,7 +735,6 @@ func TestResponsesUsage(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
@@ -801,7 +793,6 @@ func TestResponsesStructuredOutput(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			tests := []struct {
 				name   string
@@ -869,15 +860,15 @@ func TestResponsesStructuredOutput(t *testing.T) {
 							},
 						})
 
-						var content string
+						var content strings.Builder
 						for stream.Next() {
 							data := stream.Current()
-							content += data.Delta
+							content.WriteString(data.Delta)
 						}
 						require.NoError(t, stream.Err())
 
 						var book BookRecommendation
-						err := json.Unmarshal([]byte(content), &book)
+						err := json.Unmarshal([]byte(content.String()), &book)
 						require.NoError(t, err, "response should be valid JSON matching schema")
 						require.NotEmpty(t, book.Title, "title should be present")
 						require.NotEmpty(t, book.Author, "author should be present")
@@ -901,7 +892,6 @@ func TestResponsesJSONObjectFormat(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			t.Run("non-streaming", func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -948,16 +938,16 @@ func TestResponsesJSONObjectFormat(t *testing.T) {
 					},
 				})
 
-				var content string
+				var content strings.Builder
 				for stream.Next() {
 					data := stream.Current()
-					content += data.Delta
+					content.WriteString(data.Delta)
 				}
 				require.NoError(t, stream.Err())
 
 				var result SimpleAnswer
-				err := json.Unmarshal([]byte(content), &result)
-				require.NoError(t, err, "response should be valid JSON, got: %s", content)
+				err := json.Unmarshal([]byte(content.String()), &result)
+				require.NoError(t, err, "response should be valid JSON, got: %s", content.String())
 				require.Equal(t, 42, result.Answer, "answer field should be 42")
 			})
 		})
@@ -973,7 +963,6 @@ func TestResponsesWithReasoning(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range reasoningModels {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			t.Run("non-streaming with reasoning", func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -1014,13 +1003,13 @@ func TestResponsesWithReasoning(t *testing.T) {
 					},
 				})
 
-				var textContent string
+				var textContent strings.Builder
 				var hasReasoningItem bool
 				var hasReasoningSummary bool
 
 				for stream.Next() {
 					data := stream.Current()
-					textContent += data.Delta
+					textContent.WriteString(data.Delta)
 
 					// Check for reasoning items in output
 					if data.Response.Status == responses.ResponseStatusCompleted {
@@ -1036,8 +1025,8 @@ func TestResponsesWithReasoning(t *testing.T) {
 				}
 
 				require.NoError(t, stream.Err())
-				require.NotEmpty(t, textContent)
-				require.Contains(t, textContent, "255")
+				require.NotEmpty(t, textContent.String())
+				require.Contains(t, textContent.String(), "255")
 				// Note: hasReasoningItem may be false if the model doesn't return reasoning
 				// This depends on the upstream provider's response
 				_ = hasReasoningItem
@@ -1051,7 +1040,6 @@ func TestResponsesReasoningStreamEvents(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range reasoningModels {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
@@ -1098,7 +1086,6 @@ func TestResponsesReasoningEncryptedContent(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range reasoningModels {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()

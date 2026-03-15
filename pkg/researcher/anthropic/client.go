@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/researcher"
 	"github.com/anthropics/anthropic-sdk-go"
@@ -63,16 +64,16 @@ func (c *Client) Research(ctx context.Context, instructions string, options *res
 		return nil, err
 	}
 
-	var content string
+	var content strings.Builder
 
 	for _, c := range message.Content {
 		if c.Type == "text" && len(c.Citations) > 0 {
-			content += c.Text
+			content.WriteString(c.Text)
 		}
 	}
 
 	result := &researcher.Result{
-		Content: content,
+		Content: content.String(),
 	}
 
 	return result, nil

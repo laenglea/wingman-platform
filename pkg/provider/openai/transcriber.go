@@ -43,8 +43,8 @@ func (t *Transcriber) Transcribe(ctx context.Context, input provider.File, optio
 
 	fileName := input.Name
 
-	if strings.HasSuffix(fileName, ".weba") {
-		fileName = strings.TrimSuffix(fileName, ".weba") + ".webm"
+	if before, ok := strings.CutSuffix(fileName, ".weba"); ok {
+		fileName = before + ".webm"
 	}
 
 	body := openai.AudioTranscriptionNewParams{

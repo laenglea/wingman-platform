@@ -445,8 +445,8 @@ func TestChunksPreserveContent(t *testing.T) {
 			chunks := splitter.Split(tc.text)
 
 			// Check that key words from original appear in chunks
-			words := strings.Fields(tc.text)
-			for _, word := range words {
+			words := strings.FieldsSeq(tc.text)
+			for word := range words {
 				// Remove punctuation
 				cleanWord := strings.Trim(word, ".,!?;:")
 				if len(cleanWord) < 3 {

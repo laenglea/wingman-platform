@@ -36,7 +36,6 @@ func TestMessages(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			tests := []struct {
 				name      string
@@ -112,16 +111,16 @@ func TestMessages(t *testing.T) {
 						require.NotEmpty(t, message.StopReason)
 
 						// Extract text content
-						var content string
+						var content strings.Builder
 						for _, block := range message.Content {
 							if text := block.AsText(); text.Text != "" {
-								content += text.Text
+								content.WriteString(text.Text)
 							}
 						}
-						require.NotEmpty(t, content)
+						require.NotEmpty(t, content.String())
 
 						if tt.validator != nil {
-							tt.validator(t, content)
+							tt.validator(t, content.String())
 						}
 					})
 
@@ -140,22 +139,22 @@ func TestMessages(t *testing.T) {
 
 						stream := client.Messages.NewStreaming(ctx, params)
 
-						var content string
+						var content strings.Builder
 						for stream.Next() {
 							event := stream.Current()
 							switch eventVariant := event.AsAny().(type) {
 							case anthropic.ContentBlockDeltaEvent:
 								switch deltaVariant := eventVariant.Delta.AsAny().(type) {
 								case anthropic.TextDelta:
-									content += deltaVariant.Text
+									content.WriteString(deltaVariant.Text)
 								}
 							}
 						}
 						require.NoError(t, stream.Err())
-						require.NotEmpty(t, content)
+						require.NotEmpty(t, content.String())
 
 						if tt.validator != nil {
-							tt.validator(t, content)
+							tt.validator(t, content.String())
 						}
 					})
 				})
@@ -191,7 +190,6 @@ func TestMessagesToolCallingMultiTurn(t *testing.T) {
 	}
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			t.Run("non-streaming multi-turn", func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -201,10 +199,10 @@ func TestMessagesToolCallingMultiTurn(t *testing.T) {
 					anthropic.NewUserMessage(anthropic.NewTextBlock("What's the weather in London? Be specific about the conditions.")),
 				}
 
-				var finalContent string
+				var finalContent strings.Builder
 				maxIterations := 10 // Safety limit to prevent infinite loops
 
-				for i := 0; i < maxIterations; i++ {
+				for range maxIterations {
 					message, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 						Model:     anthropic.Model(model),
 						MaxTokens: 1024,
@@ -219,7 +217,7 @@ func TestMessagesToolCallingMultiTurn(t *testing.T) {
 						// Extract final text content
 						for _, block := range message.Content {
 							if text := block.AsText(); text.Text != "" {
-								finalContent += text.Text
+								finalContent.WriteString(text.Text)
 							}
 						}
 						require.Equal(t, anthropic.StopReasonEndTurn, message.StopReason)
@@ -243,13 +241,13 @@ func TestMessagesToolCallingMultiTurn(t *testing.T) {
 				}
 
 				// Verify final response includes data from tool result
-				require.NotEmpty(t, finalContent, "expected final response after tool execution")
-				lower := strings.ToLower(finalContent)
+				require.NotEmpty(t, finalContent.String(), "expected final response after tool execution")
+				lower := strings.ToLower(finalContent.String())
 				hasWeatherInfo := strings.Contains(lower, "sunny") ||
 					strings.Contains(lower, "22") ||
 					strings.Contains(lower, "wind") ||
 					strings.Contains(lower, "northwest")
-				require.True(t, hasWeatherInfo, "expected final response to include weather data from tool, got: %s", finalContent)
+				require.True(t, hasWeatherInfo, "expected final response to include weather data from tool, got: %s", finalContent.String())
 			})
 
 			t.Run("streaming multi-turn", func(t *testing.T) {
@@ -260,10 +258,10 @@ func TestMessagesToolCallingMultiTurn(t *testing.T) {
 					anthropic.NewUserMessage(anthropic.NewTextBlock("What's the weather in Paris, France? Include temperature details.")),
 				}
 
-				var finalContent string
+				var finalContent strings.Builder
 				maxIterations := 10 // Safety limit to prevent infinite loops
 
-				for i := 0; i < maxIterations; i++ {
+				for range maxIterations {
 					// Accumulate the response
 					message := anthropic.Message{}
 					stream := client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
@@ -285,7 +283,7 @@ func TestMessagesToolCallingMultiTurn(t *testing.T) {
 						// Extract final text content
 						for _, block := range message.Content {
 							if text := block.AsText(); text.Text != "" {
-								finalContent += text.Text
+								finalContent.WriteString(text.Text)
 							}
 						}
 						break
@@ -308,13 +306,13 @@ func TestMessagesToolCallingMultiTurn(t *testing.T) {
 				}
 
 				// Verify final response includes data from tool result
-				require.NotEmpty(t, finalContent, "expected final response after tool execution")
-				lower := strings.ToLower(finalContent)
+				require.NotEmpty(t, finalContent.String(), "expected final response after tool execution")
+				lower := strings.ToLower(finalContent.String())
 				hasWeatherInfo := strings.Contains(lower, "sunny") ||
 					strings.Contains(lower, "22") ||
 					strings.Contains(lower, "wind") ||
 					strings.Contains(lower, "northwest")
-				require.True(t, hasWeatherInfo, "expected final response to include weather data from tool, got: %s", finalContent)
+				require.True(t, hasWeatherInfo, "expected final response to include weather data from tool, got: %s", finalContent.String())
 			})
 		})
 	}
@@ -324,7 +322,6 @@ func TestMessagesAccumulator(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			t.Run("content accumulation", func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -348,13 +345,13 @@ func TestMessagesAccumulator(t *testing.T) {
 				require.NotEmpty(t, message.Content)
 
 				// Extract text content
-				var content string
+				var content strings.Builder
 				for _, block := range message.Content {
 					if text := block.AsText(); text.Text != "" {
-						content += text.Text
+						content.WriteString(text.Text)
 					}
 				}
-				require.NotEmpty(t, content)
+				require.NotEmpty(t, content.String())
 			})
 
 			t.Run("tool use accumulation", func(t *testing.T) {
@@ -412,7 +409,6 @@ func TestMessagesUsage(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			t.Run("non-streaming usage", func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -500,7 +496,6 @@ func TestMessagesStructuredOutput(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			tests := []struct {
 				name   string

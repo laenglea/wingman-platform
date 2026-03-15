@@ -3,7 +3,7 @@ package exa
 type SearchRequest struct {
 	Query string `json:"query"`
 
-	Contents SearchContents `json:"contents,omitempty"`
+	Contents SearchContents `json:"contents"`
 }
 
 type SearchContents struct {

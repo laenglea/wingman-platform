@@ -45,7 +45,6 @@ func TestGenerateContent(t *testing.T) {
 	client := newTestClient(t)
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			tests := []struct {
 				name              string
@@ -141,17 +140,17 @@ func TestGenerateContent(t *testing.T) {
 
 						stream := client.Models.GenerateContentStream(ctx, model, tt.contents, config)
 
-						var content string
+						var content strings.Builder
 						for response, err := range stream {
 							require.NoError(t, err)
 							if response != nil && response.Text() != "" {
-								content += response.Text()
+								content.WriteString(response.Text())
 							}
 						}
-						require.NotEmpty(t, content)
+						require.NotEmpty(t, content.String())
 
 						if tt.validator != nil {
-							tt.validator(t, content)
+							tt.validator(t, content.String())
 						}
 					})
 				})
@@ -191,7 +190,6 @@ func TestToolCallingMultiTurn(t *testing.T) {
 	}
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			t.Run("non-streaming multi-turn", func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -209,7 +207,7 @@ func TestToolCallingMultiTurn(t *testing.T) {
 				var finalContent string
 				maxIterations := 10 // Safety limit to prevent infinite loops
 
-				for i := 0; i < maxIterations; i++ {
+				for range maxIterations {
 					response, err := client.Models.GenerateContent(ctx, model, contents, config)
 					require.NoError(t, err)
 					require.NotNil(t, response)
@@ -271,10 +269,10 @@ func TestToolCallingMultiTurn(t *testing.T) {
 				var finalContent string
 				maxIterations := 10 // Safety limit to prevent infinite loops
 
-				for i := 0; i < maxIterations; i++ {
+				for range maxIterations {
 					// Collect streaming response
 					var lastResponse *genai.GenerateContentResponse
-					var fullText string
+					var fullText strings.Builder
 
 					stream := client.Models.GenerateContentStream(ctx, model, contents, config)
 					for response, err := range stream {
@@ -282,7 +280,7 @@ func TestToolCallingMultiTurn(t *testing.T) {
 						if response != nil {
 							lastResponse = response
 							if response.Text() != "" {
-								fullText += response.Text()
+								fullText.WriteString(response.Text())
 							}
 						}
 					}
@@ -293,7 +291,7 @@ func TestToolCallingMultiTurn(t *testing.T) {
 					functionCalls := lastResponse.FunctionCalls()
 					if len(functionCalls) == 0 {
 						// No function calls, this is the final response
-						finalContent = fullText
+						finalContent = fullText.String()
 						break
 					}
 
@@ -337,7 +335,6 @@ func TestUsage(t *testing.T) {
 	client := newTestClient(t)
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			t.Run("non-streaming usage", func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -431,7 +428,6 @@ func TestStructuredOutput(t *testing.T) {
 	client := newTestClient(t)
 
 	for _, model := range testModels {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			t.Run("non-streaming", func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -481,17 +477,17 @@ func TestStructuredOutput(t *testing.T) {
 
 				stream := client.Models.GenerateContentStream(ctx, model, contents, config)
 
-				var content string
+				var content strings.Builder
 				for response, err := range stream {
 					require.NoError(t, err)
 					if response != nil && response.Text() != "" {
-						content += response.Text()
+						content.WriteString(response.Text())
 					}
 				}
-				require.NotEmpty(t, content, "expected text content in response")
+				require.NotEmpty(t, content.String(), "expected text content in response")
 
 				var book BookRecommendation
-				err := json.Unmarshal([]byte(content), &book)
+				err := json.Unmarshal([]byte(content.String()), &book)
 				require.NoError(t, err, "response should be valid JSON matching schema")
 				require.NotEmpty(t, book.Title, "title should be present")
 				require.NotEmpty(t, book.Author, "author should be present")

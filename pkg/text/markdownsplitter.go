@@ -324,10 +324,7 @@ func (s *MarkdownSplitter) calculateOverlapStart(text string, boundaries []Bound
 
 	if len(chunkBoundaries) == 0 {
 		// No semantic boundaries, use character-based overlap
-		overlapStart := chunkEnd - targetSize
-		if overlapStart < chunkStart {
-			overlapStart = chunkStart
-		}
+		overlapStart := max(chunkEnd-targetSize, chunkStart)
 		// Adjust to UTF-8 boundary
 		for overlapStart > chunkStart && !utf8.RuneStart(text[overlapStart]) {
 			overlapStart--

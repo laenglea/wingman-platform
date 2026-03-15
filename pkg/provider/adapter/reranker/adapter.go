@@ -55,11 +55,7 @@ func (a *Adapter) Rerank(ctx context.Context, query string, texts []string, opti
 	})
 
 	if options.Limit != nil {
-		limit := *options.Limit
-
-		if limit > len(results) {
-			limit = len(results)
-		}
+		limit := min(*options.Limit, len(results))
 
 		results = results[:limit]
 	}
@@ -77,7 +73,7 @@ func cosineSimilarity(a []float32, b []float32) float32 {
 	magnitudeA := 0.0
 	magnitudeB := 0.0
 
-	for k := 0; k < len(a); k++ {
+	for k := range a {
 		valA := float64(a[k])
 		valB := float64(b[k])
 

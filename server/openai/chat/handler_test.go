@@ -37,7 +37,6 @@ func TestChatCompletion(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			tests := []struct {
 				name      string
@@ -117,13 +116,13 @@ func TestChatCompletion(t *testing.T) {
 							Messages: tt.messages,
 						})
 
-						var content string
+						var content strings.Builder
 						var finishReason string
 
 						for stream.Next() {
 							chunk := stream.Current()
 							if len(chunk.Choices) > 0 {
-								content += chunk.Choices[0].Delta.Content
+								content.WriteString(chunk.Choices[0].Delta.Content)
 								if chunk.Choices[0].FinishReason != "" {
 									finishReason = string(chunk.Choices[0].FinishReason)
 								}
@@ -131,11 +130,11 @@ func TestChatCompletion(t *testing.T) {
 						}
 
 						require.NoError(t, stream.Err())
-						require.NotEmpty(t, content)
+						require.NotEmpty(t, content.String())
 						require.NotEmpty(t, finishReason)
 
 						if tt.validator != nil {
-							tt.validator(t, content)
+							tt.validator(t, content.String())
 						}
 					})
 				})
@@ -171,7 +170,6 @@ func TestChatCompletionToolCallingMultiTurn(t *testing.T) {
 	}
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			t.Run("non-streaming multi-turn", func(t *testing.T) {
 
@@ -185,7 +183,7 @@ func TestChatCompletionToolCallingMultiTurn(t *testing.T) {
 				var finalContent string
 				maxIterations := 10 // Safety limit to prevent infinite loops
 
-				for i := 0; i < maxIterations; i++ {
+				for range maxIterations {
 					completion, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 						Model:    model,
 						Messages: messages,
@@ -239,7 +237,7 @@ func TestChatCompletionToolCallingMultiTurn(t *testing.T) {
 				var finalContent string
 				maxIterations := 10 // Safety limit to prevent infinite loops
 
-				for i := 0; i < maxIterations; i++ {
+				for range maxIterations {
 					stream := client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
 						Model:    model,
 						Messages: messages,
@@ -293,7 +291,6 @@ func TestChatCompletionAccumulator(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			t.Run("content accumulation", func(t *testing.T) {
 
@@ -381,7 +378,6 @@ func TestChatCompletionStreamOptions(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model // capture range variable
 		t.Run(model, func(t *testing.T) {
 			t.Run("include usage", func(t *testing.T) {
 
@@ -520,17 +516,17 @@ func TestChatCompletionStructuredOutput(t *testing.T) {
 							},
 						})
 
-						var content string
+						var content strings.Builder
 						for stream.Next() {
 							chunk := stream.Current()
 							if len(chunk.Choices) > 0 {
-								content += chunk.Choices[0].Delta.Content
+								content.WriteString(chunk.Choices[0].Delta.Content)
 							}
 						}
 						require.NoError(t, stream.Err())
 
 						var book BookRecommendation
-						err := json.Unmarshal([]byte(content), &book)
+						err := json.Unmarshal([]byte(content.String()), &book)
 						require.NoError(t, err, "response should be valid JSON matching schema")
 						require.NotEmpty(t, book.Title, "title should be present")
 						require.NotEmpty(t, book.Author, "author should be present")
@@ -554,7 +550,6 @@ func TestChatCompletionJSONObjectFormat(t *testing.T) {
 	client := newTestClient()
 
 	for _, model := range testModels {
-		model := model
 		t.Run(model, func(t *testing.T) {
 			t.Run("non-streaming", func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -597,18 +592,18 @@ func TestChatCompletionJSONObjectFormat(t *testing.T) {
 					},
 				})
 
-				var content string
+				var content strings.Builder
 				for stream.Next() {
 					chunk := stream.Current()
 					if len(chunk.Choices) > 0 {
-						content += chunk.Choices[0].Delta.Content
+						content.WriteString(chunk.Choices[0].Delta.Content)
 					}
 				}
 				require.NoError(t, stream.Err())
 
 				var result SimpleAnswer
-				err := json.Unmarshal([]byte(content), &result)
-				require.NoError(t, err, "response should be valid JSON, got: %s", content)
+				err := json.Unmarshal([]byte(content.String()), &result)
+				require.NoError(t, err, "response should be valid JSON, got: %s", content.String())
 				require.Equal(t, 42, result.Answer, "answer field should be 42")
 			})
 		})
