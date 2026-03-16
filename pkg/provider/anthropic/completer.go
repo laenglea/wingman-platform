@@ -286,7 +286,9 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		req.MaxTokens = 128000
 
 		req.Thinking = anthropic.ThinkingConfigParamUnion{
-			OfAdaptive: anthropic.Ptr(anthropic.NewThinkingConfigAdaptiveParam()),
+			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{
+				Display: anthropic.ThinkingConfigAdaptiveDisplaySummarized,
+			},
 		}
 
 		switch options.Effort {
