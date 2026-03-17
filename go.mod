@@ -15,7 +15,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/open-policy-agent/opa v1.14.1
-	github.com/openai/openai-go/v3 v3.28.0
+	github.com/openai/openai-go/v3 v3.29.0
 	github.com/replicate/replicate-go v0.26.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.41.0
