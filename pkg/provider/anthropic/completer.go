@@ -389,7 +389,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 					blocks = append(blocks, anthropic.NewTextBlock(text))
 				}
 
-				if c.Reasoning != nil {
+				if c.Reasoning != nil && c.Reasoning.Signature != "" {
 					// Include thinking blocks for conversation continuity
 					blocks = append(blocks, anthropic.NewThinkingBlock(c.Reasoning.Signature, c.Reasoning.Text))
 				}

@@ -626,7 +626,7 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 			content = append(content, &types.ContentBlockMemberText{Value: text})
 		}
 
-		if c.Reasoning != nil {
+		if c.Reasoning != nil && c.Reasoning.Signature != "" {
 			content = append(content, &types.ContentBlockMemberReasoningContent{
 				Value: &types.ReasoningContentBlockMemberReasoningText{
 					Value: types.ReasoningTextBlock{

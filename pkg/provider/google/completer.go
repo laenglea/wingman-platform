@@ -255,7 +255,7 @@ func convertContent(message provider.Message) (*genai.Content, error) {
 				content.Parts = append(content.Parts, part)
 			}
 
-			if c.Reasoning != nil {
+			if c.Reasoning != nil && c.Reasoning.Signature != "" {
 				part := genai.NewPartFromText(c.Reasoning.Text)
 				part.Thought = true
 				part.ThoughtSignature = []byte(c.Reasoning.Signature)
