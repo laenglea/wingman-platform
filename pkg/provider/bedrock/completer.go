@@ -110,27 +110,15 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			InferenceConfig: config,
 		}
 
-		// var budgetTokens int
-		// if options.ReasoningOptions != nil {
-		// 	switch options.ReasoningOptions.Effort {
-		// case provider.EffortMinimal:
-		// 	budgetTokens = 1024
-		// case provider.EffortLow:
-		// 	budgetTokens = 2048
-		// case provider.EffortMedium:
-		// 	budgetTokens = 8192
-		// case provider.EffortHigh:
-		// 	budgetTokens = 32000
-		// }
+		if options.ReasoningOptions != nil && isAdaptiveThinkingModel(c.model) {
+			config.Temperature = nil
 
-		// if budgetTokens > 0 {
-		// 	params.AdditionalModelRequestFields = document.NewLazyDocument(map[string]any{
-		// 		"thinking": map[string]any{
-		// 			"type":          "enabled",
-		// 			"budget_tokens": budgetTokens,
-		// 		},
-		// 	})
-		// }
+			params.AdditionalModelRequestFields = document.NewLazyDocument(map[string]any{
+				"thinking": map[string]any{
+					"type": "adaptive",
+				},
+			})
+		}
 
 		resp, err := c.client.ConverseStream(ctx, params)
 
