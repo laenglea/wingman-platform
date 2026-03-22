@@ -16,6 +16,8 @@ type ResponsesRequest struct {
 
 	Input ResponsesInput `json:"input"`
 
+	Include []string `json:"include,omitempty"`
+
 	Tools []Tool `json:"tools,omitempty"`
 
 	Text *TextConfig `json:"text,omitempty"`

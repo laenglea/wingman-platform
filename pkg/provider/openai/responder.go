@@ -306,9 +306,9 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 	}
 
 	if options.ReasoningOptions != nil && slices.Contains(ReasoningModels, r.model) {
-		// if slices.Contains(ReasoningModels, r.model) {
-		// 	req.Include = append(req.Include, responses.ResponseIncludableReasoningEncryptedContent)
-		// }
+		if options.ReasoningOptions.IncludeSignature {
+			req.Include = append(req.Include, responses.ResponseIncludableReasoningEncryptedContent)
+		}
 
 		req.Reasoning.Summary = responses.ReasoningSummaryAuto
 

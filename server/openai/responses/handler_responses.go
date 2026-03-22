@@ -56,6 +56,17 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		options.ToolOptions.DisableParallelToolCalls = true
 	}
 
+	for _, inc := range req.Include {
+		if inc == "reasoning.encrypted_content" {
+			if options.ReasoningOptions == nil {
+				options.ReasoningOptions = &provider.ReasoningOptions{}
+			}
+
+			options.ReasoningOptions.IncludeSignature = true
+			break
+		}
+	}
+
 	if req.Reasoning != nil && req.Reasoning.Effort != nil {
 		if options.ReasoningOptions == nil {
 			options.ReasoningOptions = &provider.ReasoningOptions{}
