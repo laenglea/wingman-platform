@@ -291,18 +291,20 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			},
 		}
 
-		switch options.Effort {
-		case provider.EffortMinimal, provider.EffortLow:
-			req.OutputConfig.Effort = anthropic.OutputConfigEffortLow
+		if options.ReasoningOptions != nil {
+			switch options.ReasoningOptions.Effort {
+			case provider.EffortMinimal, provider.EffortLow:
+				req.OutputConfig.Effort = anthropic.OutputConfigEffortLow
 
-		case provider.EffortMedium:
-			req.OutputConfig.Effort = anthropic.OutputConfigEffortMedium
+			case provider.EffortMedium:
+				req.OutputConfig.Effort = anthropic.OutputConfigEffortMedium
 
-		case provider.EffortHigh:
-			req.OutputConfig.Effort = anthropic.OutputConfigEffortHigh
+			case provider.EffortHigh:
+				req.OutputConfig.Effort = anthropic.OutputConfigEffortHigh
 
-		case provider.EffortMax:
-			req.OutputConfig.Effort = anthropic.OutputConfigEffortMax
+			case provider.EffortMax:
+				req.OutputConfig.Effort = anthropic.OutputConfigEffortMax
+			}
 		}
 	}
 

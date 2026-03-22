@@ -92,12 +92,16 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 			options = new(provider.CompleteOptions)
 		}
 
-		if options.Effort == "" {
-			options.Effort = c.effort
+		if options.OutputOptions == nil && c.verbosity != "" {
+			options.OutputOptions = &provider.OutputOptions{
+				Verbosity: c.verbosity,
+			}
 		}
 
-		if options.Verbosity == "" {
-			options.Verbosity = c.verbosity
+		if options.ReasoningOptions == nil && c.effort != "" {
+			options.ReasoningOptions = &provider.ReasoningOptions{
+				Effort: c.effort,
+			}
 		}
 
 		if options.Temperature == nil {
@@ -159,12 +163,12 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 		inputToolOptions := mergeToolOptions(options.ToolOptions, slices.Collect(maps.Keys(agentTools)))
 
 		inputOptions := &provider.CompleteOptions{
-			Effort:    options.Effort,
-			Verbosity: options.Verbosity,
-
 			Stop:        options.Stop,
 			Tools:       slices.Collect(maps.Values(inputTools)),
 			ToolOptions: inputToolOptions,
+
+			OutputOptions:    options.OutputOptions,
+			ReasoningOptions: options.ReasoningOptions,
 
 			MaxTokens:   options.MaxTokens,
 			Temperature: options.Temperature,

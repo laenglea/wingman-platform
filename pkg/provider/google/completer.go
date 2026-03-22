@@ -117,7 +117,8 @@ func convertGenerateConfig(instruction *genai.Content, options *provider.Complet
 	}
 
 	// // Configure thinking based on effort level
-	// switch options.Effort {
+	// if options.ReasoningOptions != nil {
+	// 	switch options.ReasoningOptions.Effort {
 	// case provider.EffortMinimal:
 	// 	config.ThinkingConfig = &genai.ThinkingConfig{
 	// 		IncludeThoughts: true,

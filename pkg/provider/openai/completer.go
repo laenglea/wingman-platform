@@ -139,8 +139,8 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 		req.Messages = messages
 	}
 
-	if options.Effort != "" {
-		switch options.Effort {
+	if options.ReasoningOptions != nil && slices.Contains(ReasoningModels, c.model) {
+		switch options.ReasoningOptions.Effort {
 		case provider.EffortNone:
 			req.ReasoningEffort = openai.ReasoningEffortNone
 
@@ -161,8 +161,8 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 		}
 	}
 
-	if options.Verbosity != "" {
-		switch options.Verbosity {
+	if options.OutputOptions != nil {
+		switch options.OutputOptions.Verbosity {
 		case provider.VerbosityLow:
 			req.Verbosity = openai.ChatCompletionNewParamsVerbosityLow
 

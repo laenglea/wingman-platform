@@ -173,10 +173,17 @@ type ToolOptions struct {
 	DisableParallelToolCalls bool
 }
 
-type CompleteOptions struct {
-	Effort    Effort
+type OutputOptions struct {
 	Verbosity Verbosity
+}
 
+type ReasoningOptions struct {
+	Effort Effort
+
+	IncludeSignature bool
+}
+
+type CompleteOptions struct {
 	Stop []string
 
 	MaxTokens   *int
@@ -184,6 +191,9 @@ type CompleteOptions struct {
 
 	Tools       []Tool
 	ToolOptions *ToolOptions
+
+	OutputOptions    *OutputOptions
+	ReasoningOptions *ReasoningOptions
 
 	Schema *Schema
 }

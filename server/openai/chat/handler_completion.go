@@ -71,35 +71,47 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		options.ToolOptions.DisableParallelToolCalls = true
 	}
 
-	switch req.ReasoningEffort {
-	case ReasoningEffortNone:
-		options.Effort = provider.EffortNone
+	if req.ReasoningEffort != "" {
+		if options.ReasoningOptions == nil {
+			options.ReasoningOptions = &provider.ReasoningOptions{}
+		}
 
-	case ReasoningEffortMinimal:
-		options.Effort = provider.EffortMinimal
+		switch req.ReasoningEffort {
+		case ReasoningEffortNone:
+			options.ReasoningOptions.Effort = provider.EffortNone
 
-	case ReasoningEffortLow:
-		options.Effort = provider.EffortLow
+		case ReasoningEffortMinimal:
+			options.ReasoningOptions.Effort = provider.EffortMinimal
 
-	case ReasoningEffortMedium:
-		options.Effort = provider.EffortMedium
+		case ReasoningEffortLow:
+			options.ReasoningOptions.Effort = provider.EffortLow
 
-	case ReasoningEffortHigh:
-		options.Effort = provider.EffortHigh
+		case ReasoningEffortMedium:
+			options.ReasoningOptions.Effort = provider.EffortMedium
 
-	case ReasoningEffortXHigh:
-		options.Effort = provider.EffortMax
+		case ReasoningEffortHigh:
+			options.ReasoningOptions.Effort = provider.EffortHigh
+
+		case ReasoningEffortXHigh:
+			options.ReasoningOptions.Effort = provider.EffortMax
+		}
 	}
 
-	switch req.Verbosity {
-	case VerbosityLow:
-		options.Verbosity = provider.VerbosityLow
+	if req.Verbosity != "" {
+		if options.OutputOptions == nil {
+			options.OutputOptions = &provider.OutputOptions{}
+		}
 
-	case VerbosityMedium:
-		options.Verbosity = provider.VerbosityMedium
+		switch req.Verbosity {
+		case VerbosityLow:
+			options.OutputOptions.Verbosity = provider.VerbosityLow
 
-	case VerbosityHigh:
-		options.Verbosity = provider.VerbosityHigh
+		case VerbosityMedium:
+			options.OutputOptions.Verbosity = provider.VerbosityMedium
+
+		case VerbosityHigh:
+			options.OutputOptions.Verbosity = provider.VerbosityHigh
+		}
 	}
 
 	if req.ResponseFormat != nil {

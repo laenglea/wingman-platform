@@ -305,10 +305,14 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		}
 	}
 
-	if options.Effort != "" && slices.Contains(ReasoningModels, r.model) {
+	if options.ReasoningOptions != nil && slices.Contains(ReasoningModels, r.model) {
+		// if slices.Contains(ReasoningModels, r.model) {
+		// 	req.Include = append(req.Include, responses.ResponseIncludableReasoningEncryptedContent)
+		// }
+
 		req.Reasoning.Summary = responses.ReasoningSummaryAuto
 
-		switch options.Effort {
+		switch options.ReasoningOptions.Effort {
 		case provider.EffortNone:
 			req.Reasoning.Effort = responses.ReasoningEffortNone
 
@@ -329,12 +333,8 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		}
 	}
 
-	if slices.Contains(ReasoningModels, r.model) {
-		req.Include = append(req.Include, responses.ResponseIncludableReasoningEncryptedContent)
-	}
-
-	if options.Verbosity != "" {
-		switch options.Verbosity {
+	if options.OutputOptions != nil {
+		switch options.OutputOptions.Verbosity {
 		case provider.VerbosityLow:
 			req.Text.Verbosity = responses.ResponseTextConfigVerbosityLow
 

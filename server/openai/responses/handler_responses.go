@@ -57,24 +57,28 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Reasoning != nil && req.Reasoning.Effort != nil {
+		if options.ReasoningOptions == nil {
+			options.ReasoningOptions = &provider.ReasoningOptions{}
+		}
+
 		switch *req.Reasoning.Effort {
 		case ReasoningEffortNone:
-			options.Effort = provider.EffortNone
+			options.ReasoningOptions.Effort = provider.EffortNone
 
 		case ReasoningEffortMinimal:
-			options.Effort = provider.EffortMinimal
+			options.ReasoningOptions.Effort = provider.EffortMinimal
 
 		case ReasoningEffortLow:
-			options.Effort = provider.EffortLow
+			options.ReasoningOptions.Effort = provider.EffortLow
 
 		case ReasoningEffortMedium:
-			options.Effort = provider.EffortMedium
+			options.ReasoningOptions.Effort = provider.EffortMedium
 
 		case ReasoningEffortHigh:
-			options.Effort = provider.EffortHigh
+			options.ReasoningOptions.Effort = provider.EffortHigh
 
 		case ReasoningEffortXHigh:
-			options.Effort = provider.EffortMax
+			options.ReasoningOptions.Effort = provider.EffortMax
 		}
 	}
 
@@ -99,15 +103,19 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if req.Text.Verbosity != nil {
+			if options.OutputOptions == nil {
+				options.OutputOptions = &provider.OutputOptions{}
+			}
+
 			switch *req.Text.Verbosity {
 			case VerbosityLow:
-				options.Verbosity = provider.VerbosityLow
+				options.OutputOptions.Verbosity = provider.VerbosityLow
 
 			case VerbosityMedium:
-				options.Verbosity = provider.VerbosityMedium
+				options.OutputOptions.Verbosity = provider.VerbosityMedium
 
 			case VerbosityHigh:
-				options.Verbosity = provider.VerbosityHigh
+				options.OutputOptions.Verbosity = provider.VerbosityHigh
 			}
 		}
 	}

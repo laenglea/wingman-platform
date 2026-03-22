@@ -98,9 +98,19 @@ func (c *Client) Research(ctx context.Context, instructions string, options *res
 	}
 
 	completeOptions := &provider.CompleteOptions{
-		Tools:     slices.Collect(maps.Values(toolDefs)),
-		Effort:    c.effort,
-		Verbosity: c.verbosity,
+		Tools: slices.Collect(maps.Values(toolDefs)),
+	}
+
+	if c.verbosity != "" {
+		completeOptions.OutputOptions = &provider.OutputOptions{
+			Verbosity: c.verbosity,
+		}
+	}
+
+	if c.effort != "" {
+		completeOptions.ReasoningOptions = &provider.ReasoningOptions{
+			Effort: c.effort,
+		}
 	}
 
 	for {

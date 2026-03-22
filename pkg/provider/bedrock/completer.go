@@ -111,7 +111,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		}
 
 		// var budgetTokens int
-		// switch options.Effort {
+		// if options.ReasoningOptions != nil {
+		// 	switch options.ReasoningOptions.Effort {
 		// case provider.EffortMinimal:
 		// 	budgetTokens = 1024
 		// case provider.EffortLow:
