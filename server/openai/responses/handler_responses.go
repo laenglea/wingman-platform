@@ -131,6 +131,15 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	for _, cm := range req.ContextManagement {
+		if cm.Type == "compaction" && cm.CompactThreshold != nil {
+			options.CompactionOptions = &provider.CompactionOptions{
+				Threshold: int(*cm.CompactThreshold),
+			}
+			break
+		}
+	}
+
 	if req.Stream {
 		h.handleResponsesStream(w, r, req, completer, messages, options)
 	} else {
@@ -149,7 +158,7 @@ func responseStatus(status provider.CompletionStatus) string {
 	}
 }
 
-func responseModel(defaultModel string, completion *provider.Completion) string {
+func responseModel(completion *provider.Completion, defaultModel string) string {
 	if completion != nil && completion.Model != "" {
 		return completion.Model
 	}
@@ -169,7 +178,7 @@ func responseUsage(usage *provider.Usage) *Usage {
 	}
 }
 
-func responseOutputs(message *provider.Message, messageID, status, text, reasoningSignature string) []ResponseOutput {
+func responseOutputs(message *provider.Message, messageID, status string) []ResponseOutput {
 	if message == nil {
 		return []ResponseOutput{}
 	}
@@ -179,11 +188,15 @@ func responseOutputs(message *provider.Message, messageID, status, text, reasoni
 	for _, content := range message.Content {
 		if content.Reasoning != nil && content.Reasoning.ID != "" {
 			reasoningItem := &ReasoningOutputItem{
-				ID:      content.Reasoning.ID,
-				Type:    "reasoning",
-				Status:  status,
+				ID: content.Reasoning.ID,
+
+				Type:   "reasoning",
+				Status: status,
+
 				Summary: []ReasoningOutputSummary{},
 				Content: []ReasoningOutputContentPart{},
+
+				EncryptedContent: content.Reasoning.Signature,
 			}
 
 			if content.Reasoning.Summary != "" {
@@ -200,11 +213,6 @@ func responseOutputs(message *provider.Message, messageID, status, text, reasoni
 				})
 			}
 
-			reasoningItem.EncryptedContent = content.Reasoning.Signature
-			if reasoningSignature != "" {
-				reasoningItem.EncryptedContent = reasoningSignature
-			}
-
 			output = append(output, ResponseOutput{
 				Type:                ResponseOutputTypeReasoning,
 				ReasoningOutputItem: reasoningItem,
@@ -213,7 +221,21 @@ func responseOutputs(message *provider.Message, messageID, status, text, reasoni
 		}
 	}
 
-	if text != "" {
+	for _, content := range message.Content {
+		if content.Compaction != nil && content.Compaction.Signature != "" {
+			output = append(output, ResponseOutput{
+				Type: ResponseOutputTypeCompaction,
+				CompactionOutputItem: &CompactionOutputItem{
+					ID: content.Compaction.ID,
+
+					Type:             "compaction",
+					EncryptedContent: content.Compaction.Signature,
+				},
+			})
+		}
+	}
+
+	if text := message.Text(); text != "" {
 		output = append(output, ResponseOutput{
 			Type: ResponseOutputTypeMessage,
 			OutputMessage: &OutputMessage{
@@ -401,6 +423,30 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 					CallID:    event.ToolCallID,
 					Name:      event.ToolCallName,
 					Arguments: event.Arguments,
+				},
+			})
+
+		case StreamEventCompactionItemAdded:
+			return writeEvent(w, "response.output_item.added", CompactionOutputItemAddedEvent{
+				Type:           "response.output_item.added",
+				SequenceNumber: nextSeq(),
+				OutputIndex:    event.OutputIndex,
+				Item: &CompactionOutputItem{
+					ID:               event.CompactionID,
+					Type:             "compaction",
+					EncryptedContent: event.CompactionContent,
+				},
+			})
+
+		case StreamEventCompactionItemDone:
+			return writeEvent(w, "response.output_item.done", CompactionOutputItemDoneEvent{
+				Type:           "response.output_item.done",
+				SequenceNumber: nextSeq(),
+				OutputIndex:    event.OutputIndex,
+				Item: &CompactionOutputItem{
+					ID:               event.CompactionID,
+					Type:             "compaction",
+					EncryptedContent: event.CompactionContent,
 				},
 			})
 
@@ -605,8 +651,8 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				Object:    "response",
 				CreatedAt: createdAt,
 				Status:    "completed",
-				Model:     responseModel(req.Model, event.Completion),
-				Output:    responseOutputs(event.Completion.Message, messageID, "completed", event.Text, event.ReasoningSignature),
+				Model:     responseModel(event.Completion, req.Model),
+				Output:    responseOutputs(event.Completion.Message, messageID, "completed"),
 			}
 
 			response.Usage = responseUsage(event.Completion.Usage)
@@ -623,8 +669,8 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				Object:    "response",
 				CreatedAt: createdAt,
 				Status:    "incomplete",
-				Model:     responseModel(req.Model, event.Completion),
-				Output:    responseOutputs(event.Completion.Message, messageID, "incomplete", event.Text, event.ReasoningSignature),
+				Model:     responseModel(event.Completion, req.Model),
+				Output:    responseOutputs(event.Completion.Message, messageID, "incomplete"),
 			}
 
 			response.Usage = responseUsage(event.Completion.Usage)
@@ -714,7 +760,7 @@ func (h *Handler) handleResponsesComplete(w http.ResponseWriter, r *http.Request
 		Model:     completion.Model,
 		CreatedAt: time.Now().Unix(),
 
-		Output: responseOutputs(completion.Message, "msg_"+uuid.NewString(), responseStatus(completion.Status), completion.Message.Text(), ""),
+		Output: responseOutputs(completion.Message, "msg_"+uuid.NewString(), responseStatus(completion.Status)),
 	}
 
 	if result.Model == "" {

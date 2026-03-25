@@ -131,12 +131,19 @@ func ReasoningContent(val Reasoning) Content {
 	}
 }
 
+func CompactionContent(val Compaction) Content {
+	return Content{
+		Compaction: &val,
+	}
+}
+
 type Content struct {
 	Text string
 
 	File *File
 
-	Reasoning *Reasoning
+	Reasoning  *Reasoning
+	Compaction *Compaction
 
 	ToolCall   *ToolCall
 	ToolResult *ToolResult
@@ -192,8 +199,9 @@ type CompleteOptions struct {
 	Tools       []Tool
 	ToolOptions *ToolOptions
 
-	OutputOptions    *OutputOptions
-	ReasoningOptions *ReasoningOptions
+	OutputOptions     *OutputOptions
+	ReasoningOptions  *ReasoningOptions
+	CompactionOptions *CompactionOptions
 
 	Schema *Schema
 }
@@ -242,4 +250,14 @@ type Reasoning struct {
 	Summary string
 
 	Signature string
+}
+
+type Compaction struct {
+	ID string
+
+	Signature string
+}
+
+type CompactionOptions struct {
+	Threshold int
 }

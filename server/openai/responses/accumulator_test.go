@@ -510,3 +510,178 @@ func TestStreamingAccumulatorIncompleteTerminalEvent(t *testing.T) {
 	require.Equal(t, 3, incompleteEvent.Completion.Usage.InputTokens)
 	require.Equal(t, 5, incompleteEvent.Completion.Usage.OutputTokens)
 }
+
+// ── Compaction ────────────────────────────────────────────────────────────────
+
+// compactionChunk creates a completion chunk with compaction content
+func compactionChunk(id, signature string) provider.Completion {
+	return provider.Completion{
+		Message: &provider.Message{
+			Role: provider.MessageRoleAssistant,
+			Content: []provider.Content{
+				provider.CompactionContent(provider.Compaction{
+					ID:        id,
+					Signature: signature,
+				}),
+			},
+		},
+	}
+}
+
+func TestStreamingAccumulatorCompactionEmitsAddedAndDone(t *testing.T) {
+	acc, events := newTestAccumulator()
+
+	require.NoError(t, acc.Add(compactionChunk("", "encrypted_blob")))
+	require.NoError(t, acc.Complete())
+
+	addedEvent := findEvent(*events, StreamEventCompactionItemAdded)
+	require.NotNil(t, addedEvent, "should have compaction_item.added event")
+	require.NotEmpty(t, addedEvent.CompactionID)
+	require.Equal(t, "encrypted_blob", addedEvent.CompactionContent)
+
+	doneEvent := findEvent(*events, StreamEventCompactionItemDone)
+	require.NotNil(t, doneEvent, "should have compaction_item.done event")
+	require.Equal(t, addedEvent.CompactionID, doneEvent.CompactionID)
+	require.Equal(t, "encrypted_blob", doneEvent.CompactionContent)
+}
+
+func TestStreamingAccumulatorCompactionOutputIndex(t *testing.T) {
+	acc, events := newTestAccumulator()
+
+	// Compaction comes first, should get output_index 0
+	require.NoError(t, acc.Add(compactionChunk("", "encrypted_blob")))
+	// Text comes second, should get output_index 1
+	require.NoError(t, acc.Add(textChunk("response")))
+	require.NoError(t, acc.Complete())
+
+	addedEvent := findEvent(*events, StreamEventCompactionItemAdded)
+	require.NotNil(t, addedEvent)
+	require.Equal(t, 0, addedEvent.OutputIndex, "compaction should be at output_index 0")
+
+	outputItemAddedEvent := findEvent(*events, StreamEventOutputItemAdded)
+	require.NotNil(t, outputItemAddedEvent)
+	require.Equal(t, 1, outputItemAddedEvent.OutputIndex, "message should be at output_index 1 when compaction is at 0")
+}
+
+func TestStreamingAccumulatorCompactionAndReasoning(t *testing.T) {
+	acc, events := newTestAccumulator()
+
+	// Compaction first, then reasoning, then text
+	require.NoError(t, acc.Add(compactionChunk("", "encrypted_blob")))
+	require.NoError(t, acc.Add(reasoningChunk("thinking...", "", "")))
+	require.NoError(t, acc.Add(textChunk("The answer is 42.")))
+	require.NoError(t, acc.Complete())
+
+	compactionAdded := findEvent(*events, StreamEventCompactionItemAdded)
+	require.NotNil(t, compactionAdded)
+	require.Equal(t, 0, compactionAdded.OutputIndex)
+
+	reasoningAdded := findEvent(*events, StreamEventReasoningItemAdded)
+	require.NotNil(t, reasoningAdded)
+	require.Equal(t, 1, reasoningAdded.OutputIndex)
+
+	outputItemAdded := findEvent(*events, StreamEventOutputItemAdded)
+	require.NotNil(t, outputItemAdded)
+	require.Equal(t, 2, outputItemAdded.OutputIndex)
+}
+
+func TestStreamingAccumulatorCompactionIsAtomic(t *testing.T) {
+	// Compaction should not be duplicated if multiple chunks arrive with the same content
+	acc, events := newTestAccumulator()
+
+	require.NoError(t, acc.Add(compactionChunk("", "encrypted_blob")))
+	require.NoError(t, acc.Add(compactionChunk("", "encrypted_blob_updated")))
+	require.NoError(t, acc.Complete())
+
+	// Should only emit one added+done pair
+	addedEvents := findEvents(*events, StreamEventCompactionItemAdded)
+	require.Len(t, addedEvents, 1, "should only emit one compaction_item.added")
+
+	doneEvents := findEvents(*events, StreamEventCompactionItemDone)
+	require.Len(t, doneEvents, 1, "should only emit one compaction_item.done")
+}
+
+func TestStreamingAccumulatorCompactionInResult(t *testing.T) {
+	acc, _ := newTestAccumulator()
+
+	require.NoError(t, acc.Add(compactionChunk("", "encrypted_blob")))
+	require.NoError(t, acc.Add(textChunk("Hello")))
+	require.NoError(t, acc.Complete())
+
+	result := acc.Result()
+	require.NotNil(t, result)
+	require.NotNil(t, result.Message)
+
+	// First content should be compaction
+	require.GreaterOrEqual(t, len(result.Message.Content), 2)
+	require.NotNil(t, result.Message.Content[0].Compaction)
+	require.Equal(t, "encrypted_blob", result.Message.Content[0].Compaction.Signature)
+	require.NotEmpty(t, result.Message.Content[0].Compaction.ID, "compaction should have an assigned ID")
+
+	// Second content should be text
+	require.Equal(t, "Hello", result.Message.Content[1].Text)
+}
+
+func TestStreamingAccumulatorCompactionIDGenerated(t *testing.T) {
+	acc, events := newTestAccumulator()
+
+	// Provider chunk doesn't have an ID — accumulator should generate one with "comp_" prefix
+	require.NoError(t, acc.Add(compactionChunk("", "encrypted_blob")))
+	require.NoError(t, acc.Complete())
+
+	addedEvent := findEvent(*events, StreamEventCompactionItemAdded)
+	require.NotNil(t, addedEvent)
+	require.Contains(t, addedEvent.CompactionID, "comp_", "generated compaction ID should have comp_ prefix")
+
+	// Result should also have the same ID
+	result := acc.Result()
+	require.Equal(t, addedEvent.CompactionID, result.Message.Content[0].Compaction.ID)
+}
+
+func TestStreamingAccumulatorCompactionIDFromProvider(t *testing.T) {
+	acc, events := newTestAccumulator()
+
+	// Provider supplies an ID — accumulator should use it instead of generating one
+	require.NoError(t, acc.Add(compactionChunk("comp_provider_123", "encrypted_blob")))
+	require.NoError(t, acc.Complete())
+
+	addedEvent := findEvent(*events, StreamEventCompactionItemAdded)
+	require.NotNil(t, addedEvent)
+	require.Equal(t, "comp_provider_123", addedEvent.CompactionID, "should use provider-supplied ID")
+
+	doneEvent := findEvent(*events, StreamEventCompactionItemDone)
+	require.NotNil(t, doneEvent)
+	require.Equal(t, "comp_provider_123", doneEvent.CompactionID)
+
+	result := acc.Result()
+	require.Equal(t, "comp_provider_123", result.Message.Content[0].Compaction.ID)
+}
+
+func TestStreamingAccumulatorCompactionEventOrdering(t *testing.T) {
+	acc, events := newTestAccumulator()
+
+	require.NoError(t, acc.Add(compactionChunk("", "encrypted_blob")))
+	require.NoError(t, acc.Add(textChunk("Hello")))
+	require.NoError(t, acc.Complete())
+
+	types := make([]StreamEventType, len(*events))
+	for i, e := range *events {
+		types[i] = e.Type
+	}
+
+	require.Equal(t, []StreamEventType{
+		StreamEventResponseCreated,
+		StreamEventResponseInProgress,
+		// Compaction (atomic: added+done immediately)
+		StreamEventCompactionItemAdded,
+		StreamEventCompactionItemDone,
+		// Message output item
+		StreamEventOutputItemAdded,
+		StreamEventContentPartAdded,
+		StreamEventTextDelta,
+		StreamEventTextDone,
+		StreamEventContentPartDone,
+		StreamEventOutputItemDone,
+		StreamEventResponseCompleted,
+	}, types)
+}

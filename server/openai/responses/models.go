@@ -27,8 +27,17 @@ type ResponsesRequest struct {
 
 	Reasoning *ReasoningConfig `json:"reasoning,omitempty"`
 
+	ContextManagement []ContextManagementConfig `json:"context_management,omitempty"`
+
 	ToolChoice        *ToolChoice `json:"tool_choice,omitempty"`
 	ParallelToolCalls *bool       `json:"parallel_tool_calls,omitempty"`
+}
+
+// ContextManagementConfig represents a context management entry
+type ContextManagementConfig struct {
+	Type string `json:"type"`
+
+	CompactThreshold *int64 `json:"compact_threshold,omitempty"`
 }
 
 // ReasoningConfig contains configuration options for reasoning models
@@ -175,6 +184,7 @@ type InputItemType string
 const (
 	InputItemTypeMessage            InputItemType = "message"
 	InputItemTypeReasoning          InputItemType = "reasoning"
+	InputItemTypeCompaction         InputItemType = "compaction"
 	InputItemTypeFunctionCall       InputItemType = "function_call"
 	InputItemTypeFunctionCallOutput InputItemType = "function_call_output"
 )
@@ -193,6 +203,9 @@ type InputItem struct {
 	// For reasoning type
 	*InputReasoning
 
+	// For compaction type
+	*InputCompaction
+
 	// For function_call type
 	*InputFunctionCall
 
@@ -206,6 +219,12 @@ type InputReasoning struct {
 	Summary          []ReasoningSummaryPart `json:"summary,omitempty"`
 	Content          json.RawMessage        `json:"content,omitempty"`           // Can be null
 	EncryptedContent string                 `json:"encrypted_content,omitempty"` // Base64 encoded
+}
+
+// InputCompaction represents a compaction item in the input
+type InputCompaction struct {
+	ID               string `json:"id,omitempty"`
+	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
 
 // ReasoningSummaryPart represents a part of the reasoning summary
@@ -285,6 +304,13 @@ func (ri *ResponsesInput) UnmarshalJSON(data []byte) error {
 				return err
 			}
 			item.InputReasoning = &reasoning
+
+		case InputItemTypeCompaction:
+			var compaction InputCompaction
+			if err := json.Unmarshal(raw, &compaction); err != nil {
+				return err
+			}
+			item.InputCompaction = &compaction
 
 		case InputItemTypeFunctionCall:
 			var fc InputFunctionCall
@@ -459,6 +485,7 @@ type ResponseOutput struct {
 	*OutputMessage
 	*FunctionCallOutputItem
 	*ReasoningOutputItem
+	*CompactionOutputItem
 }
 
 // MarshalJSON implements custom JSON marshaling to avoid field conflicts
@@ -517,6 +544,18 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 				EncryptedContent: r.ReasoningOutputItem.EncryptedContent,
 			})
 		}
+	case ResponseOutputTypeCompaction:
+		if r.CompactionOutputItem != nil {
+			return json.Marshal(struct {
+				Type             ResponseOutputType `json:"type"`
+				ID               string             `json:"id"`
+				EncryptedContent string             `json:"encrypted_content,omitempty"`
+			}{
+				Type:             r.Type,
+				ID:               r.CompactionOutputItem.ID,
+				EncryptedContent: r.CompactionOutputItem.EncryptedContent,
+			})
+		}
 	}
 	// Fallback: just marshal the type
 	return json.Marshal(struct {
@@ -530,6 +569,7 @@ var (
 	ResponseOutputTypeMessage      ResponseOutputType = "message"
 	ResponseOutputTypeFunctionCall ResponseOutputType = "function_call"
 	ResponseOutputTypeReasoning    ResponseOutputType = "reasoning"
+	ResponseOutputTypeCompaction   ResponseOutputType = "compaction"
 )
 
 type OutputMessage struct {
@@ -689,6 +729,29 @@ type FunctionCallOutputItemDoneEvent struct {
 	SequenceNumber int                     `json:"sequence_number"`
 	OutputIndex    int                     `json:"output_index"`
 	Item           *FunctionCallOutputItem `json:"item"`
+}
+
+// CompactionOutputItem represents a compaction item in the output
+type CompactionOutputItem struct {
+	ID               string `json:"id"`
+	Type             string `json:"type"` // compaction
+	EncryptedContent string `json:"encrypted_content,omitempty"`
+}
+
+// CompactionOutputItemAddedEvent is emitted when a compaction item is added
+type CompactionOutputItemAddedEvent struct {
+	Type           string                `json:"type"` // response.output_item.added
+	SequenceNumber int                   `json:"sequence_number"`
+	OutputIndex    int                   `json:"output_index"`
+	Item           *CompactionOutputItem `json:"item"`
+}
+
+// CompactionOutputItemDoneEvent is emitted when a compaction item is done
+type CompactionOutputItemDoneEvent struct {
+	Type           string                `json:"type"` // response.output_item.done
+	SequenceNumber int                   `json:"sequence_number"`
+	OutputIndex    int                   `json:"output_index"`
+	Item           *CompactionOutputItem `json:"item"`
 }
 
 // ReasoningOutputItem represents a reasoning item in the output

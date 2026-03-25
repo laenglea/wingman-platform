@@ -129,6 +129,16 @@ func reasoningItem(id, signature string) InputItem {
 	}
 }
 
+func compactionItem(id, encryptedContent string) InputItem {
+	return InputItem{
+		Type: InputItemTypeCompaction,
+		InputCompaction: &InputCompaction{
+			ID:               id,
+			EncryptedContent: encryptedContent,
+		},
+	}
+}
+
 func TestToMessages_Empty(t *testing.T) {
 	msgs, err := toMessages(nil, "")
 	require.NoError(t, err)
@@ -318,4 +328,69 @@ func TestToMessages_FullConversationWithToolUse(t *testing.T) {
 	require.Equal(t, provider.MessageRoleAssistant, msgs[4].Role)
 	require.Equal(t, "It's sunny and 22°C in London.", msgs[4].Content[0].Text)
 	require.Equal(t, provider.MessageRoleUser, msgs[5].Role)
+}
+
+// ── Compaction conversion ────────────────────────────────────────────────────
+
+func TestToMessages_CompactionCreatesAssistantMessage(t *testing.T) {
+	items := []InputItem{
+		compactionItem("comp_1", "encrypted_blob"),
+		userItem("Continue"),
+	}
+	msgs, err := toMessages(items, "")
+	require.NoError(t, err)
+	require.Len(t, msgs, 2)
+
+	require.Equal(t, provider.MessageRoleAssistant, msgs[0].Role)
+	require.Len(t, msgs[0].Content, 1)
+	require.NotNil(t, msgs[0].Content[0].Compaction)
+	require.Equal(t, "comp_1", msgs[0].Content[0].Compaction.ID)
+	require.Equal(t, "encrypted_blob", msgs[0].Content[0].Compaction.Signature)
+
+	require.Equal(t, provider.MessageRoleUser, msgs[1].Role)
+}
+
+func TestToMessages_CompactionEmptyContentSkipped(t *testing.T) {
+	items := []InputItem{
+		compactionItem("comp_1", ""),
+		userItem("Hello"),
+	}
+	msgs, err := toMessages(items, "")
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	require.Equal(t, provider.MessageRoleUser, msgs[0].Role)
+}
+
+func TestToMessages_CompactionFlushesPendingCalls(t *testing.T) {
+	// If there are pending function calls before a compaction item,
+	// they should be flushed into their own assistant message first.
+	items := []InputItem{
+		userItem("Use a tool"),
+		functionCallItem("call_1", "get_weather", `{}`),
+		functionCallOutputItem("call_1", "Sunny"),
+		compactionItem("comp_1", "encrypted_blob"),
+		userItem("Continue"),
+	}
+	msgs, err := toMessages(items, "")
+	require.NoError(t, err)
+	// user, assistant(call), user(result), assistant(compaction), user
+	require.Len(t, msgs, 5)
+	require.NotNil(t, msgs[1].Content[0].ToolCall)
+	require.NotNil(t, msgs[2].Content[0].ToolResult)
+	require.NotNil(t, msgs[3].Content[0].Compaction)
+	require.Equal(t, provider.MessageRoleUser, msgs[4].Role)
+}
+
+func TestToMessages_CompactionWithInstructions(t *testing.T) {
+	items := []InputItem{
+		compactionItem("comp_1", "encrypted_blob"),
+		userItem("Continue"),
+	}
+	msgs, err := toMessages(items, "Be helpful")
+	require.NoError(t, err)
+	require.Len(t, msgs, 3)
+	require.Equal(t, provider.MessageRoleSystem, msgs[0].Role)
+	require.Equal(t, provider.MessageRoleAssistant, msgs[1].Role)
+	require.NotNil(t, msgs[1].Content[0].Compaction)
+	require.Equal(t, provider.MessageRoleUser, msgs[2].Role)
 }

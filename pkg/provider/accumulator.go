@@ -12,7 +12,8 @@ type CompletionAccumulator struct {
 
 	content strings.Builder
 
-	reasoning *Reasoning
+	reasoning  *Reasoning
+	compaction *Compaction
 
 	toolCalls      []ToolCall
 	lastToolCallID string
@@ -58,6 +59,10 @@ func (a *CompletionAccumulator) Add(c Completion) {
 				if c.Reasoning.Signature != "" {
 					a.reasoning.Signature = c.Reasoning.Signature
 				}
+			}
+
+			if c.Compaction != nil {
+				a.compaction = c.Compaction
 			}
 
 			if c.ToolCall != nil {
@@ -127,6 +132,10 @@ func (a *CompletionAccumulator) Result() *Completion {
 
 	if a.reasoning != nil {
 		content = append(content, ReasoningContent(*a.reasoning))
+	}
+
+	if a.compaction != nil {
+		content = append(content, CompactionContent(*a.compaction))
 	}
 
 	if a.content.Len() > 0 {

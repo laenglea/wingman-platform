@@ -152,6 +152,26 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 
 			pendingReasoning = append(pendingReasoning, provider.ReasoningContent(r))
 
+		case InputItemTypeCompaction:
+			if item.InputCompaction == nil {
+				continue
+			}
+
+			flushCalls()
+			flushResults()
+
+			if item.InputCompaction.EncryptedContent != "" {
+				result = append(result, provider.Message{
+					Role: provider.MessageRoleAssistant,
+					Content: []provider.Content{
+						provider.CompactionContent(provider.Compaction{
+							ID:        item.InputCompaction.ID,
+							Signature: item.InputCompaction.EncryptedContent,
+						}),
+					},
+				})
+			}
+
 		case InputItemTypeFunctionCall:
 			if item.InputFunctionCall == nil {
 				continue

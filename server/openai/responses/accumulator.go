@@ -40,6 +40,10 @@ const (
 	StreamEventReasoningTextDone         StreamEventType = "reasoning_text.done"
 	StreamEventReasoningContentPartAdded StreamEventType = "reasoning_content_part.added"
 	StreamEventReasoningContentPartDone  StreamEventType = "reasoning_content_part.done"
+
+	// Compaction events
+	StreamEventCompactionItemAdded StreamEventType = "compaction_item.added"
+	StreamEventCompactionItemDone  StreamEventType = "compaction_item.done"
 )
 
 // StreamEvent represents a streaming event with its data
@@ -55,8 +59,8 @@ type StreamEvent struct {
 	// For function call events
 	ToolCallID   string
 	ToolCallName string
-	Arguments      string
-	OutputIndex    int
+	Arguments    string
+	OutputIndex  int
 
 	// For reasoning events
 	ReasoningID        string
@@ -65,6 +69,10 @@ type StreamEvent struct {
 	ReasoningSignature string
 	SummaryIndex       int
 	ContentIndex       int
+
+	// For compaction events
+	CompactionID      string
+	CompactionContent string
 
 	// For error events
 	Error error
@@ -107,9 +115,9 @@ type StreamingAccumulator struct {
 	streamedText       strings.Builder
 
 	// Tool call state — single source of truth
-	toolCalls      []accumulatedToolCall
-	toolCallByID   map[string]int // effective call ID → index in toolCalls
-	lastToolCallID string
+	toolCalls       []accumulatedToolCall
+	toolCallByID    map[string]int // effective call ID → index in toolCalls
+	lastToolCallID  string
 	nextOutputIndex int
 
 	// Reasoning state
@@ -122,6 +130,12 @@ type StreamingAccumulator struct {
 	reasoningClosed          bool
 	streamedReasoningText    strings.Builder
 	streamedReasoningSummary strings.Builder
+
+	// Compaction state
+	compactionID          string
+	compactionContent     string
+	hasCompactionItem     bool
+	compactionOutputIndex int
 }
 
 // NewStreamingAccumulator creates a new StreamingAccumulator with an event handler
@@ -410,6 +424,49 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 	}
 
 	for _, content := range c.Message.Content {
+		// Compaction — atomic item, emitted as added+done.
+		// Must close pending reasoning/message first so each output item
+		// completes before the next one starts.
+		if content.Compaction != nil && content.Compaction.Signature != "" {
+			s.compactionContent = content.Compaction.Signature
+
+			if content.Compaction.ID != "" && s.compactionID == "" {
+				s.compactionID = content.Compaction.ID
+			}
+
+			if !s.hasCompactionItem {
+				if err := s.closePendingItems(); err != nil {
+					return err
+				}
+
+				s.hasCompactionItem = true
+
+				if s.compactionID == "" {
+					s.compactionID = "comp_" + uuid.NewString()
+				}
+
+				s.compactionOutputIndex = s.reserveOutputIndex()
+
+				if err := s.emitEvent(StreamEvent{
+					Type:              StreamEventCompactionItemAdded,
+					CompactionID:      s.compactionID,
+					CompactionContent: s.compactionContent,
+					OutputIndex:       s.compactionOutputIndex,
+				}); err != nil {
+					return err
+				}
+
+				if err := s.emitEvent(StreamEvent{
+					Type:              StreamEventCompactionItemDone,
+					CompactionID:      s.compactionID,
+					CompactionContent: s.compactionContent,
+					OutputIndex:       s.compactionOutputIndex,
+				}); err != nil {
+					return err
+				}
+			}
+		}
+
 		// Reasoning — must be emitted before text or tool calls
 		if content.Reasoning != nil {
 			r := content.Reasoning
@@ -542,6 +599,10 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 
 // Complete signals that streaming is done and emits final events.
 func (s *StreamingAccumulator) Complete() error {
+	if err := s.start(); err != nil {
+		return err
+	}
+
 	result := s.Result()
 	text := s.streamedText.String()
 
@@ -642,12 +703,16 @@ func (s *StreamingAccumulator) Complete() error {
 		Text:               text,
 		ReasoningID:        s.reasoningID,
 		ReasoningSignature: s.reasoningSignature,
+		CompactionID:       s.compactionID,
+		CompactionContent:  s.compactionContent,
 		Completion:         result,
 	})
 }
 
 // Error emits an error event
 func (s *StreamingAccumulator) Error(err error) error {
+	_ = s.start()
+
 	return s.emitEvent(StreamEvent{
 		Type:  StreamEventResponseFailed,
 		Error: err,
@@ -666,6 +731,13 @@ func (s *StreamingAccumulator) Result() *provider.Completion {
 			Signature: s.reasoningSignature,
 		}
 		content = append(content, provider.ReasoningContent(r))
+	}
+
+	if s.hasCompactionItem {
+		content = append(content, provider.CompactionContent(provider.Compaction{
+			ID:        s.compactionID,
+			Signature: s.compactionContent,
+		}))
 	}
 
 	if s.streamedText.Len() > 0 {

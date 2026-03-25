@@ -207,6 +207,29 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 							return
 						}
 					}
+
+				case responses.ResponseCompactionItem:
+					if item.EncryptedContent != "" {
+						delta := &provider.Completion{
+							ID:    data.Response.ID,
+							Model: data.Response.Model,
+
+							Message: &provider.Message{
+								Role: provider.MessageRoleAssistant,
+
+								Content: []provider.Content{
+									provider.CompactionContent(provider.Compaction{
+										ID:        item.ID,
+										Signature: item.EncryptedContent,
+									}),
+								},
+							},
+						}
+
+						if !yield(delta, nil) {
+							return
+						}
+					}
 				}
 
 			case responses.ResponseCompletedEvent:
@@ -330,6 +353,15 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 
 		case provider.EffortMax:
 			req.Reasoning.Effort = responses.ReasoningEffortXhigh
+		}
+	}
+
+	if options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 {
+		req.ContextManagement = []responses.ResponseNewParamsContextManagement{
+			{
+				Type:             "compaction",
+				CompactThreshold: openai.Int(int64(options.CompactionOptions.Threshold)),
+			},
 		}
 	}
 
@@ -530,6 +562,20 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 
 					result = append(result, responses.ResponseInputItemUnionParam{
 						OfReasoning: reasoning,
+					})
+				}
+
+				if c.Compaction != nil && c.Compaction.Signature != "" {
+					compaction := &responses.ResponseCompactionItemParam{
+						EncryptedContent: c.Compaction.Signature,
+					}
+
+					if c.Compaction.ID != "" {
+						compaction.ID = openai.String(c.Compaction.ID)
+					}
+
+					result = append(result, responses.ResponseInputItemUnionParam{
+						OfCompaction: compaction,
 					})
 				}
 
