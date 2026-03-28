@@ -204,6 +204,8 @@ type CompleteOptions struct {
 	ReasoningOptions  *ReasoningOptions
 	CompactionOptions *CompactionOptions
 
+	TextEditorTool bool
+
 	Schema *Schema
 }
 

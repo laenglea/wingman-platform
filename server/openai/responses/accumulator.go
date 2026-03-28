@@ -44,6 +44,7 @@ const (
 	// Compaction events
 	StreamEventCompactionItemAdded StreamEventType = "compaction_item.added"
 	StreamEventCompactionItemDone  StreamEventType = "compaction_item.done"
+
 )
 
 // StreamEvent represents a streaming event with its data
@@ -604,6 +605,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 				}
 			}
 		}
+
 	}
 
 	return nil

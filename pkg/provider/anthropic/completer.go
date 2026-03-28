@@ -232,6 +232,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					}
 
 				case anthropic.InputJSONDelta:
+					currentBlock := message.Content[len(message.Content)-1]
+
 					delta := &provider.Completion{
 						ID:    message.ID,
 						Model: c.model,
@@ -241,7 +243,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 							Content: []provider.Content{
 								provider.ToolCallContent(provider.ToolCall{
-									ID:        message.Content[len(message.Content)-1].ID,
+									ID:        currentBlock.ID,
 									Arguments: event.PartialJSON,
 								}),
 							},
@@ -480,8 +482,14 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		req.System = system
 	}
 
+	if options.TextEditorTool {
+		req.Tools = append(req.Tools, anthropic.ToolUnionParam{
+			OfTextEditor20250728: &anthropic.ToolTextEditor20250728Param{},
+		})
+	}
+
 	if len(tools) > 0 {
-		req.Tools = tools
+		req.Tools = append(req.Tools, tools...)
 	}
 
 	if options.ToolOptions != nil {

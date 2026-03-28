@@ -110,6 +110,7 @@ func (a *CompletionAccumulator) Add(c Completion) {
 
 				a.toolCalls[toolCallIndex].Arguments += c.ToolCall.Arguments
 			}
+
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"mime"
 	"path"
+	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/tool"
@@ -200,6 +201,40 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 				ID:   output.CallID,
 				Data: output.Output,
 			}))
+
+		case InputItemTypeApplyPatchCall:
+			if item.InputApplyPatchCall == nil {
+				continue
+			}
+
+			flushResults()
+
+			call := item.InputApplyPatchCall
+			args, _ := json.Marshal(map[string]any{
+				"type": call.Operation.Type,
+				"path": call.Operation.Path,
+				"diff": call.Operation.Diff,
+			})
+
+			pendingCalls = append(pendingCalls, provider.ToolCallContent(provider.ToolCall{
+				ID:        call.CallID,
+				Name:      "apply_patch",
+				Arguments: string(args),
+			}))
+
+		case InputItemTypeApplyPatchCallOutput:
+			if item.InputApplyPatchCallOutput == nil {
+				continue
+			}
+
+			flushCalls()
+
+			output := item.InputApplyPatchCallOutput
+
+			pendingResults = append(pendingResults, provider.ToolResultContent(provider.ToolResult{
+				ID:   output.CallID,
+				Data: output.Output,
+			}))
 		}
 	}
 
@@ -226,6 +261,89 @@ func toTools(tools []Tool) []provider.Tool {
 	}
 
 	return result
+}
+
+func hasApplyPatchTool(tools []Tool) bool {
+	for _, t := range tools {
+		if t.Type == ToolTypeApplyPatch {
+			return true
+		}
+	}
+	return false
+}
+
+// isApplyPatchToolCall returns true if the tool call is an apply_patch or text_editor call.
+func isApplyPatchToolCall(call provider.ToolCall) bool {
+	return call.Name == "apply_patch" || call.Name == "str_replace_based_edit_tool"
+}
+
+// toolCallToApplyPatchCall converts a ToolCall (from apply_patch or str_replace_based_edit_tool)
+// to an ApplyPatchCallItem for the OpenAI responses API.
+func toolCallToApplyPatchCall(call provider.ToolCall, status string) *ApplyPatchCallItem {
+	item := &ApplyPatchCallItem{
+		ID:     "apc_" + call.ID,
+		CallID: call.ID,
+		Status: status,
+	}
+
+	if call.Name == "apply_patch" {
+		// Native OpenAI format: arguments are {type, path, diff}
+		var op ApplyPatchOperation
+		json.Unmarshal([]byte(call.Arguments), &op)
+		item.Operation = op
+	} else if call.Name == "str_replace_based_edit_tool" {
+		// Anthropic format: arguments are {command, path, file_text, old_str, new_str, ...}
+		var args struct {
+			Command  string `json:"command"`
+			Path     string `json:"path"`
+			FileText string `json:"file_text"`
+			OldStr   string `json:"old_str"`
+			NewStr   string `json:"new_str"`
+		}
+		json.Unmarshal([]byte(call.Arguments), &args)
+
+		switch args.Command {
+		case "create":
+			item.Operation = ApplyPatchOperation{
+				Type: "create_file",
+				Path: args.Path,
+				Diff: toAddDiff(args.FileText),
+			}
+		case "str_replace":
+			item.Operation = ApplyPatchOperation{
+				Type: "update_file",
+				Path: args.Path,
+				Diff: toReplaceDiff(args.OldStr, args.NewStr),
+			}
+		default:
+			item.Operation = ApplyPatchOperation{
+				Type: "update_file",
+				Path: args.Path,
+			}
+		}
+	}
+
+	return item
+}
+
+func toAddDiff(content string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
+		b.WriteString("+" + line + "\n")
+	}
+	return b.String()
+}
+
+func toReplaceDiff(oldText, newText string) string {
+	var b strings.Builder
+	b.WriteString("@@\n")
+	for _, line := range strings.Split(strings.TrimRight(oldText, "\n"), "\n") {
+		b.WriteString("-" + line + "\n")
+	}
+	for _, line := range strings.Split(strings.TrimRight(newText, "\n"), "\n") {
+		b.WriteString("+" + line + "\n")
+	}
+	return b.String()
 }
 
 func toInputContent(items []InputContent) ([]provider.Content, error) {

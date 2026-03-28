@@ -198,6 +198,11 @@ func toTools(tools []ToolParam) []provider.Tool {
 	var result []provider.Tool
 
 	for _, t := range tools {
+		// Skip text_editor tools — handled separately via TextEditorTool option
+		if strings.HasPrefix(t.Type, "text_editor") {
+			continue
+		}
+
 		result = append(result, provider.Tool{
 			Name:        t.Name,
 			Description: t.Description,
@@ -206,6 +211,15 @@ func toTools(tools []ToolParam) []provider.Tool {
 	}
 
 	return result
+}
+
+func hasTextEditorTool(tools []ToolParam) bool {
+	for _, t := range tools {
+		if strings.HasPrefix(t.Type, "text_editor") {
+			return true
+		}
+	}
+	return false
 }
 
 func toContentBlocks(content []provider.Content) []ContentBlock {
@@ -228,10 +242,17 @@ func toContentBlocks(content []provider.Content) []ContentBlock {
 		}
 
 		if c.ToolCall != nil {
+			name := c.ToolCall.Name
 			var input any
 
-			if c.ToolCall.Arguments != "" {
-				json.Unmarshal([]byte(c.ToolCall.Arguments), &input)
+			if name == "apply_patch" {
+				// Cross-provider: convert apply_patch args to text_editor input
+				input = applyPatchArgsToTextEditorInput(c.ToolCall.Arguments)
+				name = "str_replace_based_edit_tool"
+			} else {
+				if c.ToolCall.Arguments != "" {
+					json.Unmarshal([]byte(c.ToolCall.Arguments), &input)
+				}
 			}
 
 			if input == nil {
@@ -242,7 +263,7 @@ func toContentBlocks(content []provider.Content) []ContentBlock {
 				Type: "tool_use",
 
 				ID:    c.ToolCall.ID,
-				Name:  c.ToolCall.Name,
+				Name:  name,
 				Input: input,
 
 				Caller: &BlockCaller{Type: "direct"},
@@ -251,6 +272,61 @@ func toContentBlocks(content []provider.Content) []ContentBlock {
 	}
 
 	return result
+}
+
+// applyPatchArgsToTextEditorInput converts apply_patch JSON args to text_editor input format.
+func applyPatchArgsToTextEditorInput(args string) map[string]any {
+	var op struct {
+		Type string `json:"type"`
+		Path string `json:"path"`
+		Diff string `json:"diff"`
+	}
+
+	json.Unmarshal([]byte(args), &op)
+
+	switch op.Type {
+	case "create_file":
+		return map[string]any{
+			"command":   "create",
+			"path":      op.Path,
+			"file_text": parseDiffAdded(op.Diff),
+		}
+	case "update_file":
+		old, new_ := parseDiffOldNew(op.Diff)
+		return map[string]any{
+			"command": "str_replace",
+			"path":    op.Path,
+			"old_str": old,
+			"new_str": new_,
+		}
+	default:
+		return map[string]any{
+			"command": "view",
+			"path":    op.Path,
+		}
+	}
+}
+
+func parseDiffAdded(diff string) string {
+	var lines []string
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "+") {
+			lines = append(lines, line[1:])
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func parseDiffOldNew(diff string) (string, string) {
+	var oldLines, newLines []string
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "-") {
+			oldLines = append(oldLines, line[1:])
+		} else if strings.HasPrefix(line, "+") {
+			newLines = append(newLines, line[1:])
+		}
+	}
+	return strings.Join(oldLines, "\n"), strings.Join(newLines, "\n")
 }
 
 func toStopReason(status provider.CompletionStatus, content []provider.Content) StopReason {

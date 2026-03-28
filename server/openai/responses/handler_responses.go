@@ -44,6 +44,8 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		Tools:       tools,
 		ToolOptions: toToolOptions(req.ToolChoice),
 
+		TextEditorTool: hasApplyPatchTool(req.Tools),
+
 		MaxTokens:   req.MaxOutputTokens,
 		Temperature: req.Temperature,
 	}
@@ -262,10 +264,12 @@ func responseDefaults(resp *Response, req ResponsesRequest) {
 	if len(req.Tools) > 0 {
 		tools := make([]any, len(req.Tools))
 		for i, t := range req.Tools {
-			// OpenAI echoes tools with strict=true and additionalProperties=false
-			if t.Strict == nil {
-				strict := true
-				t.Strict = &strict
+			// OpenAI echoes function tools with strict=true and additionalProperties=false
+			if t.Type == ToolTypeFunction {
+				if t.Strict == nil {
+					strict := true
+					t.Strict = &strict
+				}
 			}
 
 			if t.Parameters != nil {
@@ -310,6 +314,7 @@ func reasoningRequested(req ResponsesRequest) bool {
 type responseOutputOptions struct {
 	IncludeSummary   bool
 	IncludeReasoning bool
+	ApplyPatchTool   bool
 }
 
 func responseOutputs(message *provider.Message, messageID, status string, opts responseOutputOptions) []ResponseOutput {
@@ -393,17 +398,24 @@ func responseOutputs(message *provider.Message, messageID, status string, opts r
 	}
 
 	for _, call := range message.ToolCalls() {
-		output = append(output, ResponseOutput{
-			Type: ResponseOutputTypeFunctionCall,
-			FunctionCallOutputItem: &FunctionCallOutputItem{
-				ID:        "fc_" + call.ID,
-				Type:      "function_call",
-				Status:    status,
-				Name:      call.Name,
-				CallID:    call.ID,
-				Arguments: call.Arguments,
-			},
-		})
+		if opts.ApplyPatchTool && isApplyPatchToolCall(call) {
+			output = append(output, ResponseOutput{
+				Type:               ResponseOutputTypeApplyPatchCall,
+				ApplyPatchCallItem: toolCallToApplyPatchCall(call, status),
+			})
+		} else {
+			output = append(output, ResponseOutput{
+				Type: ResponseOutputTypeFunctionCall,
+				FunctionCallOutputItem: &FunctionCallOutputItem{
+					ID:        "fc_" + call.ID,
+					Type:      "function_call",
+					Status:    status,
+					Name:      call.Name,
+					CallID:    call.ID,
+					Arguments: call.Arguments,
+				},
+			})
+		}
 	}
 
 	for _, content := range message.Content {
@@ -445,6 +457,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 	outputOpts := responseOutputOptions{
 		IncludeSummary:   options.ReasoningOptions != nil && options.ReasoningOptions.IncludeSummary,
 		IncludeReasoning: reasoningRequested(req),
+		ApplyPatchTool:   options.TextEditorTool,
 	}
 
 	// Create initial response template
@@ -545,6 +558,11 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventFunctionCallAdded:
+			if outputOpts.ApplyPatchTool && (event.ToolCallName == "apply_patch" || event.ToolCallName == "str_replace_based_edit_tool") {
+				// Emit as apply_patch_call — full item comes at FunctionCallDone
+				return nil
+			}
+
 			return writeEvent(w, "response.output_item.added", FunctionCallOutputItemAddedEvent{
 				Type:           "response.output_item.added",
 				SequenceNumber: nextSeq(),
@@ -579,6 +597,41 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventFunctionCallDone:
+			if outputOpts.ApplyPatchTool && (event.ToolCallName == "apply_patch" || event.ToolCallName == "str_replace_based_edit_tool") {
+				call := provider.ToolCall{
+					ID:        event.ToolCallID,
+					Name:      event.ToolCallName,
+					Arguments: event.Arguments,
+				}
+				item := toolCallToApplyPatchCall(call, "completed")
+
+				if err := writeEvent(w, "response.output_item.added", map[string]any{
+					"type":            "response.output_item.added",
+					"sequence_number": nextSeq(),
+					"output_index":    event.OutputIndex,
+					"item": map[string]any{
+						"type":   "apply_patch_call",
+						"id":     item.ID,
+						"status": "in_progress",
+					},
+				}); err != nil {
+					return err
+				}
+
+				return writeEvent(w, "response.output_item.done", map[string]any{
+					"type":            "response.output_item.done",
+					"sequence_number": nextSeq(),
+					"output_index":    event.OutputIndex,
+					"item": map[string]any{
+						"type":      "apply_patch_call",
+						"id":        item.ID,
+						"status":    item.Status,
+						"call_id":   item.CallID,
+						"operation": item.Operation,
+					},
+				})
+			}
+
 			return writeEvent(w, "response.output_item.done", FunctionCallOutputItemDoneEvent{
 				Type:           "response.output_item.done",
 				SequenceNumber: nextSeq(),
@@ -936,6 +989,7 @@ func (h *Handler) handleResponsesComplete(w http.ResponseWriter, r *http.Request
 		Output: responseOutputs(completion.Message, "msg_"+uuid.NewString(), responseStatus(completion.Status), responseOutputOptions{
 			IncludeSummary:   options.ReasoningOptions != nil && options.ReasoningOptions.IncludeSummary,
 			IncludeReasoning: reasoningRequested(req),
+			ApplyPatchTool:   options.TextEditorTool,
 		}),
 		Usage:     responseUsage(completion.Usage),
 	}

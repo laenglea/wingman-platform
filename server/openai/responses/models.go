@@ -86,8 +86,9 @@ type TextFormat struct {
 type ToolType string
 
 const (
-	ToolTypeFunction ToolType = "function"
-	ToolTypeCustom   ToolType = "custom"
+	ToolTypeFunction   ToolType = "function"
+	ToolTypeCustom     ToolType = "custom"
+	ToolTypeApplyPatch ToolType = "apply_patch"
 )
 
 // Tool represents a tool in the request
@@ -183,11 +184,13 @@ type CustomToolFormat struct {
 type InputItemType string
 
 const (
-	InputItemTypeMessage            InputItemType = "message"
-	InputItemTypeReasoning          InputItemType = "reasoning"
-	InputItemTypeCompaction         InputItemType = "compaction"
-	InputItemTypeFunctionCall       InputItemType = "function_call"
-	InputItemTypeFunctionCallOutput InputItemType = "function_call_output"
+	InputItemTypeMessage              InputItemType = "message"
+	InputItemTypeReasoning            InputItemType = "reasoning"
+	InputItemTypeCompaction           InputItemType = "compaction"
+	InputItemTypeFunctionCall         InputItemType = "function_call"
+	InputItemTypeFunctionCallOutput   InputItemType = "function_call_output"
+	InputItemTypeApplyPatchCall       InputItemType = "apply_patch_call"
+	InputItemTypeApplyPatchCallOutput InputItemType = "apply_patch_call_output"
 )
 
 type ResponsesInput struct {
@@ -212,6 +215,27 @@ type InputItem struct {
 
 	// For function_call_output type
 	*InputFunctionCallOutput
+
+	// For apply_patch_call type
+	*InputApplyPatchCall
+
+	// For apply_patch_call_output type
+	*InputApplyPatchCallOutput
+}
+
+// InputApplyPatchCall represents an apply_patch call in the input (for multi-turn)
+type InputApplyPatchCall struct {
+	ID        string              `json:"id,omitempty"`
+	CallID    string              `json:"call_id,omitempty"`
+	Status    string              `json:"status,omitempty"`
+	Operation ApplyPatchOperation `json:"operation,omitempty"`
+}
+
+// InputApplyPatchCallOutput represents the result of an apply_patch call
+type InputApplyPatchCallOutput struct {
+	CallID string `json:"call_id,omitempty"`
+	Output string `json:"output,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 // InputReasoning represents a reasoning item in the input
@@ -326,6 +350,20 @@ func (ri *ResponsesInput) UnmarshalJSON(data []byte) error {
 				return err
 			}
 			item.InputFunctionCallOutput = &fco
+
+		case InputItemTypeApplyPatchCall:
+			var apc InputApplyPatchCall
+			if err := json.Unmarshal(raw, &apc); err != nil {
+				return err
+			}
+			item.InputApplyPatchCall = &apc
+
+		case InputItemTypeApplyPatchCallOutput:
+			var apco InputApplyPatchCallOutput
+			if err := json.Unmarshal(raw, &apco); err != nil {
+				return err
+			}
+			item.InputApplyPatchCallOutput = &apco
 
 		default:
 			return fmt.Errorf("unknown input item type: %s", typeWrapper.Type)
@@ -538,6 +576,7 @@ type ResponseOutput struct {
 
 	*OutputMessage
 	*FunctionCallOutputItem
+	*ApplyPatchCallItem
 	*ReasoningOutputItem
 	*CompactionOutputItem
 }
@@ -582,6 +621,22 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 				Arguments: r.FunctionCallOutputItem.Arguments,
 			})
 		}
+	case ResponseOutputTypeApplyPatchCall:
+		if r.ApplyPatchCallItem != nil {
+			return json.Marshal(struct {
+				Type      ResponseOutputType  `json:"type"`
+				ID        string              `json:"id"`
+				Status    string              `json:"status"`
+				CallID    string              `json:"call_id"`
+				Operation ApplyPatchOperation `json:"operation"`
+			}{
+				Type:      r.Type,
+				ID:        r.ApplyPatchCallItem.ID,
+				Status:    r.ApplyPatchCallItem.Status,
+				CallID:    r.ApplyPatchCallItem.CallID,
+				Operation: r.ApplyPatchCallItem.Operation,
+			})
+		}
 	case ResponseOutputTypeReasoning:
 		if r.ReasoningOutputItem != nil {
 			return json.Marshal(struct {
@@ -618,11 +673,26 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 type ResponseOutputType string
 
 var (
-	ResponseOutputTypeMessage      ResponseOutputType = "message"
-	ResponseOutputTypeFunctionCall ResponseOutputType = "function_call"
-	ResponseOutputTypeReasoning    ResponseOutputType = "reasoning"
-	ResponseOutputTypeCompaction   ResponseOutputType = "compaction"
+	ResponseOutputTypeMessage        ResponseOutputType = "message"
+	ResponseOutputTypeFunctionCall   ResponseOutputType = "function_call"
+	ResponseOutputTypeApplyPatchCall ResponseOutputType = "apply_patch_call"
+	ResponseOutputTypeReasoning      ResponseOutputType = "reasoning"
+	ResponseOutputTypeCompaction     ResponseOutputType = "compaction"
 )
+
+// ApplyPatchCallItem represents an apply_patch tool call in the output
+type ApplyPatchCallItem struct {
+	ID     string              `json:"id"`
+	CallID string              `json:"call_id"`
+	Status string              `json:"status"`
+	Operation ApplyPatchOperation `json:"operation"`
+}
+
+type ApplyPatchOperation struct {
+	Type string `json:"type"` // "create_file", "update_file", "delete_file"
+	Path string `json:"path"`
+	Diff string `json:"diff"`
+}
 
 type OutputMessage struct {
 	ID string `json:"id,omitempty"`

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"encoding/json"
 	"slices"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -79,6 +80,27 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 								provider.ToolCallContent(provider.ToolCall{
 									ID:   item.CallID,
 									Name: item.Name,
+								}),
+							},
+						},
+					}
+
+					if !yield(delta, nil) {
+						return
+					}
+
+				case responses.ResponseApplyPatchToolCall:
+					delta := &provider.Completion{
+						ID:    data.Response.ID,
+						Model: data.Response.Model,
+
+						Message: &provider.Message{
+							Role: provider.MessageRoleAssistant,
+
+							Content: []provider.Content{
+								provider.ToolCallContent(provider.ToolCall{
+									ID:   item.CallID,
+									Name: "apply_patch",
 								}),
 							},
 						},
@@ -184,6 +206,34 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 			case responses.ResponseContentPartDoneEvent:
 			case responses.ResponseOutputItemDoneEvent:
 				switch item := event.Item.AsAny().(type) {
+				case responses.ResponseApplyPatchToolCall:
+					args, _ := json.Marshal(map[string]any{
+						"type": item.Operation.Type,
+						"path": item.Operation.Path,
+						"diff": item.Operation.Diff,
+					})
+
+					delta := &provider.Completion{
+						ID:    data.Response.ID,
+						Model: data.Response.Model,
+
+						Message: &provider.Message{
+							Role: provider.MessageRoleAssistant,
+
+							Content: []provider.Content{
+								provider.ToolCallContent(provider.ToolCall{
+									ID:        item.CallID,
+									Name:      "apply_patch",
+									Arguments: string(args),
+								}),
+							},
+						},
+					}
+
+					if !yield(delta, nil) {
+						return
+					}
+
 				case responses.ResponseReasoningItem:
 					// Capture encrypted_content for conversation continuity
 					if item.EncryptedContent != "" {
@@ -303,6 +353,12 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 
 	if err != nil {
 		return nil, err
+	}
+
+	if options.TextEditorTool {
+		tools = append(tools, responses.ToolUnionParam{
+			OfApplyPatch: &responses.ApplyPatchToolParam{},
+		})
 	}
 
 	req := &responses.ResponseNewParams{
