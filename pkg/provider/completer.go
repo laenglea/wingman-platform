@@ -79,6 +79,18 @@ func (m Message) Text() string {
 	return strings.Join(parts, "\n\n")
 }
 
+func (m Message) Refusal() string {
+	var parts []string
+
+	for _, c := range m.Content {
+		if c.Refusal != "" {
+			parts = append(parts, c.Refusal)
+		}
+	}
+
+	return strings.Join(parts, "\n\n")
+}
+
 func (m Message) ToolCalls() []ToolCall {
 	var calls []ToolCall
 
@@ -113,6 +125,12 @@ func FileContent(val *File) Content {
 	}
 }
 
+func RefusalContent(val string) Content {
+	return Content{
+		Refusal: val,
+	}
+}
+
 func ToolCallContent(val ToolCall) Content {
 	return Content{
 		ToolCall: &val,
@@ -138,7 +156,8 @@ func CompactionContent(val Compaction) Content {
 }
 
 type Content struct {
-	Text string
+	Text     string
+	Refusal  string
 
 	File *File
 
@@ -162,6 +181,14 @@ type ToolCall struct {
 
 	Name      string
 	Arguments string
+}
+
+type TextEditorOptions struct{}
+
+type ComputerOptions struct {
+	DisplayWidth  int
+	DisplayHeight int
+	Environment   string // e.g. "browser", "desktop"
 }
 
 type ToolChoice string
@@ -204,7 +231,8 @@ type CompleteOptions struct {
 	ReasoningOptions  *ReasoningOptions
 	CompactionOptions *CompactionOptions
 
-	TextEditorTool bool
+	TextEditorTool  *TextEditorOptions
+	ComputerUseTool *ComputerOptions
 
 	Schema *Schema
 }
@@ -215,6 +243,7 @@ const (
 	CompletionStatusCompleted  CompletionStatus = "completed"
 	CompletionStatusIncomplete CompletionStatus = "incomplete"
 	CompletionStatusFailed     CompletionStatus = "failed"
+	CompletionStatusRefused    CompletionStatus = "refused"
 )
 
 type Completion struct {

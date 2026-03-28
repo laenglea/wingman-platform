@@ -3,6 +3,8 @@ package openai
 import (
 	"errors"
 
+	"github.com/adrianliechti/wingman/pkg/provider"
+
 	"github.com/openai/openai-go/v3"
 )
 
@@ -10,11 +12,51 @@ func convertError(err error) error {
 	var apierr *openai.Error
 
 	if errors.As(err, &apierr) {
-		//println(string(apierr.DumpRequest(true)))  // Prints the serialized HTTP request
-		//println(string(apierr.DumpResponse(true))) // Prints the serialized HTTP response
+		provErr := &provider.ProviderError{
+			StatusCode: apierr.StatusCode,
+			Message:    apierr.Error(),
+			Err:        err,
+		}
+
+		if apierr.Response != nil {
+			provErr.RetryAfter = provider.ParseRetryAfter(apierr.Response.Header.Get("Retry-After"))
+		}
+
+		return provErr
 	}
 
 	return err
+}
+
+// ensureAdditionalPropertiesFalse recursively adds additionalProperties: false
+// to all object schemas. Required by OpenAI's strict JSON schema validation.
+func ensureAdditionalPropertiesFalse(schema map[string]any) map[string]any {
+	if schema == nil {
+		return schema
+	}
+
+	schemaType, _ := schema["type"].(string)
+	if schemaType == "object" {
+		if _, ok := schema["additionalProperties"]; !ok {
+			schema["additionalProperties"] = false
+		}
+
+		if props, ok := schema["properties"].(map[string]any); ok {
+			for key, val := range props {
+				if propSchema, ok := val.(map[string]any); ok {
+					props[key] = ensureAdditionalPropertiesFalse(propSchema)
+				}
+			}
+		}
+	}
+
+	if schemaType == "array" {
+		if items, ok := schema["items"].(map[string]any); ok {
+			schema["items"] = ensureAdditionalPropertiesFalse(items)
+		}
+	}
+
+	return schema
 }
 
 var CodingModels = []string{

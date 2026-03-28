@@ -96,6 +96,13 @@ func toMessage(m MessageParam) (*provider.Message, error) {
 				ID:   block.ToolUseID,
 				Data: result,
 			}))
+
+		case "compaction":
+			if compactionContent, ok := block.Content.(string); ok {
+				content = append(content, provider.CompactionContent(provider.Compaction{
+					Signature: compactionContent,
+				}))
+			}
 		}
 	}
 
@@ -198,8 +205,8 @@ func toTools(tools []ToolParam) []provider.Tool {
 	var result []provider.Tool
 
 	for _, t := range tools {
-		// Skip text_editor tools — handled separately via TextEditorTool option
-		if strings.HasPrefix(t.Type, "text_editor") {
+		// Skip special tools — handled separately via options
+		if strings.HasPrefix(t.Type, "text_editor") || strings.HasPrefix(t.Type, "computer") {
 			continue
 		}
 
@@ -213,24 +220,48 @@ func toTools(tools []ToolParam) []provider.Tool {
 	return result
 }
 
-func hasTextEditorTool(tools []ToolParam) bool {
+func toTextEditorToolOptions(tools []ToolParam) *provider.TextEditorOptions {
 	for _, t := range tools {
 		if strings.HasPrefix(t.Type, "text_editor") {
-			return true
+			return &provider.TextEditorOptions{}
 		}
 	}
-	return false
+	return nil
+}
+
+func toComputerUseToolOptions(tools []ToolParam) *provider.ComputerOptions {
+	for _, t := range tools {
+		if strings.HasPrefix(t.Type, "computer") {
+			return &provider.ComputerOptions{
+				DisplayWidth:  1024,
+				DisplayHeight: 768,
+			}
+		}
+	}
+	return nil
 }
 
 func toContentBlocks(content []provider.Content) []ContentBlock {
 	var result []ContentBlock
 
 	for _, c := range content {
-		if c.Reasoning != nil && (c.Reasoning.Text != "" || c.Reasoning.Signature != "") {
+		if c.Reasoning != nil && (c.Reasoning.Text != "" || c.Reasoning.Summary != "" || c.Reasoning.Signature != "") {
+			thinking := c.Reasoning.Text
+			if thinking == "" {
+				thinking = c.Reasoning.Summary
+			}
+
 			result = append(result, ContentBlock{
 				Type:      "thinking",
-				Thinking:  c.Reasoning.Text,
+				Thinking:  thinking,
 				Signature: c.Reasoning.Signature,
+			})
+		}
+
+		if c.Compaction != nil && c.Compaction.Signature != "" {
+			result = append(result, ContentBlock{
+				Type:    "compaction",
+				Content: c.Compaction.Signature,
 			})
 		}
 
@@ -330,8 +361,11 @@ func parseDiffOldNew(diff string) (string, string) {
 }
 
 func toStopReason(status provider.CompletionStatus, content []provider.Content) StopReason {
-	if status == provider.CompletionStatusIncomplete {
+	switch status {
+	case provider.CompletionStatusIncomplete:
 		return StopReasonMaxTokens
+	case provider.CompletionStatusRefused:
+		return StopReasonRefusal
 	}
 
 	for _, c := range content {

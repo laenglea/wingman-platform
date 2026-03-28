@@ -27,6 +27,11 @@ func (h *Handler) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 		totalChars += countContentChars(content)
 	}
 
+	// Count tool definition tokens
+	for _, tool := range req.Tools {
+		totalChars += countToolChars(tool)
+	}
+
 	// Estimate tokens as chars / 4
 	totalTokens := totalChars / 4
 	if totalTokens == 0 && totalChars > 0 {
@@ -36,6 +41,29 @@ func (h *Handler) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	writeJson(w, CountTokensResponse{
 		TotalTokens: totalTokens,
 	})
+}
+
+func countToolChars(tool *Tool) int {
+	total := 0
+
+	for _, fn := range tool.FunctionDeclarations {
+		total += len(fn.Name)
+		total += len(fn.Description)
+
+		if fn.Parameters != nil {
+			if data, err := json.Marshal(fn.Parameters); err == nil {
+				total += len(string(data))
+			}
+		}
+
+		if fn.ParametersJsonSchema != nil {
+			if data, err := json.Marshal(fn.ParametersJsonSchema); err == nil {
+				total += len(string(data))
+			}
+		}
+	}
+
+	return total
 }
 
 func countContentChars(content *Content) int {

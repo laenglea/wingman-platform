@@ -6,22 +6,7 @@ OpenAI-compatible endpoints. See [OpenAI API Reference](https://platform.openai.
 
 **Endpoints:** `GET /v1/models`, `GET /v1/models/{id}`
 
-List available models.
-
-## Responses
-
-**Endpoint:** `POST /v1/responses`
-
-| Parameter           | Type         | Description                                         |
-|---------------------|--------------|-----------------------------------------------------|
-| `model`             | String       | Model ID                                            |
-| `input`             | String/Array | Input text or conversation messages                 |
-| `stream`            | Boolean      | Enable streaming                                    |
-| `temperature`       | Float        | Sampling temperature                                |
-| `max_output_tokens` | Integer      | Maximum tokens to generate                          |
-| `tools`             | Array        | Available tools/functions                           |
-| `instructions`      | String       | System instructions                                 |
-| `reasoning`         | Object       | Reasoning configuration                             |
+List available models or get a specific model by ID.
 
 ## Chat Completions
 
@@ -32,21 +17,48 @@ List available models.
 | `model`                  | String       | Model ID                                            |
 | `messages`               | Array        | Conversation messages                               |
 | `stream`                 | Boolean      | Enable streaming                                    |
+| `stream_options`         | Object       | Streaming options (`include_usage`)                 |
 | `temperature`            | Float        | Sampling temperature                                |
 | `max_completion_tokens`  | Integer      | Maximum tokens to generate                          |
 | `stop`                   | String/Array | Stop sequences                                      |
 | `tools`                  | Array        | Available tools/functions                           |
+| `tool_choice`            | String/Object| Tool selection mode (auto, none, required)          |
+| `parallel_tool_calls`    | Boolean      | Enable parallel tool execution                      |
 | `response_format`        | Object       | Response format (text, json_object, json_schema)    |
-| `reasoning_effort`       | String       | Reasoning effort (low, medium, high)                |
+| `reasoning_effort`       | String       | Reasoning effort (none, minimal, low, medium, high, xhigh) |
+| `verbosity`              | String       | Output verbosity (low, medium, high)                |
+
+## Responses
+
+**Endpoint:** `POST /v1/responses`
+
+| Parameter              | Type         | Description                                         |
+|------------------------|--------------|-----------------------------------------------------|
+| `model`                | String       | Model ID                                            |
+| `input`                | String/Array | Input text or conversation messages                 |
+| `stream`               | Boolean      | Enable streaming                                    |
+| `temperature`          | Float        | Sampling temperature                                |
+| `max_output_tokens`    | Integer      | Maximum tokens to generate                          |
+| `tools`                | Array        | Available tools/functions                           |
+| `tool_choice`          | String/Object| Tool selection mode (auto, none, required)          |
+| `parallel_tool_calls`  | Boolean      | Enable parallel tool execution                      |
+| `instructions`         | String       | System instructions                                 |
+| `reasoning`            | Object       | Reasoning configuration (`effort`, `summary`)       |
+| `text`                 | Object       | Text format and verbosity configuration             |
+| `context_management`   | Array        | Context management (compaction with threshold)      |
+| `include`              | Array        | Include options (e.g. `reasoning.encrypted_content`)|
+| `truncation`           | String       | Truncation mode (auto, disabled)                    |
 
 ## Embeddings
 
 **Endpoint:** `POST /v1/embeddings`
 
-| Parameter   | Type         | Description       |
-|-------------|--------------|-------------------|
-| `model`     | String       | Model ID          |
-| `input`     | String/Array | Text(s) to embed  |
+| Parameter          | Type         | Description                     |
+|--------------------|------------- |---------------------------------|
+| `model`            | String       | Model ID                        |
+| `input`            | String/Array | Text(s) to embed                |
+| `encoding_format`  | String       | Encoding format (float, base64) |
+| `dimensions`       | Integer      | Output dimensions               |
 
 ## Audio Speech (TTS)
 
@@ -86,11 +98,12 @@ List available models.
 
 **Endpoint:** `POST /v1/images/edits`
 
-| Parameter   | Type   | Description         |
-|-------------|--------|---------------------|
-| `model`     | String | Model ID            |
-| `prompt`    | String | Edit instructions   |
-| `image`     | File   | Image to edit       |
+| Parameter          | Type   | Description         |
+|--------------------|--------|---------------------|
+| `model`            | String | Model ID            |
+| `prompt`           | String | Edit instructions   |
+| `image`            | File   | Image to edit       |
+| `response_format`  | String | url or b64_json     |
 
 ---
 
@@ -102,17 +115,34 @@ Anthropic-compatible endpoints. See [Anthropic API Reference](https://docs.anthr
 
 **Endpoint:** `POST /v1/messages`
 
-| Parameter        | Type         | Description                                    |
-|------------------|--------------|------------------------------------------------|
-| `model`          | String       | Model ID                                       |
-| `messages`       | Array        | Conversation messages                          |
-| `system`         | String/Array | System prompt                                  |
-| `max_tokens`     | Integer      | Maximum tokens to generate                     |
-| `stream`         | Boolean      | Enable streaming                               |
-| `temperature`    | Float        | Sampling temperature                           |
-| `stop_sequences` | Array        | Stop sequences                                 |
-| `tools`          | Array        | Available tools/functions                      |
-| `output_format`  | Object       | Structured output with JSON schema             |
+| Parameter             | Type         | Description                                    |
+|-----------------------|--------------|------------------------------------------------|
+| `model`               | String       | Model ID                                       |
+| `messages`            | Array        | Conversation messages                          |
+| `system`              | String/Array | System prompt                                  |
+| `max_tokens`          | Integer      | Maximum tokens to generate                     |
+| `stream`              | Boolean      | Enable streaming                               |
+| `temperature`         | Float        | Sampling temperature                           |
+| `top_p`               | Float        | Nucleus sampling                               |
+| `top_k`               | Integer      | Top-k sampling                                 |
+| `stop_sequences`      | Array        | Stop sequences                                 |
+| `tools`               | Array        | Available tools/functions                      |
+| `tool_choice`         | Object       | Tool selection (auto, any, tool, none)         |
+| `metadata`            | Object       | Request metadata (`user_id`)                   |
+| `output_format`       | Object       | Structured output with JSON schema             |
+| `thinking`            | Object       | Thinking configuration (type, budget_tokens)   |
+| `context_management`  | Object       | Context management with compaction edits       |
+
+## Count Tokens
+
+**Endpoint:** `POST /v1/messages/count_tokens`
+
+| Parameter   | Type         | Description           |
+|-------------|------------- |-----------------------|
+| `model`     | String       | Model ID              |
+| `messages`  | Array        | Conversation messages |
+| `system`    | String/Array | System prompt         |
+| `tools`     | Array        | Tool definitions      |
 
 ---
 
@@ -131,6 +161,7 @@ Gemini-compatible endpoints. See [Gemini API Reference](https://ai.google.dev/ap
 | `tools`              | Array  | Available tools/functions                    |
 | `toolConfig`         | Object | Tool configuration (mode: AUTO, ANY, NONE)   |
 | `generationConfig`   | Object | Generation parameters                        |
+| `safetySettings`     | Array  | Safety filter settings                       |
 
 **Generation Config:**
 
@@ -138,14 +169,30 @@ Gemini-compatible endpoints. See [Gemini API Reference](https://ai.google.dev/ap
 |----------------------|---------|---------------------------------------------|
 | `stopSequences`      | Array   | Stop sequences                              |
 | `temperature`        | Float   | Sampling temperature                        |
+| `topP`               | Float   | Nucleus sampling                            |
+| `topK`               | Integer | Top-k sampling                              |
 | `maxOutputTokens`    | Integer | Maximum tokens to generate                  |
+| `candidateCount`     | Integer | Number of candidates to generate            |
+| `responseMimeType`   | String  | Response MIME type                          |
 | `responseSchema`     | Object  | JSON schema for structured output           |
+| `responseJsonSchema` | Object  | JSON schema (alternative format)            |
+| `thinkingConfig`     | Object  | Thinking configuration (level, budget, includeThoughts) |
 
 ## Stream Generate Content
 
 **Endpoint:** `POST /v1beta/models/{model}:streamGenerateContent`
 
 Same parameters as Generate Content. Returns Server-Sent Events when `?alt=sse` query parameter is provided, otherwise returns a JSON array.
+
+## Count Tokens
+
+**Endpoint:** `POST /v1beta/models/{model}:countTokens`
+
+| Parameter            | Type   | Description                       |
+|----------------------|--------|-----------------------------------|
+| `contents`           | Array  | Conversation contents with parts  |
+| `systemInstruction`  | Object | System instruction content        |
+| `tools`              | Array  | Tool definitions                  |
 
 ---
 
@@ -318,3 +365,11 @@ Transcribe audio files to text.
 ```bash
 curl -X POST -F "file=@audio.mp3" http://localhost:8080/v1/transcribe
 ```
+
+## MCP Proxy
+
+Proxy requests to configured MCP (Model Context Protocol) servers.
+
+**Endpoint:** `POST /v1/mcp/{id}`, `POST /v1/mcp/{id}/*`
+
+Forwards requests to the MCP server identified by `{id}`.
