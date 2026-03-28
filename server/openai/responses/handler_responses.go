@@ -67,6 +67,16 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.Reasoning != nil && req.Reasoning.Summary != nil {
+		if summary, ok := (*req.Reasoning.Summary).(string); ok && summary != "" && summary != "disabled" {
+			if options.ReasoningOptions == nil {
+				options.ReasoningOptions = &provider.ReasoningOptions{}
+			}
+
+			options.ReasoningOptions.IncludeSummary = true
+		}
+	}
+
 	if req.Reasoning != nil && req.Reasoning.Effort != nil {
 		if options.ReasoningOptions == nil {
 			options.ReasoningOptions = &provider.ReasoningOptions{}
@@ -113,12 +123,12 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if req.Text.Verbosity != nil {
+		if req.Text.Verbosity != "" {
 			if options.OutputOptions == nil {
 				options.OutputOptions = &provider.OutputOptions{}
 			}
 
-			switch *req.Text.Verbosity {
+			switch req.Text.Verbosity {
 			case VerbosityLow:
 				options.OutputOptions.Verbosity = provider.VerbosityLow
 
@@ -172,13 +182,137 @@ func responseUsage(usage *provider.Usage) *Usage {
 	}
 
 	return &Usage{
-		InputTokens:  usage.InputTokens,
-		OutputTokens: usage.OutputTokens,
-		TotalTokens:  usage.InputTokens + usage.OutputTokens,
+		InputTokens:        usage.InputTokens,
+		InputTokensDetails: &InputTokensDetails{},
+
+		OutputTokens:        usage.OutputTokens,
+		OutputTokensDetails: &OutputTokensDetails{},
+
+		TotalTokens: usage.InputTokens + usage.OutputTokens,
 	}
 }
 
-func responseOutputs(message *provider.Message, messageID, status string) []ResponseOutput {
+// responseDefaults populates the OpenAI-compatible default fields on a Response.
+func responseDefaults(resp *Response, req ResponsesRequest) {
+	resp.Object = "response"
+	resp.Background = false
+	resp.Store = false
+	resp.ServiceTier = "default"
+
+	resp.ParallelToolCalls = true
+	if req.ParallelToolCalls != nil {
+		resp.ParallelToolCalls = *req.ParallelToolCalls
+	}
+
+	resp.Temperature = 1.0
+	if req.Temperature != nil {
+		resp.Temperature = *req.Temperature
+	}
+
+	resp.TopP = 0.98
+	resp.FrequencyPenalty = 0.0
+	resp.PresencePenalty = 0.0
+	resp.TopLogprobs = 0
+	resp.Truncation = "disabled"
+
+	if req.Instructions != "" {
+		resp.Instructions = &req.Instructions
+	}
+
+	resp.MaxOutputTokens = req.MaxOutputTokens
+
+	if req.Reasoning != nil {
+		resp.Reasoning = req.Reasoning
+	} else {
+		effort := ReasoningEffortNone
+		resp.Reasoning = &ReasoningConfig{
+			Effort: &effort,
+		}
+	}
+
+	if resp.Reasoning.Effort == nil {
+		effort := ReasoningEffortNone
+		resp.Reasoning.Effort = &effort
+	}
+
+	if req.Text != nil {
+		resp.Text = req.Text
+	} else {
+		resp.Text = &TextConfig{
+			Format: &TextFormat{Type: "text"},
+		}
+	}
+
+	if resp.Text.Verbosity == "" {
+		resp.Text.Verbosity = VerbosityMedium
+	}
+
+
+	if req.ToolChoice != nil {
+		// Echo tool_choice as a string when it's a simple mode (matching OpenAI behavior)
+		if len(req.ToolChoice.AllowedTools) == 0 && req.ToolChoice.Mode != "" {
+			resp.ToolChoice = string(req.ToolChoice.Mode)
+		} else {
+			resp.ToolChoice = req.ToolChoice
+		}
+	} else {
+		resp.ToolChoice = "auto"
+	}
+
+	if len(req.Tools) > 0 {
+		tools := make([]any, len(req.Tools))
+		for i, t := range req.Tools {
+			// OpenAI echoes tools with strict=true and additionalProperties=false
+			if t.Strict == nil {
+				strict := true
+				t.Strict = &strict
+			}
+
+			if t.Parameters != nil {
+				if _, ok := t.Parameters["additionalProperties"]; !ok {
+					t.Parameters["additionalProperties"] = false
+				}
+			}
+
+			tools[i] = t
+		}
+		resp.Tools = tools
+	} else {
+		resp.Tools = []any{}
+	}
+
+	if resp.Metadata == nil {
+		resp.Metadata = map[string]any{}
+	}
+
+	if resp.Output == nil {
+		resp.Output = []ResponseOutput{}
+	}
+}
+
+// reasoningRequested returns true if the request explicitly asks for reasoning output.
+func reasoningRequested(req ResponsesRequest) bool {
+	if req.Reasoning == nil {
+		return false
+	}
+
+	if req.Reasoning.Effort != nil && *req.Reasoning.Effort != ReasoningEffortNone {
+		return true
+	}
+
+	if req.Reasoning.Summary != nil {
+		return true
+	}
+
+	return false
+}
+
+type responseOutputOptions struct {
+	IncludeSummary   bool
+	IncludeReasoning bool
+}
+
+func responseOutputs(message *provider.Message, messageID, status string, opts responseOutputOptions) []ResponseOutput {
 	if message == nil {
 		return []ResponseOutput{}
 	}
@@ -186,9 +320,18 @@ func responseOutputs(message *provider.Message, messageID, status string) []Resp
 	output := []ResponseOutput{}
 
 	for _, content := range message.Content {
-		if content.Reasoning != nil && content.Reasoning.ID != "" {
+		if content.Reasoning != nil && !opts.IncludeReasoning {
+			continue
+		}
+
+		if content.Reasoning != nil && (content.Reasoning.ID != "" || content.Reasoning.Text != "" || content.Reasoning.Summary != "" || content.Reasoning.Signature != "") {
+			reasoningID := content.Reasoning.ID
+			if reasoningID == "" {
+				reasoningID = "rs_" + uuid.NewString()
+			}
+
 			reasoningItem := &ReasoningOutputItem{
-				ID: content.Reasoning.ID,
+				ID: reasoningID,
 
 				Type:   "reasoning",
 				Status: status,
@@ -199,17 +342,25 @@ func responseOutputs(message *provider.Message, messageID, status string) []Resp
 				EncryptedContent: content.Reasoning.Signature,
 			}
 
-			if content.Reasoning.Summary != "" {
+			reasoningText := content.Reasoning.Text
+			reasoningSummary := content.Reasoning.Summary
+
+			if opts.IncludeSummary && reasoningText != "" && reasoningSummary == "" {
+				reasoningSummary = reasoningText
+				reasoningText = ""
+			}
+
+			if reasoningSummary != "" {
 				reasoningItem.Summary = append(reasoningItem.Summary, ReasoningOutputSummary{
 					Type: "summary_text",
-					Text: content.Reasoning.Summary,
+					Text: reasoningSummary,
 				})
 			}
 
-			if content.Reasoning.Text != "" {
+			if reasoningText != "" {
 				reasoningItem.Content = append(reasoningItem.Content, ReasoningOutputContentPart{
 					Type: "reasoning_text",
-					Text: content.Reasoning.Text,
+					Text: reasoningText,
 				})
 			}
 
@@ -221,20 +372,6 @@ func responseOutputs(message *provider.Message, messageID, status string) []Resp
 		}
 	}
 
-	for _, content := range message.Content {
-		if content.Compaction != nil && content.Compaction.Signature != "" {
-			output = append(output, ResponseOutput{
-				Type: ResponseOutputTypeCompaction,
-				CompactionOutputItem: &CompactionOutputItem{
-					ID: content.Compaction.ID,
-
-					Type:             "compaction",
-					EncryptedContent: content.Compaction.Signature,
-				},
-			})
-		}
-	}
-
 	if text := message.Text(); text != "" {
 		output = append(output, ResponseOutput{
 			Type: ResponseOutputTypeMessage,
@@ -242,10 +379,13 @@ func responseOutputs(message *provider.Message, messageID, status string) []Resp
 				ID:     messageID,
 				Role:   MessageRoleAssistant,
 				Status: status,
+				Phase:  "final_answer",
 				Contents: []OutputContent{
 					{
-						Type: "output_text",
-						Text: text,
+						Type:        "output_text",
+						Text:        text,
+						Annotations: []any{},
+						Logprobs:    []any{},
 					},
 				},
 			},
@@ -264,6 +404,20 @@ func responseOutputs(message *provider.Message, messageID, status string) []Resp
 				Arguments: call.Arguments,
 			},
 		})
+	}
+
+	for _, content := range message.Content {
+		if content.Compaction != nil && content.Compaction.Signature != "" {
+			output = append(output, ResponseOutput{
+				Type: ResponseOutputTypeCompaction,
+				CompactionOutputItem: &CompactionOutputItem{
+					ID: content.Compaction.ID,
+
+					Type:             "compaction",
+					EncryptedContent: content.Compaction.Signature,
+				},
+			})
+		}
 	}
 
 	return output
@@ -288,16 +442,22 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 		return n
 	}
 
+	outputOpts := responseOutputOptions{
+		IncludeSummary:   options.ReasoningOptions != nil && options.ReasoningOptions.IncludeSummary,
+		IncludeReasoning: reasoningRequested(req),
+	}
+
 	// Create initial response template
 	createResponse := func(status string, output []ResponseOutput) *Response {
-		return &Response{
+		resp := &Response{
 			ID:        responseID,
-			Object:    "response",
 			CreatedAt: createdAt,
 			Status:    status,
 			Model:     req.Model,
 			Output:    output,
 		}
+		responseDefaults(resp, req)
+		return resp
 	}
 
 	// Create streaming accumulator with event handler
@@ -327,6 +487,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 					Type:    "message",
 					Status:  "in_progress",
 					Content: []OutputContent{},
+					Phase:   "final_answer",
 					Role:    MessageRoleAssistant,
 				},
 			})
@@ -339,8 +500,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				OutputIndex:    event.OutputIndex,
 				ContentIndex:   0,
 				Part: &OutputContent{
-					Type: "output_text",
-					Text: "",
+					Type:        "output_text",
+					Text:        "",
+					Annotations: []any{},
+					Logprobs:    []any{},
 				},
 			})
 
@@ -352,6 +515,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				OutputIndex:    event.OutputIndex,
 				ContentIndex:   0,
 				Delta:          event.Delta,
+				Logprobs:       []any{},
 			})
 
 		case StreamEventTextDone:
@@ -362,6 +526,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				OutputIndex:    event.OutputIndex,
 				ContentIndex:   0,
 				Text:           event.Text,
+				Logprobs:       []any{},
 			})
 
 		case StreamEventContentPartDone:
@@ -372,8 +537,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				OutputIndex:    event.OutputIndex,
 				ContentIndex:   0,
 				Part: &OutputContent{
-					Type: "output_text",
-					Text: event.Text,
+					Type:        "output_text",
+					Text:        event.Text,
+					Annotations: []any{},
+					Logprobs:    []any{},
 				},
 			})
 
@@ -637,25 +804,29 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 					Status: "completed",
 					Content: []OutputContent{
 						{
-							Type: "output_text",
-							Text: event.Text,
+							Type:        "output_text",
+							Text:        event.Text,
+							Annotations: []any{},
+							Logprobs:    []any{},
 						},
 					},
-					Role: MessageRoleAssistant,
+					Phase: "final_answer",
+					Role:  MessageRoleAssistant,
 				},
 			})
 
 		case StreamEventResponseCompleted:
+			now := time.Now().Unix()
 			response := &Response{
-				ID:        responseID,
-				Object:    "response",
-				CreatedAt: createdAt,
-				Status:    "completed",
-				Model:     responseModel(event.Completion, req.Model),
-				Output:    responseOutputs(event.Completion.Message, messageID, "completed"),
+				ID:          responseID,
+				CreatedAt:   createdAt,
+				CompletedAt: &now,
+				Status:      "completed",
+				Model:       responseModel(event.Completion, req.Model),
+				Output:      responseOutputs(event.Completion.Message, messageID, "completed", outputOpts),
+				Usage:       responseUsage(event.Completion.Usage),
 			}
-
-			response.Usage = responseUsage(event.Completion.Usage)
+			responseDefaults(response, req)
 
 			return writeEvent(w, "response.completed", ResponseCompletedEvent{
 				Type:           "response.completed",
@@ -666,14 +837,13 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 		case StreamEventResponseIncomplete:
 			response := &Response{
 				ID:        responseID,
-				Object:    "response",
 				CreatedAt: createdAt,
 				Status:    "incomplete",
 				Model:     responseModel(event.Completion, req.Model),
-				Output:    responseOutputs(event.Completion.Message, messageID, "incomplete"),
+				Output:    responseOutputs(event.Completion.Message, messageID, "incomplete", outputOpts),
+				Usage:     responseUsage(event.Completion.Usage),
 			}
-
-			response.Usage = responseUsage(event.Completion.Usage)
+			responseDefaults(response, req)
 
 			return writeEvent(w, "response.incomplete", ResponseIncompleteEvent{
 				Type:           "response.incomplete",
@@ -682,26 +852,31 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventResponseFailed:
+			failResp := &Response{
+				ID:        responseID,
+				CreatedAt: createdAt,
+				Status:    "failed",
+				Model:     req.Model,
+				Output:    []ResponseOutput{},
+				Error: &ResponseError{
+					Type:    "server_error",
+					Message: event.Error.Error(),
+				},
+			}
+			responseDefaults(failResp, req)
+
 			return writeEvent(w, "response.failed", ResponseFailedEvent{
 				Type:           "response.failed",
 				SequenceNumber: nextSeq(),
-				Response: &Response{
-					ID:        responseID,
-					Object:    "response",
-					CreatedAt: createdAt,
-					Status:    "failed",
-					Model:     req.Model,
-					Output:    []ResponseOutput{},
-					Error: &ResponseError{
-						Type:    "server_error",
-						Message: event.Error.Error(),
-					},
-				},
+				Response:       failResp,
 			})
 		}
 
 		return nil
 	})
+
+	accumulator.ReasoningAsSummary = outputOpts.IncludeSummary
+	accumulator.SuppressReasoning = !outputOpts.IncludeReasoning
 
 	failed := false
 
@@ -751,23 +926,25 @@ func (h *Handler) handleResponsesComplete(w http.ResponseWriter, r *http.Request
 		responseID = "resp_" + uuid.NewString()
 	}
 
+	now := time.Now().Unix()
+
 	result := Response{
-		Object: "response",
-		Status: responseStatus(completion.Status),
-
-		ID: responseID,
-
-		Model:     completion.Model,
-		CreatedAt: time.Now().Unix(),
-
-		Output: responseOutputs(completion.Message, "msg_"+uuid.NewString(), responseStatus(completion.Status)),
+		ID:        responseID,
+		CreatedAt: now,
+		Status:    responseStatus(completion.Status),
+		Model:     responseModel(completion, req.Model),
+		Output: responseOutputs(completion.Message, "msg_"+uuid.NewString(), responseStatus(completion.Status), responseOutputOptions{
+			IncludeSummary:   options.ReasoningOptions != nil && options.ReasoningOptions.IncludeSummary,
+			IncludeReasoning: reasoningRequested(req),
+		}),
+		Usage:     responseUsage(completion.Usage),
 	}
 
-	if result.Model == "" {
-		result.Model = req.Model
+	if result.Status == "completed" {
+		result.CompletedAt = &now
 	}
 
-	result.Usage = responseUsage(completion.Usage)
+	responseDefaults(&result, req)
 
 	writeJson(w, result)
 }
