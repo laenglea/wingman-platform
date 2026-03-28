@@ -48,7 +48,7 @@ func (m *mockCompleter) Complete(ctx context.Context, messages []provider.Messag
 
 func TestNewCompleter(t *testing.T) {
 	t.Run("requires at least one completer", func(t *testing.T) {
-		_, err := NewCompleter()
+		_, err := NewCompleter(nil)
 		if err == nil {
 			t.Error("expected error for empty completers")
 		}
@@ -56,7 +56,7 @@ func TestNewCompleter(t *testing.T) {
 
 	t.Run("creates completer with providers", func(t *testing.T) {
 		mock := &mockCompleter{response: "hello"}
-		c, err := NewCompleter(mock)
+		c, err := NewCompleter([]provider.Completer{mock})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -69,7 +69,7 @@ func TestNewCompleter(t *testing.T) {
 func TestComplete(t *testing.T) {
 	t.Run("routes to available provider", func(t *testing.T) {
 		mock := &mockCompleter{response: "hello"}
-		c, _ := NewCompleter(mock)
+		c, _ := NewCompleter([]provider.Completer{mock})
 
 		ctx := context.Background()
 		messages := []provider.Message{provider.UserMessage("test")}
@@ -93,7 +93,7 @@ func TestComplete(t *testing.T) {
 
 	t.Run("records failure on error", func(t *testing.T) {
 		mock := &mockCompleter{err: errors.New("provider error")}
-		c, _ := NewCompleter(mock)
+		c, _ := NewCompleter([]provider.Completer{mock})
 		comp := c.(*Completer)
 
 		ctx := context.Background()
@@ -116,7 +116,7 @@ func TestComplete(t *testing.T) {
 
 	t.Run("opens circuit after threshold failures", func(t *testing.T) {
 		mock := &mockCompleter{err: errors.New("provider error")}
-		c, _ := NewCompleter(mock)
+		c, _ := NewCompleter([]provider.Completer{mock})
 		comp := c.(*Completer)
 
 		ctx := context.Background()
@@ -140,7 +140,7 @@ func TestProviderSelection(t *testing.T) {
 		slow := &mockCompleter{response: "slow", delay: 100 * time.Millisecond}
 		fast := &mockCompleter{response: "fast", delay: 10 * time.Millisecond}
 
-		c, _ := NewCompleter(slow, fast)
+		c, _ := NewCompleter([]provider.Completer{slow, fast})
 
 		ctx := context.Background()
 		messages := []provider.Message{provider.UserMessage("test")}
@@ -175,7 +175,7 @@ func TestProviderSelection(t *testing.T) {
 		failing := &mockCompleter{err: errors.New("error")}
 		healthy := &mockCompleter{response: "ok"}
 
-		c, _ := NewCompleter(failing, healthy)
+		c, _ := NewCompleter([]provider.Completer{failing, healthy})
 
 		ctx := context.Background()
 		messages := []provider.Message{provider.UserMessage("test")}
@@ -207,7 +207,7 @@ func TestProviderSelection(t *testing.T) {
 
 	t.Run("returns error when all providers unavailable", func(t *testing.T) {
 		failing := &mockCompleter{err: errors.New("error")}
-		c, _ := NewCompleter(failing)
+		c, _ := NewCompleter([]provider.Completer{failing})
 		comp := c.(*Completer)
 
 		ctx := context.Background()
@@ -240,7 +240,7 @@ func TestInflightTracking(t *testing.T) {
 		// Create a provider with some delay to observe inflight behavior
 		mock := &mockCompleter{response: "ok", delay: 10 * time.Millisecond}
 
-		c, _ := NewCompleter(mock)
+		c, _ := NewCompleter([]provider.Completer{mock})
 		comp := c.(*Completer)
 
 		ctx := context.Background()
@@ -276,7 +276,7 @@ func TestInflightTracking(t *testing.T) {
 		mock1 := &mockCompleter{response: "one", delay: 5 * time.Millisecond}
 		mock2 := &mockCompleter{response: "two", delay: 5 * time.Millisecond}
 
-		c, _ := NewCompleter(mock1, mock2)
+		c, _ := NewCompleter([]provider.Completer{mock1, mock2})
 		comp := c.(*Completer)
 
 		ctx := context.Background()
@@ -318,7 +318,7 @@ func TestInflightTracking(t *testing.T) {
 func TestCircuitRecovery(t *testing.T) {
 	t.Run("recovers circuit after timeout", func(t *testing.T) {
 		mock := &mockCompleter{err: errors.New("error")}
-		c, _ := NewCompleter(mock)
+		c, _ := NewCompleter([]provider.Completer{mock})
 		comp := c.(*Completer)
 
 		// Use short recovery timeout for test
