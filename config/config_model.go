@@ -105,6 +105,7 @@ func DetectModelType(id string) ModelType {
 		"magistral",
 		"mistral",
 		"mixtral",
+		"nemotron",
 		"nova",
 		"o1",
 		"o3",
@@ -150,6 +151,7 @@ func DetectModelType(id string) ModelType {
 		"transcribe",
 		"voxtral",
 		"whisper",
+		"stt",
 	}
 
 	for _, val := range synthesizers {

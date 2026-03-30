@@ -10,9 +10,6 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider/custom"
 	"github.com/adrianliechti/wingman/pkg/provider/google"
 	"github.com/adrianliechti/wingman/pkg/provider/huggingface"
-	"github.com/adrianliechti/wingman/pkg/provider/llama"
-	"github.com/adrianliechti/wingman/pkg/provider/mistral"
-	"github.com/adrianliechti/wingman/pkg/provider/ollama"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
 )
 
@@ -61,13 +58,26 @@ func createCompleter(cfg providerConfig, model modelContext) (provider.Completer
 		return huggingfaceCompleter(cfg, model)
 
 	case "llama":
-		return llamaCompleter(cfg, model)
+		cfg.URL = normalizeURL(cfg.URL, "/v1")
+		return openaiCompleter(cfg, model, true)
 
 	case "mistral":
-		return mistralCompleter(cfg, model)
+		if cfg.URL == "" {
+			cfg.URL = "https://api.mistral.ai/v1/"
+		}
+
+		return openaiCompleter(cfg, model, true)
 
 	case "ollama":
-		return ollamaCompleter(cfg, model)
+		if cfg.URL == "" {
+			cfg.URL = "http://localhost:11434"
+		}
+
+		cfg.URL = normalizeURL(cfg.URL, "/v1")
+		return openaiCompleter(cfg, model, true)
+
+	case "nim", "nvidia":
+		return openaiCompleter(cfg, model, true)
 
 	case "openai":
 		return openaiCompleter(cfg, model, false)
@@ -133,40 +143,6 @@ func huggingfaceCompleter(cfg providerConfig, model modelContext) (provider.Comp
 	}
 
 	return huggingface.NewCompleter(cfg.URL, model.ID, options...)
-}
-
-func llamaCompleter(cfg providerConfig, model modelContext) (provider.Completer, error) {
-	var options []llama.Option
-
-	if model.Client != nil {
-		options = append(options, llama.WithClient(model.Client))
-	}
-
-	return llama.NewCompleter(model.ID, cfg.URL, options...)
-}
-
-func mistralCompleter(cfg providerConfig, model modelContext) (provider.Completer, error) {
-	var options []mistral.Option
-
-	if cfg.Token != "" {
-		options = append(options, mistral.WithToken(cfg.Token))
-	}
-
-	if model.Client != nil {
-		options = append(options, mistral.WithClient(model.Client))
-	}
-
-	return mistral.NewCompleter(model.ID, options...)
-}
-
-func ollamaCompleter(cfg providerConfig, model modelContext) (provider.Completer, error) {
-	var options []ollama.Option
-
-	if model.Client != nil {
-		options = append(options, ollama.WithClient(model.Client))
-	}
-
-	return ollama.NewCompleter(cfg.URL, model.ID, options...)
 }
 
 func openaiCompleter(cfg providerConfig, model modelContext, useLegacy bool) (provider.Completer, error) {

@@ -67,10 +67,7 @@ func (cfg *Config) registerRouters(f *configFile) error {
 		}
 
 		if completer, ok := router.(provider.Completer); ok {
-			if _, ok := completer.(otel.Completer); !ok {
-				completer = otel.NewCompleter(config.Type, id, completer)
-			}
-
+			completer = otel.NewCompleterSpan("router "+id, completer)
 			cfg.RegisterCompleter(id, completer)
 		}
 	}
