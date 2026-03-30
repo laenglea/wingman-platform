@@ -2,17 +2,19 @@ package config
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/limiter"
 	"github.com/adrianliechti/wingman/pkg/otel"
-
+	"github.com/adrianliechti/wingman/pkg/provider"
 	reranker "github.com/adrianliechti/wingman/pkg/provider/adapter/reranker"
-	summarizer "github.com/adrianliechti/wingman/pkg/summarizer/adapter"
 
 	"gopkg.in/yaml.v3"
 )
 
 func (cfg *Config) registerProviders(f *configFile) error {
+	var firstReranker provider.Reranker
+
 	for _, p := range f.Providers {
 		models := map[string]modelConfig{}
 
@@ -99,7 +101,6 @@ func (cfg *Config) registerProviders(f *configFile) error {
 				}
 
 				cfg.RegisterCompleter(id, completer)
-				cfg.RegisterSummarizer(id, summarizer.FromCompleter(completer))
 
 			case ModelTypeEmbedder:
 				embedder, err := createEmbedder(p, context)
@@ -135,6 +136,10 @@ func (cfg *Config) registerProviders(f *configFile) error {
 				}
 
 				cfg.RegisterReranker(id, reranker)
+
+				if firstReranker == nil {
+					firstReranker = reranker
+				}
 
 			case ModelTypeRenderer:
 				renderer, err := createRenderer(p, context)
@@ -193,6 +198,10 @@ func (cfg *Config) registerProviders(f *configFile) error {
 		}
 	}
 
+	if firstReranker != nil {
+		cfg.reranker[""] = firstReranker
+	}
+
 	return nil
 }
 
@@ -202,8 +211,17 @@ type providerConfig struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token"`
 
-	Limit *int         `yaml:"limit"`
-	Proxy *proxyConfig `yaml:"proxy"`
+	Vars  map[string]string `yaml:"vars"`
+	Proxy *proxyConfig      `yaml:"proxy"`
+
+	Limit *int `yaml:"limit"`
 
 	Models yaml.Node `yaml:"models"`
+}
+
+func normalizeURL(url string, suffix string) string {
+	url = strings.TrimRight(url, "/")
+	url = strings.TrimSuffix(url, suffix)
+
+	return url + suffix
 }
