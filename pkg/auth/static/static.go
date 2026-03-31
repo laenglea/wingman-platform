@@ -48,7 +48,13 @@ func (p *Provider) Authenticate(ctx context.Context, r *http.Request) (context.C
 		return ctx, errors.New("invalid token")
 	}
 
-	ctx = context.WithValue(ctx, auth.UserContextKey, token)
+	if user := strings.TrimSpace(r.Header.Get("X-Forwarded-User")); user != "" {
+		ctx = context.WithValue(ctx, auth.UserContextKey, user)
+	}
+
+	if email := strings.TrimSpace(r.Header.Get("X-Forwarded-Email")); email != "" {
+		ctx = context.WithValue(ctx, auth.EmailContextKey, email)
+	}
 
 	return ctx, nil
 }
