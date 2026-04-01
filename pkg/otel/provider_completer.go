@@ -111,6 +111,30 @@ func (p *observableCompleter) Complete(ctx context.Context, messages []provider.
 						}, EndUserAttrs(ctx))...,
 					)
 				}
+
+				if lastResult.Usage.CacheCreationInputTokens > 0 {
+					p.tokenUsageMetric.Record(ctx, int64(lastResult.Usage.CacheCreationInputTokens),
+						genaiconv.OperationNameChat,
+						providerName,
+						TokenTypeCacheCreation,
+						KeyValues([]KeyValue{
+							p.tokenUsageMetric.AttrRequestModel(p.model),
+							p.tokenUsageMetric.AttrResponseModel(providerModel),
+						}, EndUserAttrs(ctx))...,
+					)
+				}
+
+				if lastResult.Usage.CacheReadInputTokens > 0 {
+					p.tokenUsageMetric.Record(ctx, int64(lastResult.Usage.CacheReadInputTokens),
+						genaiconv.OperationNameChat,
+						providerName,
+						TokenTypeCacheRead,
+						KeyValues([]KeyValue{
+							p.tokenUsageMetric.AttrRequestModel(p.model),
+							p.tokenUsageMetric.AttrResponseModel(providerModel),
+						}, EndUserAttrs(ctx))...,
+					)
+				}
 			}
 		}
 	}

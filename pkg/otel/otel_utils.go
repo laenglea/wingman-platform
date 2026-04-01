@@ -7,6 +7,14 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/semconv/v1.40.0/genaiconv"
+)
+
+// Cache token type attributes following the GenAI semantic conventions:
+// gen_ai.usage.cache_creation.input_tokens and gen_ai.usage.cache_read.input_tokens
+var (
+	TokenTypeCacheCreation genaiconv.TokenTypeAttr = "cache_creation"
+	TokenTypeCacheRead     genaiconv.TokenTypeAttr = "cache_read"
 )
 
 type KeyValue = attribute.KeyValue
