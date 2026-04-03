@@ -10,6 +10,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/scraper"
 	"github.com/adrianliechti/wingman/pkg/scraper/custom"
 	"github.com/adrianliechti/wingman/pkg/scraper/exa"
+	"github.com/adrianliechti/wingman/pkg/scraper/fetch"
 	"github.com/adrianliechti/wingman/pkg/scraper/jina"
 	"github.com/adrianliechti/wingman/pkg/scraper/tavily"
 	"golang.org/x/time/rate"
@@ -107,6 +108,9 @@ func (cfg *Config) registerScrapers(f *configFile) error {
 func createScraper(cfg scraperConfig, context scraperContext) (scraper.Provider, error) {
 	switch strings.ToLower(cfg.Type) {
 
+	case "fetch":
+		return fetchScraper(cfg, context)
+
 	case "exa":
 		return exaScraper(cfg, context)
 
@@ -162,4 +166,14 @@ func customScraper(cfg scraperConfig, context scraperContext) (scraper.Provider,
 	var options []custom.Option
 
 	return custom.New(cfg.URL, options...)
+}
+
+func fetchScraper(cfg scraperConfig, context scraperContext) (scraper.Provider, error) {
+	var options []fetch.Option
+
+	if context.Client != nil {
+		options = append(options, fetch.WithClient(context.Client))
+	}
+
+	return fetch.New(options...)
 }
