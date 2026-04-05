@@ -29,7 +29,7 @@ func NewSynthesizer(url, model string, options ...Option) (*Synthesizer, error) 
 
 	return &Synthesizer{
 		Config: cfg,
-		speech: openai.NewAudioSpeechService(cfg.HackOldAzure()...),
+		speech: openai.NewAudioSpeechService(cfg.AzureOptions()...),
 	}, nil
 }
 
@@ -73,11 +73,17 @@ func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *p
 		return nil, err
 	}
 
+	contentType := "audio/mpeg"
+
+	if ct := result.Header.Get("Content-Type"); ct != "" {
+		contentType = ct
+	}
+
 	return &provider.Synthesis{
 		ID:    uuid.NewString(),
 		Model: s.model,
 
 		Content:     data,
-		ContentType: "audio/mpeg",
+		ContentType: contentType,
 	}, nil
 }

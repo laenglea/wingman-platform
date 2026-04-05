@@ -11,6 +11,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider/google"
 	"github.com/adrianliechti/wingman/pkg/provider/huggingface"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
+	"github.com/adrianliechti/wingman/pkg/provider/xai"
 )
 
 func (cfg *Config) RegisterCompleter(id string, p provider.Completer) {
@@ -85,6 +86,9 @@ func createCompleter(cfg providerConfig, model modelContext) (provider.Completer
 	case "openai-compatible":
 		return openaiCompleter(cfg, model, true)
 
+	case "xai":
+		return xaiCompleter(cfg, model)
+
 	case "custom":
 		return customCompleter(cfg, model)
 
@@ -102,6 +106,10 @@ func anthropicCompleter(cfg providerConfig, model modelContext) (provider.Comple
 
 	if model.Client != nil {
 		options = append(options, anthropic.WithClient(model.Client))
+	}
+
+	if model.MaxRetries != nil {
+		options = append(options, anthropic.WithMaxRetries(*model.MaxRetries))
 	}
 
 	return anthropic.NewCompleter(cfg.URL, model.ID, options...)
@@ -156,11 +164,29 @@ func openaiCompleter(cfg providerConfig, model modelContext, useLegacy bool) (pr
 		options = append(options, openai.WithClient(model.Client))
 	}
 
+	if model.MaxRetries != nil {
+		options = append(options, openai.WithMaxRetries(*model.MaxRetries))
+	}
+
 	if useLegacy {
 		return openai.NewCompleter(cfg.URL, model.ID, options...)
 	}
 
 	return openai.NewResponder(cfg.URL, model.ID, options...)
+}
+
+func xaiCompleter(cfg providerConfig, model modelContext) (provider.Completer, error) {
+	var options []xai.Option
+
+	if cfg.Token != "" {
+		options = append(options, xai.WithToken(cfg.Token))
+	}
+
+	if model.Client != nil {
+		options = append(options, xai.WithClient(model.Client))
+	}
+
+	return xai.NewCompleter(model.ID, options...)
 }
 
 func customCompleter(cfg providerConfig, model modelContext) (provider.Completer, error) {

@@ -229,9 +229,7 @@ LOOP:
 
 		name := uuid.New().String()
 
-		if ext, _ := mime.ExtensionsByType(image.ContentType); len(ext) > 0 {
-			name += ext[0]
-		}
+		name += extByContentType(image.ContentType, ".png")
 
 		os.WriteFile(name, image.Content, 0600)
 		fmt.Println("Saved: " + name)
@@ -269,11 +267,7 @@ LOOP:
 
 		name := uuid.New().String()
 
-		if ext, _ := mime.ExtensionsByType(synthesis.ContentType); len(ext) > 0 {
-			name += ext[0]
-		} else {
-			name += ".mp3"
-		}
+		name += extByContentType(synthesis.ContentType, ".mp3")
 
 		os.WriteFile(name, synthesis.Content, 0600)
 		fmt.Println("Saved: " + name)
@@ -281,4 +275,29 @@ LOOP:
 		output.WriteString("\n")
 		output.WriteString("\n")
 	}
+}
+
+var contentTypeExtMap = map[string]string{
+	"audio/mpeg": ".mp3",
+	"audio/mp3":  ".mp3",
+	"audio/wav":  ".wav",
+	"audio/pcm":  ".pcm",
+	"audio/opus": ".opus",
+	"audio/aac":  ".aac",
+	"audio/flac": ".flac",
+	"image/png":  ".png",
+	"image/jpeg": ".jpg",
+	"image/webp": ".webp",
+}
+
+func extByContentType(contentType, fallback string) string {
+	if ext, ok := contentTypeExtMap[contentType]; ok {
+		return ext
+	}
+
+	if ext, _ := mime.ExtensionsByType(contentType); len(ext) > 0 {
+		return ext[0]
+	}
+
+	return fallback
 }
