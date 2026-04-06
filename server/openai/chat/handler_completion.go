@@ -217,11 +217,18 @@ func (h *Handler) handleChatCompletionComplete(w http.ResponseWriter, r *http.Re
 }
 
 func (h *Handler) handleChatCompletionStream(w http.ResponseWriter, r *http.Request, req ChatCompletionRequest, completer provider.Completer, messages []provider.Message, options *provider.CompleteOptions) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
 	includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage != nil && *req.StreamOptions.IncludeUsage
+
+	headersSent := false
+
+	sendHeaders := func() {
+		if !headersSent {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			headersSent = true
+		}
+	}
 
 	// Create streaming accumulator with event handler
 	accumulator := NewStreamingAccumulator(req.Model, func(event StreamEvent) error {
@@ -256,15 +263,24 @@ func (h *Handler) handleChatCompletionStream(w http.ResponseWriter, r *http.Requ
 
 	for c, err := range completer.Complete(r.Context(), messages, options) {
 		if err != nil {
+			if !headersSent {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+
 			accumulator.Error(err)
 			return
 		}
+
+		sendHeaders()
 
 		if err := accumulator.Add(*c); err != nil {
 			accumulator.Error(err)
 			return
 		}
 	}
+
+	sendHeaders()
 
 	if err := accumulator.Complete(streamUsage(req)); err != nil {
 		accumulator.Error(err)

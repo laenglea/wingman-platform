@@ -181,12 +181,19 @@ func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request,
 }
 
 func (h *Handler) handleMessagesStream(w http.ResponseWriter, r *http.Request, req MessageRequest, completer provider.Completer, messages []provider.Message, options *provider.CompleteOptions) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
 	messageID := generateMessageID()
 	model := req.Model
+
+	headersSent := false
+
+	sendHeaders := func() {
+		if !headersSent {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			headersSent = true
+		}
+	}
 
 	// Create streaming accumulator with event handler
 	accumulator := NewStreamingAccumulator(messageID, model, func(event StreamEvent) error {
@@ -241,15 +248,24 @@ func (h *Handler) handleMessagesStream(w http.ResponseWriter, r *http.Request, r
 
 	for completion, err := range completer.Complete(r.Context(), messages, options) {
 		if err != nil {
+			if !headersSent {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+
 			accumulator.Error(err)
 			return
 		}
+
+		sendHeaders()
 
 		if err := accumulator.Add(*completion); err != nil {
 			accumulator.Error(err)
 			return
 		}
 	}
+
+	sendHeaders()
 
 	// Emit final events
 	if err := accumulator.Complete(); err != nil {

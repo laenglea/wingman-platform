@@ -81,14 +81,21 @@ func (h *Handler) handleStreamGenerateContent(w http.ResponseWriter, r *http.Req
 	// We support both SSE and JSON array formats for compatibility
 	useSSE := r.URL.Query().Get("alt") == "sse"
 
-	if useSSE {
-		w.Header().Set("Content-Type", "text/event-stream")
-	} else {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte("["))
+	headersSent := false
+
+	sendHeaders := func() {
+		if !headersSent {
+			if useSSE {
+				w.Header().Set("Content-Type", "text/event-stream")
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte("["))
+			}
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			headersSent = true
+		}
 	}
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
 
 	responseID := generateResponseID()
 	firstChunk := true
@@ -101,15 +108,24 @@ func (h *Handler) handleStreamGenerateContent(w http.ResponseWriter, r *http.Req
 
 	for completion, err := range completer.Complete(r.Context(), messages, options) {
 		if err != nil {
+			if !headersSent {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+
 			accumulator.Error(err)
 			return
 		}
+
+		sendHeaders()
 
 		if err := accumulator.Add(*completion); err != nil {
 			accumulator.Error(err)
 			return
 		}
 	}
+
+	sendHeaders()
 
 	// Emit final chunk with finish reason
 	if err := accumulator.Complete(); err != nil {
