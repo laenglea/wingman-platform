@@ -7,6 +7,7 @@ import (
 	"github.com/adrianliechti/wingman/server/openai/embeddings"
 	"github.com/adrianliechti/wingman/server/openai/image"
 	"github.com/adrianliechti/wingman/server/openai/models"
+	"github.com/adrianliechti/wingman/server/openai/realtime"
 	"github.com/adrianliechti/wingman/server/openai/responses"
 
 	"github.com/go-chi/chi/v5"
@@ -23,6 +24,8 @@ type Handler struct {
 
 	responses  *responses.Handler
 	embeddings *embeddings.Handler
+
+	realtime *realtime.Handler
 }
 
 func New(cfg *config.Config) *Handler {
@@ -37,6 +40,8 @@ func New(cfg *config.Config) *Handler {
 
 		responses:  responses.New(cfg),
 		embeddings: embeddings.New(cfg),
+
+		realtime: realtime.New(),
 	}
 }
 
@@ -49,4 +54,8 @@ func (h *Handler) Attach(r chi.Router) {
 
 	h.responses.Attach(r)
 	h.embeddings.Attach(r)
+
+	if h.realtime != nil {
+		h.realtime.Attach(r)
+	}
 }
