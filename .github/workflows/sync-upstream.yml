@@ -21,7 +21,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Add upstream remote
-        run: git remote add upstream https://github.com/adrianliechti/wingman-platform.git
+        run: git remote add upstream https://github.com/adrianliechti/wingman.git
 
       - name: Fetch upstream
         run: git fetch upstream main
