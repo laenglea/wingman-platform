@@ -1,0 +1,55 @@
+name: Sync fork with upstream
+
+on:
+  schedule:
+    - cron: '30 2 * * *'   # täglich um 02:30 UTC (30 min vor dem Build)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/adrianliechti/wingman-platform.git
+
+      - name: Fetch upstream
+        run: git fetch upstream main
+
+      - name: Check for new commits
+        id: check
+        run: |
+          LOCAL=$(git rev-parse HEAD)
+          UPSTREAM=$(git rev-parse upstream/main)
+          echo "local=$LOCAL"
+          echo "upstream=$UPSTREAM"
+          if [ "$LOCAL" = "$UPSTREAM" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Merge upstream changes
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git merge upstream/main --no-edit
+
+      - name: Push to fork
+        if: steps.check.outputs.changed == 'true'
+        run: git push origin main
+
+      - name: No changes
+        if: steps.check.outputs.changed == 'false'
+        run: echo "Fork is already up-to-date — skipping push."
