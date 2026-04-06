@@ -271,8 +271,10 @@ func TestComplete_WithOptions(t *testing.T) {
 
 		// Verify options propagated
 		opts := completer.capturedOptions[0]
-		require.Equal(t, provider.EffortHigh, opts.Effort)
-		require.Equal(t, provider.VerbosityMedium, opts.Verbosity)
+		require.NotNil(t, opts.ReasoningOptions)
+		require.Equal(t, provider.EffortHigh, opts.ReasoningOptions.Effort)
+		require.NotNil(t, opts.OutputOptions)
+		require.Equal(t, provider.VerbosityMedium, opts.OutputOptions.Verbosity)
 		require.NotNil(t, opts.Temperature)
 		require.Equal(t, float32(0.8), *opts.Temperature)
 	})
@@ -293,9 +295,9 @@ func TestComplete_WithOptions(t *testing.T) {
 
 		callTemp := float32(0.5)
 		callOpts := &provider.CompleteOptions{
-			Effort:      provider.EffortHigh,
-			Verbosity:   provider.VerbosityHigh,
-			Temperature: &callTemp,
+			OutputOptions:    &provider.OutputOptions{Verbosity: provider.VerbosityHigh},
+			ReasoningOptions: &provider.ReasoningOptions{Effort: provider.EffortHigh},
+			Temperature:      &callTemp,
 		}
 
 		_, err = collectCompletions(chain.Complete(context.Background(), nil, callOpts))
@@ -303,8 +305,10 @@ func TestComplete_WithOptions(t *testing.T) {
 
 		// Call-time options should take precedence
 		opts := completer.capturedOptions[0]
-		require.Equal(t, provider.EffortHigh, opts.Effort)
-		require.Equal(t, provider.VerbosityHigh, opts.Verbosity)
+		require.NotNil(t, opts.OutputOptions)
+		require.NotNil(t, opts.ReasoningOptions)
+		require.Equal(t, provider.EffortHigh, opts.ReasoningOptions.Effort)
+		require.Equal(t, provider.VerbosityHigh, opts.OutputOptions.Verbosity)
 		require.Equal(t, float32(0.5), *opts.Temperature)
 	})
 

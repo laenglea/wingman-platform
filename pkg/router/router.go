@@ -132,20 +132,6 @@ func (s *ProviderStats) RecordFailure(failureThreshold int) {
 	}
 }
 
-// GetLastFailure returns the last failure time in a thread-safe manner
-func (s *ProviderStats) GetLastFailure() time.Time {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.lastFailure
-}
-
-// SetHalfOpen transitions the circuit to half-open state
-func (s *ProviderStats) SetHalfOpen() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.state = CircuitHalfOpen
-}
-
 // AddInflight increments the inflight counter and returns the new value
 func (s *ProviderStats) AddInflight(delta int64) int64 {
 	return s.inflight.Add(delta)

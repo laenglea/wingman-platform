@@ -3,7 +3,9 @@ package openai
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"iter"
 	"slices"
 
@@ -51,6 +53,11 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 
 		stream := r.responses.NewStreaming(ctx, *req)
 
+		// Maps item ID → call ID for function tool calls.
+		// ResponseFunctionCallArgumentsDeltaEvent uses item_id, but downstream
+		// consumers identify tool calls by call_id (used in function_call_output).
+		itemToCallID := make(map[string]string)
+
 		for stream.Next() {
 			data := stream.Current()
 
@@ -60,6 +67,8 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 			case responses.ResponseOutputItemAddedEvent:
 				switch item := event.Item.AsAny().(type) {
 				case responses.ResponseFunctionToolCall:
+					itemToCallID[item.ID] = item.CallID
+
 					delta := &provider.Completion{
 						ID:    data.Response.ID,
 						Model: data.Response.Model,
@@ -69,10 +78,50 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 
 							Content: []provider.Content{
 								provider.ToolCallContent(provider.ToolCall{
-									ID: item.CallID,
+									ID:   item.CallID,
+									Name: item.Name,
+								}),
+							},
+						},
+					}
 
-									Name:      item.Name,
-									Arguments: item.Arguments,
+					if !yield(delta, nil) {
+						return
+					}
+
+				case responses.ResponseApplyPatchToolCall:
+					delta := &provider.Completion{
+						ID:    data.Response.ID,
+						Model: data.Response.Model,
+
+						Message: &provider.Message{
+							Role: provider.MessageRoleAssistant,
+
+							Content: []provider.Content{
+								provider.ToolCallContent(provider.ToolCall{
+									ID:   item.CallID,
+									Name: "apply_patch",
+								}),
+							},
+						},
+					}
+
+					if !yield(delta, nil) {
+						return
+					}
+
+				case responses.ResponseComputerToolCall:
+					delta := &provider.Completion{
+						ID:    data.Response.ID,
+						Model: data.Response.Model,
+
+						Message: &provider.Message{
+							Role: provider.MessageRoleAssistant,
+
+							Content: []provider.Content{
+								provider.ToolCallContent(provider.ToolCall{
+									ID:   item.CallID,
+									Name: "computer",
 								}),
 							},
 						},
@@ -94,6 +143,26 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 
 						Content: []provider.Content{
 							provider.TextContent(event.Delta),
+						},
+					},
+				}
+
+				if !yield(delta, nil) {
+					return
+				}
+
+			case responses.ResponseRefusalDeltaEvent:
+				delta := &provider.Completion{
+					ID:    data.Response.ID,
+					Model: data.Response.Model,
+
+					Status: provider.CompletionStatusRefused,
+
+					Message: &provider.Message{
+						Role: provider.MessageRoleAssistant,
+
+						Content: []provider.Content{
+							provider.RefusalContent(event.Delta),
 						},
 					},
 				}
@@ -150,6 +219,10 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 			case responses.ResponseReasoningSummaryTextDoneEvent:
 			case responses.ResponseReasoningSummaryPartDoneEvent:
 			case responses.ResponseFunctionCallArgumentsDeltaEvent:
+				callID := itemToCallID[event.ItemID]
+				if callID == "" {
+					callID = event.ItemID
+				}
 				delta := &provider.Completion{
 					ID:    data.Response.ID,
 					Model: data.Response.Model,
@@ -159,6 +232,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 
 						Content: []provider.Content{
 							provider.ToolCallContent(provider.ToolCall{
+								ID:        callID,
 								Arguments: event.Delta,
 							}),
 						},
@@ -173,6 +247,58 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 			case responses.ResponseContentPartDoneEvent:
 			case responses.ResponseOutputItemDoneEvent:
 				switch item := event.Item.AsAny().(type) {
+				case responses.ResponseApplyPatchToolCall:
+					args, _ := json.Marshal(map[string]any{
+						"type": item.Operation.Type,
+						"path": item.Operation.Path,
+						"diff": item.Operation.Diff,
+					})
+
+					delta := &provider.Completion{
+						ID:    data.Response.ID,
+						Model: data.Response.Model,
+
+						Message: &provider.Message{
+							Role: provider.MessageRoleAssistant,
+
+							Content: []provider.Content{
+								provider.ToolCallContent(provider.ToolCall{
+									ID:        item.CallID,
+									Name:      "apply_patch",
+									Arguments: string(args),
+								}),
+							},
+						},
+					}
+
+					if !yield(delta, nil) {
+						return
+					}
+
+				case responses.ResponseComputerToolCall:
+					args, _ := json.Marshal(computerCallToArgs(item))
+
+					delta := &provider.Completion{
+						ID:    data.Response.ID,
+						Model: data.Response.Model,
+
+						Message: &provider.Message{
+							Role: provider.MessageRoleAssistant,
+
+							Content: []provider.Content{
+								provider.ToolCallContent(provider.ToolCall{
+									ID:        item.CallID,
+									Name:      "computer",
+									Arguments: string(args),
+								}),
+							},
+						},
+					}
+
+					if !yield(delta, nil) {
+						return
+					}
+
 				case responses.ResponseReasoningItem:
 					// Capture encrypted_content for conversation continuity
 					if item.EncryptedContent != "" {
@@ -185,6 +311,30 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 
 								Content: []provider.Content{
 									provider.ReasoningContent(provider.Reasoning{
+										ID:        item.ID,
+										Signature: item.EncryptedContent,
+									}),
+								},
+							},
+						}
+
+						if !yield(delta, nil) {
+							return
+						}
+					}
+
+				case responses.ResponseCompactionItem:
+					if item.EncryptedContent != "" {
+						delta := &provider.Completion{
+							ID:    data.Response.ID,
+							Model: data.Response.Model,
+
+							Message: &provider.Message{
+								Role: provider.MessageRoleAssistant,
+
+								Content: []provider.Content{
+									provider.CompactionContent(provider.Compaction{
+										ID:        item.ID,
 										Signature: item.EncryptedContent,
 									}),
 								},
@@ -198,11 +348,41 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 				}
 
 			case responses.ResponseCompletedEvent:
+				status := provider.CompletionStatusCompleted
+
+				if event.Response.Status == responses.ResponseStatusIncomplete {
+					status = provider.CompletionStatusIncomplete
+				}
+
 				delta := &provider.Completion{
 					ID:    data.Response.ID,
 					Model: data.Response.Model,
 
-					Usage: toResponseUsage(event.Response.Usage),
+					Status: status,
+					Usage:  toResponseUsage(event.Response.Usage),
+				}
+
+				if !yield(delta, nil) {
+					return
+				}
+
+			case responses.ResponseFailedEvent:
+				msg := "response failed"
+
+				if event.Response.Error.Message != "" {
+					msg = event.Response.Error.Message
+				}
+
+				yield(nil, errors.New(msg))
+				return
+
+			case responses.ResponseIncompleteEvent:
+				delta := &provider.Completion{
+					ID:    data.Response.ID,
+					Model: data.Response.Model,
+
+					Status: provider.CompletionStatusIncomplete,
+					Usage:  toResponseUsage(event.Response.Usage),
 				}
 
 				if !yield(delta, nil) {
@@ -210,7 +390,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 				}
 
 			default:
-				println("unknown event", data.Type)
+				// Tolerate unknown/vendor-extension events silently
 			}
 		}
 
@@ -222,8 +402,10 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 }
 
 func (r *Responder) convertResponsesRequest(messages []provider.Message, options *provider.CompleteOptions) (*responses.ResponseNewParams, error) {
-	if slices.Contains(ReasoningModels, r.model) {
-		options.Temperature = nil
+	if slices.Contains(ReasoningModels, r.model) && options.Temperature != nil {
+		optsCopy := *options
+		optsCopy.Temperature = nil
+		options = &optsCopy
 	}
 
 	input, err := r.convertResponsesInput(messages)
@@ -238,19 +420,17 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		return nil, err
 	}
 
-	// tools = append(tools, responses.ToolUnionParam{
-	// 	OfCodeInterpreter: &responses.ToolCodeInterpreterParam{
-	// 		Container: responses.ToolCodeInterpreterContainerUnionParam{
-	// 			OfCodeInterpreterContainerAuto: &responses.ToolCodeInterpreterContainerCodeInterpreterContainerAutoParam{},
-	// 		},
-	// 	},
-	// })
+	if options.TextEditorTool != nil {
+		tools = append(tools, responses.ToolUnionParam{
+			OfApplyPatch: &responses.ApplyPatchToolParam{},
+		})
+	}
 
-	// tools = append(tools, responses.ToolUnionParam{
-	// 	OfWebSearch: &responses.WebSearchToolParam{
-	// 		Type: responses.WebSearchToolTypeWebSearch,
-	// 	},
-	// })
+	if options.ComputerUseTool != nil {
+		tools = append(tools, responses.ToolUnionParam{
+			OfComputer: &responses.ComputerToolParam{},
+		})
+	}
 
 	req := &responses.ResponseNewParams{
 		Model: r.model,
@@ -267,10 +447,27 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		req.Truncation = ""
 	}
 
-	if options.Effort != "" && slices.Contains(ReasoningModels, r.model) {
-		req.Reasoning.Summary = responses.ReasoningSummaryAuto
+	if options.ToolOptions != nil {
+		req.ToolChoice = convertResponsesToolChoice(options.ToolOptions)
 
-		switch options.Effort {
+		if options.ToolOptions.DisableParallelToolCalls {
+			req.ParallelToolCalls = openai.Bool(false)
+		}
+	}
+
+	if options.ReasoningOptions != nil && slices.Contains(ReasoningModels, r.model) {
+		if options.ReasoningOptions.IncludeSignature {
+			req.Include = append(req.Include, responses.ResponseIncludableReasoningEncryptedContent)
+		}
+
+		if options.ReasoningOptions.IncludeSummary {
+			req.Reasoning.Summary = responses.ReasoningSummaryAuto
+		}
+
+		switch options.ReasoningOptions.Effort {
+		case provider.EffortNone:
+			req.Reasoning.Effort = responses.ReasoningEffortNone
+
 		case provider.EffortMinimal:
 			req.Reasoning.Effort = responses.ReasoningEffortMinimal
 
@@ -282,13 +479,23 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 
 		case provider.EffortHigh:
 			req.Reasoning.Effort = responses.ReasoningEffortHigh
-		}
 
-		req.Include = append(req.Include, responses.ResponseIncludableReasoningEncryptedContent)
+		case provider.EffortMax:
+			req.Reasoning.Effort = responses.ReasoningEffortXhigh
+		}
 	}
 
-	if options.Verbosity != "" {
-		switch options.Verbosity {
+	if options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 {
+		req.ContextManagement = []responses.ResponseNewParamsContextManagement{
+			{
+				Type:             "compaction",
+				CompactThreshold: openai.Int(int64(options.CompactionOptions.Threshold)),
+			},
+		}
+	}
+
+	if options.OutputOptions != nil {
+		switch options.OutputOptions.Verbosity {
 		case provider.VerbosityLow:
 			req.Text.Verbosity = responses.ResponseTextConfigVerbosityLow
 
@@ -306,9 +513,15 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 				OfJSONObject: &responses.ResponseFormatJSONObjectParam{},
 			}
 		} else {
+			schemaData := options.Schema.Schema
+
+			if options.Schema.Strict != nil && *options.Schema.Strict {
+				schemaData = ensureAdditionalPropertiesFalse(schemaData)
+			}
+
 			schema := &responses.ResponseFormatTextJSONSchemaConfigParam{
 				Name:   options.Schema.Name,
-				Schema: options.Schema.Schema,
+				Schema: schemaData,
 			}
 
 			if options.Schema.Strict != nil {
@@ -411,7 +624,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 						})
 
 					default:
-						return responses.ResponseNewParamsInputUnion{}, errors.New("unsupported content type")
+						return responses.ResponseNewParamsInputUnion{}, fmt.Errorf("unsupported content type: %s", c.File.ContentType)
 					}
 				}
 
@@ -437,6 +650,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 			}
 
 		case provider.MessageRoleAssistant:
+			calls := []responses.ResponseInputItemUnionParam{}
 			message := &responses.ResponseOutputMessageParam{}
 
 			for _, c := range m.Content {
@@ -449,6 +663,10 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 				}
 
 				if c.Reasoning != nil {
+					if c.Reasoning.ID == "" {
+						continue
+					}
+
 					reasoning := &responses.ResponseReasoningItemParam{
 						ID: c.Reasoning.ID,
 					}
@@ -482,6 +700,20 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 					})
 				}
 
+				if c.Compaction != nil && c.Compaction.Signature != "" {
+					compaction := &responses.ResponseCompactionItemParam{
+						EncryptedContent: c.Compaction.Signature,
+					}
+
+					if c.Compaction.ID != "" {
+						compaction.ID = openai.String(c.Compaction.ID)
+					}
+
+					result = append(result, responses.ResponseInputItemUnionParam{
+						OfCompaction: compaction,
+					})
+				}
+
 				if c.ToolCall != nil {
 					call := &responses.ResponseFunctionToolCallParam{
 						CallID: c.ToolCall.ID,
@@ -490,7 +722,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 						Arguments: c.ToolCall.Arguments,
 					}
 
-					result = append(result, responses.ResponseInputItemUnionParam{
+					calls = append(calls, responses.ResponseInputItemUnionParam{
 						OfFunctionCall: call,
 					})
 				}
@@ -500,6 +732,10 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 				result = append(result, responses.ResponseInputItemUnionParam{
 					OfOutputMessage: message,
 				})
+			}
+
+			if len(calls) > 0 {
+				result = append(result, calls...)
 			}
 		}
 	}
@@ -539,6 +775,54 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 	return result, nil
 }
 
+func computerCallToArgs(item responses.ResponseComputerToolCall) map[string]any {
+	result := map[string]any{
+		"call_id": item.CallID,
+	}
+
+	if len(item.Actions) > 0 {
+		var actions []map[string]any
+		for _, a := range item.Actions {
+			action := map[string]any{"type": a.Type}
+
+			switch v := a.AsAny().(type) {
+			case responses.ComputerActionClick:
+				action["x"] = v.X
+				action["y"] = v.Y
+				action["button"] = v.Button
+			case responses.ComputerActionDoubleClick:
+				action["x"] = v.X
+				action["y"] = v.Y
+			case responses.ComputerActionMove:
+				action["x"] = v.X
+				action["y"] = v.Y
+			case responses.ComputerActionType:
+				action["text"] = v.Text
+			case responses.ComputerActionKeypress:
+				action["keys"] = v.Keys
+			case responses.ComputerActionScroll:
+				action["x"] = v.X
+				action["y"] = v.Y
+				action["scroll_x"] = v.ScrollX
+				action["scroll_y"] = v.ScrollY
+			case responses.ComputerActionDrag:
+				if len(v.Path) > 0 {
+					var path []map[string]any
+					for _, p := range v.Path {
+						path = append(path, map[string]any{"x": p.X, "y": p.Y})
+					}
+					action["path"] = path
+				}
+			}
+
+			actions = append(actions, action)
+		}
+		result["actions"] = actions
+	}
+
+	return result
+}
+
 func toResponseUsage(usage responses.ResponseUsage) *provider.Usage {
 	if usage.InputTokens == 0 && usage.OutputTokens == 0 {
 		return nil
@@ -549,5 +833,38 @@ func toResponseUsage(usage responses.ResponseUsage) *provider.Usage {
 		OutputTokens: int(usage.OutputTokens),
 
 		CacheReadInputTokens: int(usage.InputTokensDetails.CachedTokens),
+	}
+}
+
+func convertResponsesToolChoice(opts *provider.ToolOptions) responses.ResponseNewParamsToolChoiceUnion {
+	if len(opts.Allowed) == 0 {
+		modes := map[provider.ToolChoice]responses.ToolChoiceOptions{
+			provider.ToolChoiceNone: responses.ToolChoiceOptionsNone,
+			provider.ToolChoiceAuto: responses.ToolChoiceOptionsAuto,
+			provider.ToolChoiceAny:  responses.ToolChoiceOptionsRequired,
+		}
+
+		return responses.ResponseNewParamsToolChoiceUnion{
+			OfToolChoiceMode: openai.Opt(modes[opts.Choice]),
+		}
+	}
+
+	var tools []map[string]any
+
+	for _, name := range opts.Allowed {
+		tools = append(tools, map[string]any{"type": "function", "name": name})
+	}
+
+	mode := responses.ToolChoiceAllowedModeRequired
+
+	if opts.Choice == provider.ToolChoiceAuto {
+		mode = responses.ToolChoiceAllowedModeAuto
+	}
+
+	return responses.ResponseNewParamsToolChoiceUnion{
+		OfAllowedTools: &responses.ToolChoiceAllowedParam{
+			Mode:  mode,
+			Tools: tools,
+		},
 	}
 }

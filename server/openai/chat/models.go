@@ -47,6 +47,9 @@ type ChatCompletionRequest struct {
 	Stop   any    `json:"stop,omitempty"`
 	Tools  []Tool `json:"tools,omitempty"`
 
+	ToolChoice        *ToolChoice `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool       `json:"parallel_tool_calls,omitempty"`
+
 	Temperature         *float32 `json:"temperature,omitempty"`
 	MaxCompletionTokens *int     `json:"max_completion_tokens,omitempty"`
 
@@ -67,18 +70,18 @@ type ChatCompletionRequest struct {
 
 	// top_p *float32
 
-	// tool_choice string: none, auto
-
 	// user string
 }
 
 type ReasoningEffort string
 
 var (
+	ReasoningEffortNone    ReasoningEffort = "none"
 	ReasoningEffortMinimal ReasoningEffort = "minimal"
 	ReasoningEffortLow     ReasoningEffort = "low"
 	ReasoningEffortMedium  ReasoningEffort = "medium"
 	ReasoningEffortHigh    ReasoningEffort = "high"
+	ReasoningEffortXHigh   ReasoningEffort = "xhigh"
 )
 
 type Verbosity string
@@ -119,7 +122,10 @@ type ChatCompletion struct {
 
 	Choices []ChatCompletionChoice `json:"choices"`
 
-	Usage *Usage `json:"usage"`
+	Usage *Usage `json:"usage,omitempty"`
+
+	ServiceTier       string  `json:"service_tier,omitempty"`
+	SystemFingerprint *string `json:"system_fingerprint"`
 }
 
 // https://platform.openai.com/docs/api-reference/chat/object
@@ -137,11 +143,13 @@ type ChatCompletionMessage struct {
 	Role MessageRole `json:"role,omitempty"`
 
 	Content *string `json:"content,omitempty"`
+	Refusal *string `json:"refusal,omitempty"`
 
 	Contents []MessageContent `json:"-"`
 
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
+	ToolCalls   []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID  string     `json:"tool_call_id,omitempty"`
+	Annotations []any      `json:"annotations,omitzero"`
 }
 
 type MessageContentType string
@@ -183,67 +191,144 @@ func (m *ChatCompletionMessage) MarshalJSON() ([]byte, error) {
 	}
 
 	if len(m.Contents) > 0 {
-		type2 := struct {
-			Role MessageRole `json:"role,omitempty"`
-
-			Content *string `json:"-"`
-
-			Contents []MessageContent `json:"content,omitempty"`
-
-			ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-			ToolCallID string     `json:"tool_call_id,omitempty"`
-		}(*m)
-
-		return json.Marshal(type2)
-	} else {
-		type1 := struct {
-			Role MessageRole `json:"role,omitempty"`
-
-			Content *string `json:"content,omitempty"`
-
-			Contents []MessageContent `json:"-"`
-
-			ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-			ToolCallID string     `json:"tool_call_id,omitempty"`
-		}(*m)
-
-		return json.Marshal(type1)
+		return json.Marshal(struct {
+			Role        MessageRole      `json:"role,omitempty"`
+			Contents    []MessageContent `json:"content,omitempty"`
+			Refusal     *string          `json:"refusal,omitzero"`
+			ToolCalls   []ToolCall       `json:"tool_calls,omitempty"`
+			ToolCallID  string           `json:"tool_call_id,omitempty"`
+			Annotations []any            `json:"annotations,omitzero"`
+		}{
+			Role:        m.Role,
+			Contents:    m.Contents,
+			Refusal:     m.Refusal,
+			ToolCalls:   m.ToolCalls,
+			ToolCallID:  m.ToolCallID,
+			Annotations: m.Annotations,
+		})
 	}
+
+	return json.Marshal(struct {
+		Role        MessageRole `json:"role,omitempty"`
+		Content     *string     `json:"content,omitempty"`
+		Refusal     *string     `json:"refusal"`
+		ToolCalls   []ToolCall  `json:"tool_calls,omitempty"`
+		ToolCallID  string      `json:"tool_call_id,omitempty"`
+		Annotations []any       `json:"annotations,omitzero"`
+	}{
+		Role:        m.Role,
+		Content:     m.Content,
+		Refusal:     m.Refusal,
+		ToolCalls:   m.ToolCalls,
+		ToolCallID:  m.ToolCallID,
+		Annotations: m.Annotations,
+	})
 }
 
 func (m *ChatCompletionMessage) UnmarshalJSON(data []byte) error {
-	type1 := struct {
-		Role MessageRole `json:"role,omitempty"`
+	// Try string content first
+	type stringContent struct {
+		Role        MessageRole `json:"role,omitempty"`
+		Content     *string     `json:"content"`
+		Refusal     *string     `json:"refusal,omitempty"`
+		ToolCalls   []ToolCall  `json:"tool_calls,omitempty"`
+		ToolCallID  string      `json:"tool_call_id,omitempty"`
+		Annotations []any       `json:"annotations,omitzero"`
+	}
 
-		Content *string `json:"content"`
-
-		Contents []MessageContent
-
-		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-		ToolCallID string     `json:"tool_call_id,omitempty"`
-	}{}
-
-	if err := json.Unmarshal(data, &type1); err == nil {
-		*m = ChatCompletionMessage(type1)
+	var sc stringContent
+	if err := json.Unmarshal(data, &sc); err == nil {
+		m.Role = sc.Role
+		m.Content = sc.Content
+		m.Refusal = sc.Refusal
+		m.ToolCalls = sc.ToolCalls
+		m.ToolCallID = sc.ToolCallID
+		m.Annotations = sc.Annotations
 		return nil
 	}
 
-	type2 := struct {
-		Role MessageRole `json:"role,omitempty"`
+	// Try array content
+	type arrayContent struct {
+		Role        MessageRole      `json:"role,omitempty"`
+		Contents    []MessageContent `json:"content"`
+		Refusal     *string          `json:"refusal,omitempty"`
+		ToolCalls   []ToolCall       `json:"tool_calls,omitempty"`
+		ToolCallID  string           `json:"tool_call_id,omitempty"`
+		Annotations []any            `json:"annotations,omitzero"`
+	}
 
-		Content *string
+	var ac arrayContent
+	if err := json.Unmarshal(data, &ac); err == nil {
+		m.Role = ac.Role
+		m.Contents = ac.Contents
+		m.Refusal = ac.Refusal
+		m.ToolCalls = ac.ToolCalls
+		m.ToolCallID = ac.ToolCallID
+		m.Annotations = ac.Annotations
+		return nil
+	}
 
-		Contents []MessageContent `json:"content"`
+	return nil
+}
 
-		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-		ToolCallID string     `json:"tool_call_id,omitempty"`
-	}{}
+type ToolChoice struct {
+	Mode ToolChoiceMode `json:"mode,omitempty"`
 
-	if err := json.Unmarshal(data, &type2); err == nil {
-		*m = ChatCompletionMessage(type2)
+	AllowedTools []ToolChoiceAllowedTool `json:"allowed_tools,omitempty"`
+}
+
+type ToolChoiceMode string
+
+const (
+	ToolChoiceModeNone     ToolChoiceMode = "none"
+	ToolChoiceModeAuto     ToolChoiceMode = "auto"
+	ToolChoiceModeRequired ToolChoiceMode = "required"
+)
+
+type ToolChoiceAllowedTool struct {
+	Type     string                         `json:"type"`
+	Function *ToolChoiceAllowedToolFunction `json:"function,omitempty"`
+}
+
+type ToolChoiceAllowedToolFunction struct {
+	Name string `json:"name"`
+}
+
+func (t *ToolChoice) UnmarshalJSON(data []byte) error {
+	// string: "none", "auto", "required"
+	var mode string
+
+	if err := json.Unmarshal(data, &mode); err == nil {
+		t.Mode = ToolChoiceMode(mode)
+		return nil
+	}
+
+	// object: {"type": "function", "function": {"name": "X"}}
+	var legacy struct {
+		Type     string                         `json:"type"`
+		Function *ToolChoiceAllowedToolFunction `json:"function,omitempty"`
+	}
+
+	if err := json.Unmarshal(data, &legacy); err == nil && legacy.Type == "function" && legacy.Function != nil {
+		t.Mode = ToolChoiceModeRequired
+
+		t.AllowedTools = []ToolChoiceAllowedTool{
+			{Type: legacy.Type, Function: legacy.Function},
+		}
+
+		return nil
+	}
+
+	// object: {"type": "allowed_tools", "mode": "...", "allowed_tools": [...]}
+	type Alias ToolChoice
+
+	var alias Alias
+
+	if err := json.Unmarshal(data, &alias); err != nil {
 		return err
 	}
 
+	*t = ToolChoice(alias)
 	return nil
 }
 
@@ -266,7 +351,7 @@ type ToolCall struct {
 
 	Type ToolType `json:"type,omitempty"`
 
-	Index int `json:"index"`
+	Index *int `json:"index,omitempty"`
 
 	Function *FunctionCall `json:"function,omitempty"`
 }

@@ -4,10 +4,14 @@ import (
 	"errors"
 	"strings"
 
+	"net/http"
+
+	"github.com/adrianliechti/wingman/pkg/otel"
+	"github.com/adrianliechti/wingman/pkg/provider"
+	adapter "github.com/adrianliechti/wingman/pkg/provider/adapter/summarizer"
 	"github.com/adrianliechti/wingman/pkg/summarizer"
 	"github.com/adrianliechti/wingman/pkg/summarizer/custom"
 
-	"golang.org/x/time/rate"
 )
 
 func (cfg *Config) RegisterSummarizer(id string, p summarizer.Provider) {
@@ -38,11 +42,17 @@ type summarizerConfig struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token"`
 
-	Limit *int `yaml:"limit"`
+	Model string `yaml:"model"`
+
+	Vars  map[string]string `yaml:"vars"`
+	Proxy *proxyConfig      `yaml:"proxy"`
+
 }
 
 type summarizerContext struct {
-	Limiter *rate.Limiter
+	Completer provider.Completer
+
+	Client *http.Client
 }
 
 func (cfg *Config) registerSummarizers(f *configFile) error {
@@ -61,14 +71,32 @@ func (cfg *Config) registerSummarizers(f *configFile) error {
 			continue
 		}
 
-		context := summarizerContext{
-			Limiter: createLimiter(config.Limit),
+		context := summarizerContext{}
+
+		if config.Proxy != nil {
+			client, err := config.Proxy.proxyClient()
+
+			if err != nil {
+				return err
+			}
+
+			context.Client = client
+		}
+
+		if config.Model != "" {
+			if p, err := cfg.Completer(config.Model); err == nil {
+				context.Completer = p
+			}
 		}
 
 		summarizer, err := createSummarizer(config, context)
 
 		if err != nil {
 			return err
+		}
+
+		if _, ok := summarizer.(otel.Summarizer); !ok {
+			summarizer = otel.NewSummarizer(config.Type, id, summarizer)
 		}
 
 		cfg.RegisterSummarizer(id, summarizer)
@@ -79,13 +107,19 @@ func (cfg *Config) registerSummarizers(f *configFile) error {
 
 func createSummarizer(cfg summarizerConfig, context summarizerContext) (summarizer.Provider, error) {
 	switch strings.ToLower(cfg.Type) {
+	case "llm":
+		return llmSummarizer(cfg, context)
 
 	case "custom":
 		return customSummarizer(cfg, context)
 
 	default:
-		return nil, errors.New("invalid translator type: " + cfg.Type)
+		return nil, errors.New("invalid summarizer type: " + cfg.Type)
 	}
+}
+
+func llmSummarizer(cfg summarizerConfig, context summarizerContext) (summarizer.Provider, error) {
+	return adapter.FromCompleter(context.Completer), nil
 }
 
 func customSummarizer(cfg summarizerConfig, context summarizerContext) (summarizer.Provider, error) {

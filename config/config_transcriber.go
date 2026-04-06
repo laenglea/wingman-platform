@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/adrianliechti/wingman/pkg/provider/mistral"
+	"github.com/adrianliechti/wingman/pkg/provider/azurespeech"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
 )
 
@@ -36,28 +36,37 @@ func (cfg *Config) Transcriber(id string) (provider.Transcriber, error) {
 func createTranscriber(cfg providerConfig, model modelContext) (provider.Transcriber, error) {
 	switch strings.ToLower(cfg.Type) {
 	case "mistral":
-		return mistralTranscriber(cfg, model)
+		if cfg.URL == "" {
+			cfg.URL = "https://api.mistral.ai/v1/"
+		}
+
+		return openaiTranscriber(cfg, model)
 
 	case "openai", "openai-compatible":
 		return openaiTranscriber(cfg, model)
+
+	case "azurespeech", "azure-speech":
+		return azureSpeechTranscriber(cfg, model)
 
 	default:
 		return nil, errors.New("invalid transcriber type: " + cfg.Type)
 	}
 }
 
-func mistralTranscriber(cfg providerConfig, model modelContext) (provider.Transcriber, error) {
-	var options []mistral.Option
+func azureSpeechTranscriber(cfg providerConfig, model modelContext) (provider.Transcriber, error) {
+	var options []azurespeech.Option
 
 	if cfg.Token != "" {
-		options = append(options, mistral.WithToken(cfg.Token))
+		options = append(options, azurespeech.WithToken(cfg.Token))
 	}
 
 	if model.Client != nil {
-		options = append(options, mistral.WithClient(model.Client))
+		options = append(options, azurespeech.WithClient(model.Client))
 	}
 
-	return mistral.NewTranscriber(model.ID, options...)
+	region := cfg.Vars["region"]
+
+	return azurespeech.NewTranscriber(region, model.ID, options...)
 }
 
 func openaiTranscriber(cfg providerConfig, model modelContext) (provider.Transcriber, error) {
@@ -69,6 +78,10 @@ func openaiTranscriber(cfg providerConfig, model modelContext) (provider.Transcr
 
 	if model.Client != nil {
 		options = append(options, openai.WithClient(model.Client))
+	}
+
+	if model.MaxRetries != nil {
+		options = append(options, openai.WithMaxRetries(*model.MaxRetries))
 	}
 
 	return openai.NewTranscriber(cfg.URL, model.ID, options...)

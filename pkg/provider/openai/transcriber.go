@@ -30,7 +30,7 @@ func NewTranscriber(url, model string, options ...Option) (*Transcriber, error) 
 
 	return &Transcriber{
 		Config:         cfg,
-		transcriptions: openai.NewAudioTranscriptionService(cfg.HackOldAzure()...),
+		transcriptions: openai.NewAudioTranscriptionService(cfg.AzureOptions()...),
 	}, nil
 }
 
@@ -43,17 +43,27 @@ func (t *Transcriber) Transcribe(ctx context.Context, input provider.File, optio
 
 	fileName := input.Name
 
-	if strings.HasSuffix(fileName, ".weba") {
-		fileName = strings.TrimSuffix(fileName, ".weba") + ".webm"
+	if before, ok := strings.CutSuffix(fileName, ".weba"); ok {
+		fileName = before + ".webm"
 	}
 
-	transcription, err := t.transcriptions.New(ctx, openai.AudioTranscriptionNewParams{
+	body := openai.AudioTranscriptionNewParams{
 		Model: t.model,
 
 		File: openai.File(bytes.NewReader(input.Content), fileName, input.ContentType),
 
 		ResponseFormat: openai.AudioResponseFormatJSON,
-	})
+	}
+
+	if options.Language != "" {
+		body.Language = openai.String(options.Language)
+	}
+
+	if options.Instructions != "" {
+		body.Prompt = openai.String(options.Instructions)
+	}
+
+	transcription, err := t.transcriptions.New(ctx, body)
 
 	if err != nil {
 		return nil, convertError(err)

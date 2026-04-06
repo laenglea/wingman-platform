@@ -5,14 +5,13 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/adrianliechti/wingman/pkg/limiter"
 	"github.com/adrianliechti/wingman/pkg/otel"
 	"github.com/adrianliechti/wingman/pkg/scraper"
 	"github.com/adrianliechti/wingman/pkg/scraper/custom"
 	"github.com/adrianliechti/wingman/pkg/scraper/exa"
+	"github.com/adrianliechti/wingman/pkg/scraper/fetch"
 	"github.com/adrianliechti/wingman/pkg/scraper/jina"
 	"github.com/adrianliechti/wingman/pkg/scraper/tavily"
-	"golang.org/x/time/rate"
 )
 
 func (cfg *Config) RegisterScraper(id string, p scraper.Provider) {
@@ -46,12 +45,10 @@ type scraperConfig struct {
 	Vars  map[string]string `yaml:"vars"`
 	Proxy *proxyConfig      `yaml:"proxy"`
 
-	Limit *int `yaml:"limit"`
 }
 
 type scraperContext struct {
-	Client  *http.Client
-	Limiter *rate.Limiter
+	Client *http.Client
 }
 
 func (cfg *Config) registerScrapers(f *configFile) error {
@@ -70,9 +67,7 @@ func (cfg *Config) registerScrapers(f *configFile) error {
 			continue
 		}
 
-		context := scraperContext{
-			Limiter: createLimiter(config.Limit),
-		}
+		context := scraperContext{}
 
 		if config.Proxy != nil {
 			client, err := config.Proxy.proxyClient()
@@ -90,10 +85,6 @@ func (cfg *Config) registerScrapers(f *configFile) error {
 			return err
 		}
 
-		if _, ok := scraper.(limiter.Scraper); !ok {
-			scraper = limiter.NewScraper(context.Limiter, scraper)
-		}
-
 		if _, ok := scraper.(otel.Scraper); !ok {
 			scraper = otel.NewScraper(id, "", scraper)
 		}
@@ -106,6 +97,9 @@ func (cfg *Config) registerScrapers(f *configFile) error {
 
 func createScraper(cfg scraperConfig, context scraperContext) (scraper.Provider, error) {
 	switch strings.ToLower(cfg.Type) {
+
+	case "fetch":
+		return fetchScraper(cfg, context)
 
 	case "exa":
 		return exaScraper(cfg, context)
@@ -162,4 +156,14 @@ func customScraper(cfg scraperConfig, context scraperContext) (scraper.Provider,
 	var options []custom.Option
 
 	return custom.New(cfg.URL, options...)
+}
+
+func fetchScraper(cfg scraperConfig, context scraperContext) (scraper.Provider, error) {
+	var options []fetch.Option
+
+	if context.Client != nil {
+		options = append(options, fetch.WithClient(context.Client))
+	}
+
+	return fetch.New(options...)
 }

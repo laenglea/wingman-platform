@@ -127,12 +127,23 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 		req.Tools = tools
 	}
 
+	if options.ToolOptions != nil {
+		req.ToolChoice = convertToolChoice(options.ToolOptions)
+
+		if options.ToolOptions.DisableParallelToolCalls {
+			req.ParallelToolCalls = openai.Bool(false)
+		}
+	}
+
 	if len(messages) > 0 {
 		req.Messages = messages
 	}
 
-	if options.Effort != "" {
-		switch options.Effort {
+	if options.ReasoningOptions != nil && slices.Contains(ReasoningModels, c.model) {
+		switch options.ReasoningOptions.Effort {
+		case provider.EffortNone:
+			req.ReasoningEffort = openai.ReasoningEffortNone
+
 		case provider.EffortMinimal:
 			req.ReasoningEffort = openai.ReasoningEffortMinimal
 
@@ -144,11 +155,14 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 
 		case provider.EffortHigh:
 			req.ReasoningEffort = openai.ReasoningEffortHigh
+
+		case provider.EffortMax:
+			req.ReasoningEffort = openai.ReasoningEffortXhigh
 		}
 	}
 
-	if options.Verbosity != "" {
-		switch options.Verbosity {
+	if options.OutputOptions != nil {
+		switch options.OutputOptions.Verbosity {
 		case provider.VerbosityLow:
 			req.Verbosity = openai.ChatCompletionNewParamsVerbosityLow
 
@@ -166,9 +180,15 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 				OfJSONObject: &openai.ResponseFormatJSONObjectParam{},
 			}
 		} else {
+			schemaData := options.Schema.Schema
+
+			if options.Schema.Strict != nil && *options.Schema.Strict {
+				schemaData = ensureAdditionalPropertiesFalse(schemaData)
+			}
+
 			schema := openai.ResponseFormatJSONSchemaJSONSchemaParam{
 				Name:   options.Schema.Name,
-				Schema: options.Schema.Schema,
+				Schema: schemaData,
 			}
 
 			if options.Schema.Description != "" {
@@ -233,10 +253,8 @@ func (c *Completer) convertMessages(input []provider.Message) ([]openai.ChatComp
 			result = append(result, message)
 
 		case provider.MessageRoleUser:
-			parts := []openai.ChatCompletionContentPartUnionParam{}
-
-			var tool string
-			var toolData string
+			var parts []openai.ChatCompletionContentPartUnionParam
+			var toolResults []*provider.ToolResult
 
 			for _, c := range m.Content {
 				if text := strings.TrimRight(c.Text, " \t\n\r"); text != "" {
@@ -271,14 +289,16 @@ func (c *Completer) convertMessages(input []provider.Message) ([]openai.ChatComp
 				}
 
 				if c.ToolResult != nil {
-					tool = c.ToolResult.ID
-					toolData = c.ToolResult.Data
+					toolResults = append(toolResults, c.ToolResult)
 				}
 			}
 
-			if tool != "" {
-				result = append(result, openai.ToolMessage(toolData, tool))
-			} else {
+			// Each tool result becomes a separate tool message (OpenAI Chat Completions format)
+			for _, tr := range toolResults {
+				result = append(result, openai.ToolMessage(tr.Data, tr.ID))
+			}
+
+			if len(toolResults) == 0 {
 				result = append(result, openai.UserMessage(parts))
 			}
 
@@ -355,6 +375,32 @@ func convertTools(tools []provider.Tool) ([]openai.ChatCompletionToolUnionParam,
 	}
 
 	return result, nil
+}
+
+func convertToolChoice(opts *provider.ToolOptions) openai.ChatCompletionToolChoiceOptionUnionParam {
+	// Force a specific function when exactly one tool is required — universally supported format.
+	if len(opts.Allowed) == 1 && opts.Choice == provider.ToolChoiceAny {
+		return openai.ChatCompletionToolChoiceOptionUnionParam{
+			OfFunctionToolChoice: &openai.ChatCompletionNamedToolChoiceParam{
+				Function: openai.ChatCompletionNamedToolChoiceFunctionParam{
+					Name: opts.Allowed[0],
+				},
+			},
+		}
+	}
+
+	// For all other cases use the simple string mode. When multiple tools are in
+	// the allowed list we can't restrict universally across OpenAI-compatible
+	// providers, so we fall back to the plain required/auto/none mode.
+	modes := map[provider.ToolChoice]string{
+		provider.ToolChoiceNone: "none",
+		provider.ToolChoiceAuto: "auto",
+		provider.ToolChoiceAny:  "required",
+	}
+
+	return openai.ChatCompletionToolChoiceOptionUnionParam{
+		OfAuto: openai.String(modes[opts.Choice]),
+	}
 }
 
 func toUsage(metadata openai.CompletionUsage) *provider.Usage {

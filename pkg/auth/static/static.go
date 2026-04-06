@@ -13,10 +13,18 @@ type Provider struct {
 	token string
 }
 
-func New(token string) (*Provider, error) {
-	return &Provider{
+type Option func(*Provider)
+
+func New(token string, opts ...Option) (*Provider, error) {
+	p := &Provider{
 		token: token,
-	}, nil
+	}
+
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	return p, nil
 }
 
 func (p *Provider) Authenticate(ctx context.Context, r *http.Request) (context.Context, error) {
@@ -30,17 +38,23 @@ func (p *Provider) Authenticate(ctx context.Context, r *http.Request) (context.C
 		return ctx, errors.New("missing authorization header")
 	}
 
-	if !strings.HasPrefix(header, "Bearer ") {
+	token, ok := strings.CutPrefix(header, "Bearer ")
+
+	if !ok {
 		return ctx, errors.New("invalid authorization header")
 	}
 
-	token := strings.TrimPrefix(header, "Bearer ")
-
-	if !strings.EqualFold(token, p.token) {
+	if token != p.token {
 		return ctx, errors.New("invalid token")
 	}
 
-	ctx = context.WithValue(ctx, auth.UserContextKey, token)
+	if user := strings.TrimSpace(r.Header.Get("X-Forwarded-User")); user != "" {
+		ctx = context.WithValue(ctx, auth.UserContextKey, user)
+	}
+
+	if email := strings.TrimSpace(r.Header.Get("X-Forwarded-Email")); email != "" {
+		ctx = context.WithValue(ctx, auth.EmailContextKey, email)
+	}
 
 	return ctx, nil
 }

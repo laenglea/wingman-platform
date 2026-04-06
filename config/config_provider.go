@@ -2,17 +2,18 @@ package config
 
 import (
 	"errors"
+	"strings"
 
-	"github.com/adrianliechti/wingman/pkg/limiter"
 	"github.com/adrianliechti/wingman/pkg/otel"
-
+	"github.com/adrianliechti/wingman/pkg/provider"
 	reranker "github.com/adrianliechti/wingman/pkg/provider/adapter/reranker"
-	summarizer "github.com/adrianliechti/wingman/pkg/summarizer/adapter"
 
 	"gopkg.in/yaml.v3"
 )
 
 func (cfg *Config) registerProviders(f *configFile) error {
+	var firstReranker provider.Reranker
+
 	for _, p := range f.Providers {
 		models := map[string]modelConfig{}
 
@@ -55,10 +56,10 @@ func (cfg *Config) registerProviders(f *configFile) error {
 				m.Type = DetectModelType(id)
 			}
 
-			limit := m.Limit
+			maxRetries := m.MaxRetries
 
-			if limit == nil {
-				limit = p.Limit
+			if maxRetries == nil {
+				maxRetries = p.MaxRetries
 			}
 
 			context := modelContext{
@@ -69,7 +70,7 @@ func (cfg *Config) registerProviders(f *configFile) error {
 				Name:        m.Name,
 				Description: m.Description,
 
-				Limiter: createLimiter(limit),
+				MaxRetries: maxRetries,
 			}
 
 			if p.Proxy != nil {
@@ -90,26 +91,17 @@ func (cfg *Config) registerProviders(f *configFile) error {
 					return err
 				}
 
-				if _, ok := completer.(limiter.Completer); !ok {
-					completer = limiter.NewCompleter(context.Limiter, completer)
-				}
-
 				if _, ok := completer.(otel.Completer); !ok {
 					completer = otel.NewCompleter(p.Type, id, completer)
 				}
 
 				cfg.RegisterCompleter(id, completer)
-				cfg.RegisterSummarizer(id, summarizer.FromCompleter(completer))
 
 			case ModelTypeEmbedder:
 				embedder, err := createEmbedder(p, context)
 
 				if err != nil {
 					return err
-				}
-
-				if _, ok := embedder.(limiter.Embedder); !ok {
-					embedder = limiter.NewEmbedder(context.Limiter, embedder)
 				}
 
 				if _, ok := embedder.(otel.Embedder); !ok {
@@ -126,25 +118,21 @@ func (cfg *Config) registerProviders(f *configFile) error {
 					return err
 				}
 
-				if _, ok := reranker.(limiter.Reranker); !ok {
-					reranker = limiter.NewReranker(context.Limiter, reranker)
-				}
-
 				if _, ok := reranker.(otel.Reranker); !ok {
 					reranker = otel.NewReranker(p.Type, id, reranker)
 				}
 
 				cfg.RegisterReranker(id, reranker)
 
+				if firstReranker == nil {
+					firstReranker = reranker
+				}
+
 			case ModelTypeRenderer:
 				renderer, err := createRenderer(p, context)
 
 				if err != nil {
 					return err
-				}
-
-				if _, ok := renderer.(limiter.Renderer); !ok {
-					renderer = limiter.NewRenderer(context.Limiter, renderer)
 				}
 
 				if _, ok := renderer.(otel.Renderer); !ok {
@@ -160,10 +148,6 @@ func (cfg *Config) registerProviders(f *configFile) error {
 					return err
 				}
 
-				if _, ok := synthesizer.(limiter.Synthesizer); !ok {
-					synthesizer = limiter.NewSynthesizer(context.Limiter, synthesizer)
-				}
-
 				if _, ok := synthesizer.(otel.Synthesizer); !ok {
 					synthesizer = otel.NewSynthesizer(p.Type, id, synthesizer)
 				}
@@ -175,10 +159,6 @@ func (cfg *Config) registerProviders(f *configFile) error {
 
 				if err != nil {
 					return err
-				}
-
-				if _, ok := transcriber.(limiter.Transcriber); !ok {
-					transcriber = limiter.NewTranscriber(context.Limiter, transcriber)
 				}
 
 				if _, ok := transcriber.(otel.Transcriber); !ok {
@@ -193,6 +173,10 @@ func (cfg *Config) registerProviders(f *configFile) error {
 		}
 	}
 
+	if firstReranker != nil {
+		cfg.reranker[""] = firstReranker
+	}
+
 	return nil
 }
 
@@ -202,8 +186,17 @@ type providerConfig struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token"`
 
-	Limit *int         `yaml:"limit"`
-	Proxy *proxyConfig `yaml:"proxy"`
+	Vars  map[string]string `yaml:"vars"`
+	Proxy *proxyConfig      `yaml:"proxy"`
+
+	MaxRetries *int `yaml:"max_retries"`
 
 	Models yaml.Node `yaml:"models"`
+}
+
+func normalizeURL(url string, suffix string) string {
+	url = strings.TrimRight(url, "/")
+	url = strings.TrimSuffix(url, suffix)
+
+	return url + suffix
 }

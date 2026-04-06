@@ -47,7 +47,7 @@ func (m *mockCompleter) Complete(ctx context.Context, messages []provider.Messag
 
 func TestNewCompleter(t *testing.T) {
 	t.Run("requires at least one completer", func(t *testing.T) {
-		_, err := NewCompleter()
+		_, err := NewCompleter(nil)
 		if err == nil {
 			t.Error("expected error for empty completers")
 		}
@@ -55,7 +55,7 @@ func TestNewCompleter(t *testing.T) {
 
 	t.Run("creates completer with providers", func(t *testing.T) {
 		mock := &mockCompleter{response: "hello"}
-		c, err := NewCompleter(mock)
+		c, err := NewCompleter([]provider.Completer{mock})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -68,7 +68,7 @@ func TestNewCompleter(t *testing.T) {
 func TestComplete(t *testing.T) {
 	t.Run("routes to available provider", func(t *testing.T) {
 		mock := &mockCompleter{response: "hello"}
-		c, _ := NewCompleter(mock)
+		c, _ := NewCompleter([]provider.Completer{mock})
 
 		ctx := context.Background()
 		messages := []provider.Message{provider.UserMessage("test")}
@@ -92,7 +92,7 @@ func TestComplete(t *testing.T) {
 
 	t.Run("records failure on error", func(t *testing.T) {
 		mock := &mockCompleter{err: errors.New("provider error")}
-		c, _ := NewCompleter(mock)
+		c, _ := NewCompleter([]provider.Completer{mock})
 		comp := c.(*Completer)
 
 		ctx := context.Background()
@@ -115,14 +115,14 @@ func TestComplete(t *testing.T) {
 
 	t.Run("opens circuit after threshold failures", func(t *testing.T) {
 		mock := &mockCompleter{err: errors.New("provider error")}
-		c, _ := NewCompleter(mock)
+		c, _ := NewCompleter([]provider.Completer{mock})
 		comp := c.(*Completer)
 
 		ctx := context.Background()
 		messages := []provider.Message{provider.UserMessage("test")}
 
 		// Trigger failures to open circuit
-		for i := 0; i < router.DefaultFailureThreshold; i++ {
+		for range router.DefaultFailureThreshold {
 			for range c.Complete(ctx, messages, nil) {
 			}
 		}
@@ -140,13 +140,13 @@ func TestRandomDistribution(t *testing.T) {
 		mock2 := &mockCompleter{response: "two"}
 		mock3 := &mockCompleter{response: "three"}
 
-		c, _ := NewCompleter(mock1, mock2, mock3)
+		c, _ := NewCompleter([]provider.Completer{mock1, mock2, mock3})
 
 		ctx := context.Background()
 		messages := []provider.Message{provider.UserMessage("test")}
 
 		// Run many requests
-		for i := 0; i < 300; i++ {
+		for range 300 {
 			for range c.Complete(ctx, messages, nil) {
 			}
 		}
@@ -170,14 +170,14 @@ func TestCircuitBreaker(t *testing.T) {
 		failing := &mockCompleter{err: errors.New("error")}
 		healthy := &mockCompleter{response: "ok"}
 
-		c, _ := NewCompleter(failing, healthy)
+		c, _ := NewCompleter([]provider.Completer{failing, healthy})
 
 		ctx := context.Background()
 		messages := []provider.Message{provider.UserMessage("test")}
 
 		// Open circuit on first provider by triggering failures
 		// We need to get the failing provider selected enough times
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			for range c.Complete(ctx, messages, nil) {
 			}
 		}
@@ -190,7 +190,7 @@ func TestCircuitBreaker(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 
 		// Next requests should only go to healthy provider
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			for range c.Complete(ctx, messages, nil) {
 			}
 		}
@@ -204,7 +204,7 @@ func TestCircuitBreaker(t *testing.T) {
 
 	t.Run("recovers circuit after timeout", func(t *testing.T) {
 		mock := &mockCompleter{err: errors.New("error")}
-		c, _ := NewCompleter(mock)
+		c, _ := NewCompleter([]provider.Completer{mock})
 		comp := c.(*Completer)
 
 		// Use short recovery timeout for test
@@ -214,7 +214,7 @@ func TestCircuitBreaker(t *testing.T) {
 		messages := []provider.Message{provider.UserMessage("test")}
 
 		// Open circuit
-		for i := 0; i < router.DefaultFailureThreshold; i++ {
+		for range router.DefaultFailureThreshold {
 			for range c.Complete(ctx, messages, nil) {
 			}
 		}
@@ -252,48 +252,65 @@ func TestCircuitBreaker(t *testing.T) {
 }
 
 func TestFallback(t *testing.T) {
-	t.Run("falls back to least recently failed when all open", func(t *testing.T) {
-		mock1 := &mockCompleter{err: errors.New("error")}
-		mock2 := &mockCompleter{err: errors.New("error")}
+	t.Run("uses fallback when all providers unavailable", func(t *testing.T) {
+		failing := &mockCompleter{err: errors.New("error")}
+		fallback := &mockCompleter{response: "fallback"}
 
-		c, _ := NewCompleter(mock1, mock2)
+		c, _ := NewCompleter([]provider.Completer{failing}, WithFallback(fallback))
 		comp := c.(*Completer)
 
-		// Use short recovery timeout
-		comp.recoveryTimeout = 5 * time.Millisecond
+		// Use long recovery timeout to prevent half-open
+		comp.recoveryTimeout = time.Hour
 
 		ctx := context.Background()
 		messages := []provider.Message{provider.UserMessage("test")}
 
-		// Open both circuits
-		for i := 0; i < 20; i++ {
+		// Open circuit
+		for range router.DefaultFailureThreshold {
 			for range c.Complete(ctx, messages, nil) {
 			}
 		}
 
-		// Wait for recovery
-		time.Sleep(10 * time.Millisecond)
-
-		// Fix one provider
-		mock2.err = nil
-		mock2.response = "ok"
-
-		// Should eventually route to the fixed provider
-		var gotSuccess bool
-		for i := 0; i < 10; i++ {
-			for completion, err := range c.Complete(ctx, messages, nil) {
-				if err == nil && completion != nil {
-					gotSuccess = true
-				}
+		// Next request should go to fallback
+		var result *provider.Completion
+		for completion, err := range c.Complete(ctx, messages, nil) {
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
-			if gotSuccess {
-				break
-			}
-			time.Sleep(5 * time.Millisecond)
+			result = completion
 		}
 
-		if !gotSuccess {
-			t.Error("expected to eventually succeed with recovered provider")
+		if result.Message.Text() != "fallback" {
+			t.Errorf("expected 'fallback', got '%s'", result.Message.Text())
+		}
+	})
+
+	t.Run("returns error when no fallback and all unavailable", func(t *testing.T) {
+		failing := &mockCompleter{err: errors.New("error")}
+
+		c, _ := NewCompleter([]provider.Completer{failing})
+		comp := c.(*Completer)
+
+		comp.recoveryTimeout = time.Hour
+
+		ctx := context.Background()
+		messages := []provider.Message{provider.UserMessage("test")}
+
+		// Open circuit
+		for range router.DefaultFailureThreshold {
+			for range c.Complete(ctx, messages, nil) {
+			}
+		}
+
+		var gotError bool
+		for _, err := range c.Complete(ctx, messages, nil) {
+			if err != nil {
+				gotError = true
+			}
+		}
+
+		if !gotError {
+			t.Error("expected error when all providers unavailable and no fallback")
 		}
 	})
 }

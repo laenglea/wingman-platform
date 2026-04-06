@@ -8,6 +8,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/chain"
 	"github.com/adrianliechti/wingman/pkg/extractor"
 	"github.com/adrianliechti/wingman/pkg/mcp"
+	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/researcher"
 	"github.com/adrianliechti/wingman/pkg/scraper"
@@ -17,13 +18,13 @@ import (
 	"github.com/adrianliechti/wingman/pkg/tool"
 	"github.com/adrianliechti/wingman/pkg/translator"
 
-	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
 	Address string
 
+	Policy      policy.Provider
 	Authorizers []auth.Provider
 
 	models map[string]provider.Model
@@ -65,7 +66,15 @@ func Parse(path string) (*Config, error) {
 		return nil, err
 	}
 
+	if err := c.registerPolicies(file); err != nil {
+		return nil, err
+	}
+
 	if err := c.registerProviders(file); err != nil {
+		return nil, err
+	}
+
+	if err := c.registerRouters(file); err != nil {
 		return nil, err
 	}
 
@@ -85,11 +94,11 @@ func Parse(path string) (*Config, error) {
 		return nil, err
 	}
 
-	if err := c.registerTranslators(file); err != nil {
+	if err := c.registerSearchers(file); err != nil {
 		return nil, err
 	}
 
-	if err := c.registerSearchers(file); err != nil {
+	if err := c.registerTranslators(file); err != nil {
 		return nil, err
 	}
 
@@ -98,10 +107,6 @@ func Parse(path string) (*Config, error) {
 	}
 
 	if err := c.registerTools(file); err != nil {
-		return nil, err
-	}
-
-	if err := c.registerRouters(file); err != nil {
 		return nil, err
 	}
 
@@ -118,6 +123,8 @@ func Parse(path string) (*Config, error) {
 
 type configFile struct {
 	Authorizers []authorizerConfig `yaml:"authorizers"`
+
+	Policy *policyConfig `yaml:"policy"`
 
 	Providers []providerConfig `yaml:"providers"`
 
@@ -159,10 +166,3 @@ func parseFile(path string) (*configFile, error) {
 	return &config, nil
 }
 
-func createLimiter(limit *int) *rate.Limiter {
-	if limit == nil {
-		return nil
-	}
-
-	return rate.NewLimiter(rate.Limit(*limit), *limit)
-}

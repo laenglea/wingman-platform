@@ -4,15 +4,16 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/adrianliechti/wingman/pkg/extractor"
+	"net/http"
+
+	"github.com/adrianliechti/wingman/pkg/otel"
 	"github.com/adrianliechti/wingman/pkg/provider"
+	adapter "github.com/adrianliechti/wingman/pkg/provider/adapter/translator"
 	"github.com/adrianliechti/wingman/pkg/translator"
 	"github.com/adrianliechti/wingman/pkg/translator/azure"
 	"github.com/adrianliechti/wingman/pkg/translator/custom"
 	"github.com/adrianliechti/wingman/pkg/translator/deepl"
-	"github.com/adrianliechti/wingman/pkg/translator/llm"
 
-	"golang.org/x/time/rate"
 )
 
 func (cfg *Config) RegisterTranslator(id string, p translator.Provider) {
@@ -43,19 +44,17 @@ type translatorConfig struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token"`
 
-	Model     string `yaml:"model"`
-	Extractor string `yaml:"extractor"`
+	Model string `yaml:"model"`
 
-	Vars map[string]string `yaml:"vars"`
+	Vars  map[string]string `yaml:"vars"`
+	Proxy *proxyConfig      `yaml:"proxy"`
 
-	Limit *int `yaml:"limit"`
 }
 
 type translatorContext struct {
 	Completer provider.Completer
-	Extractor extractor.Provider
 
-	Limiter *rate.Limiter
+	Client *http.Client
 }
 
 func (cfg *Config) registerTranslators(f *configFile) error {
@@ -74,8 +73,16 @@ func (cfg *Config) registerTranslators(f *configFile) error {
 			continue
 		}
 
-		context := translatorContext{
-			Limiter: createLimiter(config.Limit),
+		context := translatorContext{}
+
+		if config.Proxy != nil {
+			client, err := config.Proxy.proxyClient()
+
+			if err != nil {
+				return err
+			}
+
+			context.Client = client
 		}
 
 		if config.Model != "" {
@@ -84,16 +91,14 @@ func (cfg *Config) registerTranslators(f *configFile) error {
 			}
 		}
 
-		if config.Extractor != "" {
-			if p, err := cfg.Extractor(config.Extractor); err == nil {
-				context.Extractor = p
-			}
-		}
-
 		translator, err := createTranslator(config, context)
 
 		if err != nil {
 			return err
+		}
+
+		if _, ok := translator.(otel.Translator); !ok {
+			translator = otel.NewTranslator(config.Type, id, translator)
 		}
 
 		cfg.RegisterTranslator(id, translator)
@@ -122,7 +127,7 @@ func createTranslator(cfg translatorConfig, context translatorContext) (translat
 }
 
 func llmTranslator(cfg translatorConfig, context translatorContext) (translator.Provider, error) {
-	return llm.New(context.Completer, context.Extractor)
+	return adapter.FromCompleter(context.Completer), nil
 }
 
 func azureTranslator(cfg translatorConfig, context translatorContext) (translator.Provider, error) {
@@ -130,6 +135,10 @@ func azureTranslator(cfg translatorConfig, context translatorContext) (translato
 
 	if cfg.Token != "" {
 		options = append(options, azure.WithToken(cfg.Token))
+	}
+
+	if context.Client != nil {
+		options = append(options, azure.WithClient(context.Client))
 	}
 
 	if region := cfg.Vars["region"]; region != "" {
@@ -144,6 +153,10 @@ func deeplTranslator(cfg translatorConfig, context translatorContext) (translato
 
 	if cfg.Token != "" {
 		options = append(options, deepl.WithToken(cfg.Token))
+	}
+
+	if context.Client != nil {
+		options = append(options, deepl.WithClient(context.Client))
 	}
 
 	return deepl.New(cfg.URL, options...)

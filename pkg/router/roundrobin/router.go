@@ -18,12 +18,23 @@ type Completer struct {
 	completers []provider.Completer
 	stats      []*router.ProviderStats
 
+	fallback provider.Completer
+
 	failureThreshold int
 	recoveryTimeout  time.Duration
 }
 
+type Option func(*Completer)
+
+// WithFallback sets a fallback completer used when all primary providers are unavailable
+func WithFallback(fallback provider.Completer) Option {
+	return func(c *Completer) {
+		c.fallback = fallback
+	}
+}
+
 // NewCompleter creates a new round-robin router with circuit breaker protection
-func NewCompleter(completers ...provider.Completer) (provider.Completer, error) {
+func NewCompleter(completers []provider.Completer, options ...Option) (provider.Completer, error) {
 	if len(completers) == 0 {
 		return nil, errors.New("at least one completer is required")
 	}
@@ -33,12 +44,18 @@ func NewCompleter(completers ...provider.Completer) (provider.Completer, error) 
 		stats[i] = router.NewProviderStats()
 	}
 
-	return &Completer{
+	c := &Completer{
 		completers:       completers,
 		stats:            stats,
 		failureThreshold: router.DefaultFailureThreshold,
 		recoveryTimeout:  router.DefaultRecoveryTimeout,
-	}, nil
+	}
+
+	for _, option := range options {
+		option(c)
+	}
+
+	return c, nil
 }
 
 // Complete routes the request to a randomly selected healthy provider
@@ -47,6 +64,15 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		index := c.selectProvider()
 
 		if index < 0 {
+			if c.fallback != nil {
+				for completion, err := range c.fallback.Complete(ctx, messages, options) {
+					if !yield(completion, err) {
+						return
+					}
+				}
+				return
+			}
+
 			yield(nil, errors.New("all providers are unavailable"))
 			return
 		}
@@ -89,31 +115,10 @@ func (c *Completer) selectProvider() int {
 	}
 
 	if len(candidates) == 0 {
-		// All circuits are open - fallback to least recently failed
-		return c.fallbackProvider()
+		return -1
 	}
 
 	// Random selection among healthy providers
 	return candidates[rand.Intn(len(candidates))]
 }
 
-// fallbackProvider returns the least recently failed provider when all circuits are open
-func (c *Completer) fallbackProvider() int {
-	bestIndex := 0
-
-	var oldestFailure time.Time
-
-	for i, stat := range c.stats {
-		lastFailure := stat.GetLastFailure()
-
-		if i == 0 || lastFailure.Before(oldestFailure) {
-			oldestFailure = lastFailure
-			bestIndex = i
-		}
-	}
-
-	// Transition to half-open for the fallback
-	c.stats[bestIndex].SetHalfOpen()
-
-	return bestIndex
-}

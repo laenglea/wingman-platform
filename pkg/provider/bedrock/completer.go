@@ -110,26 +110,15 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			InferenceConfig: config,
 		}
 
-		// var budgetTokens int
-		// switch options.Effort {
-		// case provider.EffortMinimal:
-		// 	budgetTokens = 1024
-		// case provider.EffortLow:
-		// 	budgetTokens = 2048
-		// case provider.EffortMedium:
-		// 	budgetTokens = 8192
-		// case provider.EffortHigh:
-		// 	budgetTokens = 32000
-		// }
+		if options.ReasoningOptions != nil && isAdaptiveThinkingModel(c.model) {
+			config.Temperature = nil
 
-		// if budgetTokens > 0 {
-		// 	params.AdditionalModelRequestFields = document.NewLazyDocument(map[string]any{
-		// 		"thinking": map[string]any{
-		// 			"type":          "enabled",
-		// 			"budget_tokens": budgetTokens,
-		// 		},
-		// 	})
-		// }
+			params.AdditionalModelRequestFields = document.NewLazyDocument(map[string]any{
+				"thinking": map[string]any{
+					"type": "adaptive",
+				},
+			})
+		}
 
 		resp, err := c.client.ConverseStream(ctx, params)
 
@@ -346,71 +335,77 @@ func convertError(err error) error {
 		return nil
 	}
 
-	// Handle Bedrock-specific error types
+	wrap := func(statusCode int, msg string) error {
+		return &provider.ProviderError{
+			StatusCode: statusCode,
+			Message:    msg,
+			Err:        err,
+		}
+	}
+
 	var throttle *types.ThrottlingException
 	if errors.As(err, &throttle) {
-		return fmt.Errorf("bedrock throttling: %s", aws.ToString(throttle.Message))
-	}
-
-	var validation *types.ValidationException
-	if errors.As(err, &validation) {
-		return fmt.Errorf("bedrock validation: %s", aws.ToString(validation.Message))
-	}
-
-	var modelErr *types.ModelStreamErrorException
-	if errors.As(err, &modelErr) {
-		return fmt.Errorf("bedrock stream error: %s", aws.ToString(modelErr.Message))
-	}
-
-	var modelNotReady *types.ModelNotReadyException
-	if errors.As(err, &modelNotReady) {
-		return fmt.Errorf("bedrock model not ready: %s", aws.ToString(modelNotReady.Message))
-	}
-
-	var serviceUnavailable *types.ServiceUnavailableException
-	if errors.As(err, &serviceUnavailable) {
-		return fmt.Errorf("bedrock service unavailable: %s", aws.ToString(serviceUnavailable.Message))
-	}
-
-	var internalServer *types.InternalServerException
-	if errors.As(err, &internalServer) {
-		return fmt.Errorf("bedrock internal error: %s", aws.ToString(internalServer.Message))
-	}
-
-	var accessDenied *types.AccessDeniedException
-	if errors.As(err, &accessDenied) {
-		return fmt.Errorf("bedrock access denied: %s", aws.ToString(accessDenied.Message))
-	}
-
-	var modelTimeout *types.ModelTimeoutException
-	if errors.As(err, &modelTimeout) {
-		return fmt.Errorf("bedrock model timeout: %s", aws.ToString(modelTimeout.Message))
-	}
-
-	var modelError *types.ModelErrorException
-	if errors.As(err, &modelError) {
-		return fmt.Errorf("bedrock model error: %s", aws.ToString(modelError.Message))
-	}
-
-	var conflict *types.ConflictException
-	if errors.As(err, &conflict) {
-		return fmt.Errorf("bedrock conflict: %s", aws.ToString(conflict.Message))
-	}
-
-	var resourceNotFound *types.ResourceNotFoundException
-	if errors.As(err, &resourceNotFound) {
-		return fmt.Errorf("bedrock resource not found: %s", aws.ToString(resourceNotFound.Message))
+		return wrap(429, fmt.Sprintf("bedrock throttling: %s", aws.ToString(throttle.Message)))
 	}
 
 	var quotaExceeded *types.ServiceQuotaExceededException
 	if errors.As(err, &quotaExceeded) {
-		return fmt.Errorf("bedrock quota exceeded: %s", aws.ToString(quotaExceeded.Message))
+		return wrap(429, fmt.Sprintf("bedrock quota exceeded: %s", aws.ToString(quotaExceeded.Message)))
 	}
 
-	// Extract AWS API error details (error code, message) for any other AWS errors
+	var validation *types.ValidationException
+	if errors.As(err, &validation) {
+		return wrap(400, fmt.Sprintf("bedrock validation: %s", aws.ToString(validation.Message)))
+	}
+
+	var accessDenied *types.AccessDeniedException
+	if errors.As(err, &accessDenied) {
+		return wrap(403, fmt.Sprintf("bedrock access denied: %s", aws.ToString(accessDenied.Message)))
+	}
+
+	var resourceNotFound *types.ResourceNotFoundException
+	if errors.As(err, &resourceNotFound) {
+		return wrap(404, fmt.Sprintf("bedrock resource not found: %s", aws.ToString(resourceNotFound.Message)))
+	}
+
+	var conflict *types.ConflictException
+	if errors.As(err, &conflict) {
+		return wrap(409, fmt.Sprintf("bedrock conflict: %s", aws.ToString(conflict.Message)))
+	}
+
+	var modelNotReady *types.ModelNotReadyException
+	if errors.As(err, &modelNotReady) {
+		return wrap(503, fmt.Sprintf("bedrock model not ready: %s", aws.ToString(modelNotReady.Message)))
+	}
+
+	var serviceUnavailable *types.ServiceUnavailableException
+	if errors.As(err, &serviceUnavailable) {
+		return wrap(503, fmt.Sprintf("bedrock service unavailable: %s", aws.ToString(serviceUnavailable.Message)))
+	}
+
+	var modelTimeout *types.ModelTimeoutException
+	if errors.As(err, &modelTimeout) {
+		return wrap(504, fmt.Sprintf("bedrock model timeout: %s", aws.ToString(modelTimeout.Message)))
+	}
+
+	var internalServer *types.InternalServerException
+	if errors.As(err, &internalServer) {
+		return wrap(500, fmt.Sprintf("bedrock internal error: %s", aws.ToString(internalServer.Message)))
+	}
+
+	var modelErr *types.ModelStreamErrorException
+	if errors.As(err, &modelErr) {
+		return wrap(500, fmt.Sprintf("bedrock stream error: %s", aws.ToString(modelErr.Message)))
+	}
+
+	var modelError *types.ModelErrorException
+	if errors.As(err, &modelError) {
+		return wrap(500, fmt.Sprintf("bedrock model error: %s", aws.ToString(modelError.Message)))
+	}
+
 	var ae smithy.APIError
 	if errors.As(err, &ae) {
-		return fmt.Errorf("bedrock error [%s]: %s", ae.ErrorCode(), ae.ErrorMessage())
+		return wrap(500, fmt.Sprintf("bedrock error [%s]: %s", ae.ErrorCode(), ae.ErrorMessage()))
 	}
 
 	return err
@@ -423,12 +418,20 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 		return nil, err
 	}
 
-	toolConfig := c.convertToolConfig(options.Tools)
+	// ToolChoiceNone suppresses toolConfig, but Bedrock requires it when message history
+	// contains toolUse/toolResult blocks. In that case, fall back to no ToolChoice (auto).
+	toolOptions := options.ToolOptions
+
+	if toolOptions != nil && toolOptions.Choice == provider.ToolChoiceNone && inputHasToolBlocks(input) {
+		toolOptions = nil
+	}
+
+	config := c.convertToolConfig(options.Tools, toolOptions)
 
 	// Schema mode: create a tool with the schema and force ToolChoice
 	if options.Schema != nil {
-		if toolConfig == nil {
-			toolConfig = &types.ToolConfiguration{}
+		if config == nil {
+			config = &types.ToolConfiguration{}
 		}
 
 		tool := types.ToolSpecification{
@@ -439,14 +442,18 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 			tool.Description = aws.String(options.Schema.Description)
 		}
 
-		if options.Schema.Schema != nil {
-			tool.InputSchema = &types.ToolInputSchemaMemberJson{
-				Value: document.NewLazyDocument(options.Schema.Schema),
-			}
+		schema := options.Schema.Schema
+		if schema == nil {
+			// json_object mode: use a permissive schema that accepts any JSON object
+			schema = map[string]any{"type": "object"}
 		}
 
-		toolConfig.Tools = append(toolConfig.Tools, &types.ToolMemberToolSpec{Value: tool})
-		toolConfig.ToolChoice = &types.ToolChoiceMemberTool{
+		tool.InputSchema = &types.ToolInputSchemaMemberJson{
+			Value: document.NewLazyDocument(schema),
+		}
+
+		config.Tools = append(config.Tools, &types.ToolMemberToolSpec{Value: tool})
+		config.ToolChoice = &types.ToolChoiceMemberTool{
 			Value: types.SpecificToolChoice{
 				Name: aws.String(options.Schema.Name),
 			},
@@ -459,7 +466,7 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 		Messages: messages,
 
 		System:     c.convertSystem(input),
-		ToolConfig: toolConfig,
+		ToolConfig: config,
 	}, nil
 }
 
@@ -618,7 +625,7 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 			content = append(content, &types.ContentBlockMemberText{Value: text})
 		}
 
-		if c.Reasoning != nil {
+		if c.Reasoning != nil && c.Reasoning.Signature != "" {
 			content = append(content, &types.ContentBlockMemberReasoningContent{
 				Value: &types.ReasoningContentBlockMemberReasoningText{
 					Value: types.ReasoningTextBlock{
@@ -650,7 +657,7 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 	return content, nil
 }
 
-func (c *Completer) convertToolConfig(tools []provider.Tool) *types.ToolConfiguration {
+func (c *Completer) convertToolConfig(tools []provider.Tool, options *provider.ToolOptions) *types.ToolConfiguration {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -684,7 +691,43 @@ func (c *Completer) convertToolConfig(tools []provider.Tool) *types.ToolConfigur
 		})
 	}
 
+	if options != nil {
+		switch options.Choice {
+		case provider.ToolChoiceNone:
+			return nil
+
+		case provider.ToolChoiceAuto:
+			result.ToolChoice = &types.ToolChoiceMemberAuto{
+				Value: types.AutoToolChoice{},
+			}
+
+		case provider.ToolChoiceAny:
+			if len(options.Allowed) == 1 {
+				result.ToolChoice = &types.ToolChoiceMemberTool{
+					Value: types.SpecificToolChoice{
+						Name: aws.String(options.Allowed[0]),
+					},
+				}
+			} else {
+				result.ToolChoice = &types.ToolChoiceMemberAny{
+					Value: types.AnyToolChoice{},
+				}
+			}
+		}
+	}
+
 	return result
+}
+
+func inputHasToolBlocks(messages []provider.Message) bool {
+	for _, m := range messages {
+		for _, c := range m.Content {
+			if c.ToolCall != nil || c.ToolResult != nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func convertFile(val *provider.File) (types.ContentBlock, error) {

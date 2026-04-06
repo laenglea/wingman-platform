@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/adrianliechti/wingman/config"
+
 	"github.com/adrianliechti/wingman/server/anthropic"
 	"github.com/adrianliechti/wingman/server/api"
 	"github.com/adrianliechti/wingman/server/gemini"
@@ -66,14 +67,12 @@ func New(cfg *config.Config) (*Server, error) {
 			http.MethodOptions,
 		},
 
-		AllowedHeaders:   []string{"*"},
-		AllowCredentials: true,
+		AllowedHeaders: []string{"*"},
 
 		MaxAge: 300,
 	}))
 
 	mux.Use(otelhttp.NewMiddleware("http"))
-
 	mux.Use(s.handleAuth)
 
 	mux.Route("/v1", func(r chi.Router) {
@@ -92,27 +91,4 @@ func New(cfg *config.Config) (*Server, error) {
 
 func (s *Server) ListenAndServe() error {
 	return http.ListenAndServe(s.Address, s)
-}
-
-func (s *Server) handleAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-
-		var authorized = len(s.Authorizers) == 0
-
-		for _, a := range s.Authorizers {
-			if authCtx, err := a.Authenticate(ctx, r); err == nil {
-				ctx = authCtx
-				authorized = true
-				break
-			}
-		}
-
-		if !authorized {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
 }

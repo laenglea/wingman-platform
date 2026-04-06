@@ -5,7 +5,9 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/azurespeech"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
+	"github.com/adrianliechti/wingman/pkg/provider/xai"
 )
 
 func (cfg *Config) RegisterSynthesizer(id string, p provider.Synthesizer) {
@@ -37,9 +39,31 @@ func createSynthesizer(cfg providerConfig, model modelContext) (provider.Synthes
 	case "openai", "openai-compatible":
 		return openaiSynthesizer(cfg, model)
 
+	case "azurespeech", "azure-speech":
+		return azureSpeechSynthesizer(cfg, model)
+
+	case "xai":
+		return xaiSynthesizer(cfg, model)
+
 	default:
 		return nil, errors.New("invalid synthesizer type: " + cfg.Type)
 	}
+}
+
+func azureSpeechSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesizer, error) {
+	var options []azurespeech.Option
+
+	if cfg.Token != "" {
+		options = append(options, azurespeech.WithToken(cfg.Token))
+	}
+
+	if model.Client != nil {
+		options = append(options, azurespeech.WithClient(model.Client))
+	}
+
+	region := cfg.Vars["region"]
+
+	return azurespeech.NewSynthesizer(region, model.ID, options...)
 }
 
 func openaiSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesizer, error) {
@@ -53,5 +77,23 @@ func openaiSynthesizer(cfg providerConfig, model modelContext) (provider.Synthes
 		options = append(options, openai.WithClient(model.Client))
 	}
 
+	if model.MaxRetries != nil {
+		options = append(options, openai.WithMaxRetries(*model.MaxRetries))
+	}
+
 	return openai.NewSynthesizer(cfg.URL, model.ID, options...)
+}
+
+func xaiSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesizer, error) {
+	var options []xai.Option
+
+	if cfg.Token != "" {
+		options = append(options, xai.WithToken(cfg.Token))
+	}
+
+	if model.Client != nil {
+		options = append(options, xai.WithClient(model.Client))
+	}
+
+	return xai.NewSynthesizer(model.ID, options...)
 }

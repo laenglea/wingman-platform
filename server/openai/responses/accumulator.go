@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/google/uuid"
 )
 
 // StreamEventType represents the type of streaming event
@@ -13,6 +14,7 @@ const (
 	StreamEventResponseCreated    StreamEventType = "response.created"
 	StreamEventResponseInProgress StreamEventType = "response.in_progress"
 	StreamEventResponseCompleted  StreamEventType = "response.completed"
+	StreamEventResponseIncomplete StreamEventType = "response.incomplete"
 	StreamEventResponseFailed     StreamEventType = "response.failed"
 	StreamEventOutputItemAdded    StreamEventType = "output_item.added"
 	StreamEventOutputItemDone     StreamEventType = "output_item.done"
@@ -38,6 +40,11 @@ const (
 	StreamEventReasoningTextDone         StreamEventType = "reasoning_text.done"
 	StreamEventReasoningContentPartAdded StreamEventType = "reasoning_content_part.added"
 	StreamEventReasoningContentPartDone  StreamEventType = "reasoning_content_part.done"
+
+	// Compaction events
+	StreamEventCompactionItemAdded StreamEventType = "compaction_item.added"
+	StreamEventCompactionItemDone  StreamEventType = "compaction_item.done"
+
 )
 
 // StreamEvent represents a streaming event with its data
@@ -64,6 +71,10 @@ type StreamEvent struct {
 	SummaryIndex       int
 	ContentIndex       int
 
+	// For compaction events
+	CompactionID      string
+	CompactionContent string
+
 	// For error events
 	Error error
 
@@ -74,51 +85,221 @@ type StreamEvent struct {
 // StreamEventHandler is called for each streaming event
 type StreamEventHandler func(event StreamEvent) error
 
-// StreamingAccumulator wraps provider.CompletionAccumulator and emits events
-type StreamingAccumulator struct {
-	accumulator provider.CompletionAccumulator
+// accumulatedToolCall holds per-tool-call state during streaming.
+type accumulatedToolCall struct {
+	ID string // call ID (e.g. call_xxx)
 
+	Name        string
+	Arguments   strings.Builder
+	OutputIndex int
+	Started     bool
+}
+
+// StreamingAccumulator accumulates streaming completion chunks and emits
+// Responses API SSE events. It is self-contained — there is no separate
+// inner accumulator that could get out of sync.
+type StreamingAccumulator struct {
 	handler StreamEventHandler
+
+	// When true, incoming Reasoning.Text is emitted as summary events instead of text events.
+	ReasoningAsSummary bool
+
+	// When true, reasoning output is silently dropped (client didn't request reasoning).
+	SuppressReasoning bool
+
+	// Completion metadata (captured from chunks)
+	id     string
+	model  string
+	status provider.CompletionStatus
+	usage  *provider.Usage
 
 	// Track state for event emission
 	started            bool
 	hasOutputItem      bool // True if we emitted output_item.added for message
 	hasContentPart     bool // True if we emitted content_part.added
+	messageClosed      bool // True if we emitted output_item.done for message
 	messageOutputIndex int  // Output index for the message item
 	streamedText       strings.Builder
 
-	// Track tool calls - map from tool call ID to output index
-	toolCallIndices map[string]int
-	toolCallStarted map[string]bool
-	lastToolCallID  string // Track the last tool call ID for chunks without ID
-	nextOutputIndex int    // Next available output index
+	// Tool call state — single source of truth
+	toolCalls       []accumulatedToolCall
+	toolCallByID    map[string]int // effective call ID → index in toolCalls
+	lastToolCallID  string
+	nextOutputIndex int
 
-	// Track reasoning state
+	// Reasoning state
 	reasoningID              string
 	reasoningSignature       string
 	hasReasoningItem         bool
 	hasReasoningTextPart     bool
-	hasReasoningText         bool
 	hasReasoningSummaryPart  bool
-	hasReasoningSummary      bool
 	reasoningOutputIndex     int
 	reasoningClosed          bool
 	streamedReasoningText    strings.Builder
 	streamedReasoningSummary strings.Builder
+
+	// Compaction state
+	compactionID          string
+	compactionContent     string
+	hasCompactionItem     bool
+	compactionOutputIndex int
 }
 
 // NewStreamingAccumulator creates a new StreamingAccumulator with an event handler
 func NewStreamingAccumulator(handler StreamEventHandler) *StreamingAccumulator {
 	return &StreamingAccumulator{
-		handler:         handler,
-		toolCallIndices: make(map[string]int),
-		toolCallStarted: make(map[string]bool),
-		nextOutputIndex: 0,
+		handler:      handler,
+		toolCallByID: make(map[string]int),
 	}
 }
 
-// closeReasoning emits all the "done" events for reasoning if reasoning was in progress
-// This should be called before starting the message output
+func (s *StreamingAccumulator) reserveOutputIndex() int {
+	idx := s.nextOutputIndex
+	s.nextOutputIndex++
+	return idx
+}
+
+func (s *StreamingAccumulator) start() error {
+	if s.started {
+		return nil
+	}
+
+	s.started = true
+
+	if err := s.emitEvent(StreamEvent{Type: StreamEventResponseCreated}); err != nil {
+		return err
+	}
+
+	return s.emitEvent(StreamEvent{Type: StreamEventResponseInProgress})
+}
+
+func (s *StreamingAccumulator) ensureMessageItem() error {
+	if s.hasOutputItem {
+		return nil
+	}
+
+	s.hasOutputItem = true
+	s.messageOutputIndex = s.reserveOutputIndex()
+
+	return s.emitEvent(StreamEvent{
+		Type:        StreamEventOutputItemAdded,
+		OutputIndex: s.messageOutputIndex,
+	})
+}
+
+func (s *StreamingAccumulator) ensureMessageContentPart() error {
+	if s.hasContentPart {
+		return nil
+	}
+
+	s.hasContentPart = true
+
+	return s.emitEvent(StreamEvent{
+		Type:        StreamEventContentPartAdded,
+		OutputIndex: s.messageOutputIndex,
+	})
+}
+
+// trackToolCall ensures a tool call entry exists and returns its effective ID,
+// output index, and whether tracking succeeded.
+func (s *StreamingAccumulator) trackToolCall(toolCall provider.ToolCall) (string, int, bool) {
+	effectiveID := toolCall.ID
+
+	if effectiveID != "" {
+		if _, exists := s.toolCallByID[effectiveID]; !exists {
+			idx := len(s.toolCalls)
+			s.toolCalls = append(s.toolCalls, accumulatedToolCall{
+				ID:          effectiveID,
+				OutputIndex: s.reserveOutputIndex(),
+			})
+			s.toolCallByID[effectiveID] = idx
+		}
+		s.lastToolCallID = effectiveID
+	}
+
+	currentID := effectiveID
+	if currentID == "" {
+		currentID = s.lastToolCallID
+	}
+
+	if currentID == "" {
+		return "", 0, false
+	}
+
+	tc := &s.toolCalls[s.toolCallByID[currentID]]
+	return currentID, tc.OutputIndex, true
+}
+
+func (s *StreamingAccumulator) ensureToolCallStarted(callID string, toolCall provider.ToolCall, outputIndex int) error {
+	tc := &s.toolCalls[s.toolCallByID[callID]]
+	if tc.Started {
+		return nil
+	}
+
+	tc.Started = true
+
+	if toolCall.Name != "" {
+		tc.Name = toolCall.Name
+	}
+
+	return s.emitEvent(StreamEvent{
+		Type:         StreamEventFunctionCallAdded,
+		ToolCallID:   callID,
+		ToolCallName: tc.Name,
+		OutputIndex:  outputIndex,
+	})
+}
+
+func (s *StreamingAccumulator) ensureReasoningItem() error {
+	if s.hasReasoningItem {
+		return nil
+	}
+
+	s.hasReasoningItem = true
+	s.reasoningOutputIndex = s.reserveOutputIndex()
+
+	if s.reasoningID == "" {
+		s.reasoningID = "rs_" + uuid.NewString()
+	}
+
+	return s.emitEvent(StreamEvent{
+		Type:        StreamEventReasoningItemAdded,
+		ReasoningID: s.reasoningID,
+		OutputIndex: s.reasoningOutputIndex,
+	})
+}
+
+func (s *StreamingAccumulator) ensureReasoningTextPart() error {
+	if s.hasReasoningTextPart {
+		return nil
+	}
+
+	s.hasReasoningTextPart = true
+
+	return s.emitEvent(StreamEvent{
+		Type:         StreamEventReasoningContentPartAdded,
+		ReasoningID:  s.reasoningID,
+		OutputIndex:  s.reasoningOutputIndex,
+		ContentIndex: 0,
+	})
+}
+
+func (s *StreamingAccumulator) ensureReasoningSummaryPart() error {
+	if s.hasReasoningSummaryPart {
+		return nil
+	}
+
+	s.hasReasoningSummaryPart = true
+
+	return s.emitEvent(StreamEvent{
+		Type:         StreamEventReasoningSummaryPartAdded,
+		ReasoningID:  s.reasoningID,
+		OutputIndex:  s.reasoningOutputIndex,
+		SummaryIndex: 0,
+	})
+}
+
+// closeReasoning emits all the "done" events for reasoning if it was in progress.
 func (s *StreamingAccumulator) closeReasoning() error {
 	if !s.hasReasoningItem || s.reasoningClosed {
 		return nil
@@ -128,8 +309,7 @@ func (s *StreamingAccumulator) closeReasoning() error {
 	reasoningText := s.streamedReasoningText.String()
 	reasoningSummary := s.streamedReasoningSummary.String()
 
-	// Emit reasoning text done if we had text
-	if s.hasReasoningText {
+	if s.streamedReasoningText.Len() > 0 {
 		if err := s.emitEvent(StreamEvent{
 			Type:          StreamEventReasoningTextDone,
 			ReasoningID:   s.reasoningID,
@@ -140,7 +320,6 @@ func (s *StreamingAccumulator) closeReasoning() error {
 			return err
 		}
 
-		// content_part.done for reasoning
 		if err := s.emitEvent(StreamEvent{
 			Type:          StreamEventReasoningContentPartDone,
 			ReasoningID:   s.reasoningID,
@@ -152,8 +331,7 @@ func (s *StreamingAccumulator) closeReasoning() error {
 		}
 	}
 
-	// Emit summary done if we had summary
-	if s.hasReasoningSummary {
+	if s.streamedReasoningSummary.Len() > 0 {
 		if err := s.emitEvent(StreamEvent{
 			Type:             StreamEventReasoningSummaryDone,
 			ReasoningID:      s.reasoningID,
@@ -164,7 +342,6 @@ func (s *StreamingAccumulator) closeReasoning() error {
 			return err
 		}
 
-		// summary_part.done
 		if err := s.emitEvent(StreamEvent{
 			Type:             StreamEventReasoningSummaryPartDone,
 			ReasoningID:      s.reasoningID,
@@ -176,81 +353,211 @@ func (s *StreamingAccumulator) closeReasoning() error {
 		}
 	}
 
-	// output_item.done for reasoning
-	if err := s.emitEvent(StreamEvent{
+	return s.emitEvent(StreamEvent{
 		Type:               StreamEventReasoningItemDone,
 		ReasoningID:        s.reasoningID,
 		ReasoningText:      reasoningText,
 		ReasoningSummary:   reasoningSummary,
 		ReasoningSignature: s.reasoningSignature,
 		OutputIndex:        s.reasoningOutputIndex,
+	})
+}
+
+// closeMessage emits done events for the message item if it was in progress.
+func (s *StreamingAccumulator) closeMessage() error {
+	if !s.hasOutputItem || s.messageClosed || s.streamedText.Len() == 0 {
+		return nil
+	}
+
+	s.messageClosed = true
+	text := s.streamedText.String()
+
+	if err := s.emitEvent(StreamEvent{
+		Type:        StreamEventTextDone,
+		Text:        text,
+		OutputIndex: s.messageOutputIndex,
 	}); err != nil {
 		return err
 	}
 
-	return nil
-}
-
-// Add processes a completion chunk and emits appropriate events
-func (s *StreamingAccumulator) Add(c provider.Completion) error {
-	// Emit initial events on first add
-	if !s.started {
-		s.started = true
-
-		// response.created
-		if err := s.emitEvent(StreamEvent{
-			Type: StreamEventResponseCreated,
-		}); err != nil {
-			return err
-		}
-
-		// response.in_progress
-		if err := s.emitEvent(StreamEvent{
-			Type: StreamEventResponseInProgress,
-		}); err != nil {
-			return err
-		}
+	if err := s.emitEvent(StreamEvent{
+		Type:        StreamEventContentPartDone,
+		Text:        text,
+		OutputIndex: s.messageOutputIndex,
+	}); err != nil {
+		return err
 	}
 
-	// Check for message content
-	if c.Message != nil {
-		// Process text content
-		for _, content := range c.Message.Content {
-			if content.Text != "" {
-				s.streamedText.WriteString(content.Text)
+	return s.emitEvent(StreamEvent{
+		Type:        StreamEventOutputItemDone,
+		Text:        text,
+		OutputIndex: s.messageOutputIndex,
+	})
+}
 
-				// Emit output_item.added on first text (message container)
-				if !s.hasOutputItem {
-					// Close reasoning first if it was in progress
-					if err := s.closeReasoning(); err != nil {
-						return err
-					}
+// closePendingItems closes any in-progress reasoning and message items.
+// Must be called before emitting function call events so that the client
+// sees each output item completed before the next one starts.
+func (s *StreamingAccumulator) closePendingItems() error {
+	if err := s.closeReasoning(); err != nil {
+		return err
+	}
 
-					s.hasOutputItem = true
-					s.messageOutputIndex = s.nextOutputIndex
-					s.nextOutputIndex++ // Increment for next item
+	return s.closeMessage()
+}
 
-					if err := s.emitEvent(StreamEvent{
-						Type:        StreamEventOutputItemAdded,
-						OutputIndex: s.messageOutputIndex,
-					}); err != nil {
-						return err
-					}
+// Add processes a completion chunk and emits appropriate events.
+func (s *StreamingAccumulator) Add(c provider.Completion) error {
+	if err := s.start(); err != nil {
+		return err
+	}
+
+	// Capture metadata
+	if c.ID != "" {
+		s.id = c.ID
+	}
+	if c.Model != "" {
+		s.model = c.Model
+	}
+	if c.Status != "" {
+		s.status = c.Status
+	}
+	if c.Usage != nil {
+		s.usage = c.Usage
+	}
+
+	if c.Message == nil {
+		return nil
+	}
+
+	for _, content := range c.Message.Content {
+		// Compaction — atomic item, emitted as added+done.
+		// Must close pending reasoning/message first so each output item
+		// completes before the next one starts.
+		if content.Compaction != nil && content.Compaction.Signature != "" {
+			s.compactionContent = content.Compaction.Signature
+
+			if content.Compaction.ID != "" && s.compactionID == "" {
+				s.compactionID = content.Compaction.ID
+			}
+
+			if !s.hasCompactionItem {
+				if err := s.closePendingItems(); err != nil {
+					return err
 				}
 
-				// Emit content_part.added on first text
-				if !s.hasContentPart {
-					s.hasContentPart = true
+				s.hasCompactionItem = true
 
-					if err := s.emitEvent(StreamEvent{
-						Type:        StreamEventContentPartAdded,
-						OutputIndex: s.messageOutputIndex,
-					}); err != nil {
-						return err
-					}
+				if s.compactionID == "" {
+					s.compactionID = "comp_" + uuid.NewString()
 				}
 
-				// Emit text delta
+				s.compactionOutputIndex = s.reserveOutputIndex()
+
+				if err := s.emitEvent(StreamEvent{
+					Type:              StreamEventCompactionItemAdded,
+					CompactionID:      s.compactionID,
+					CompactionContent: s.compactionContent,
+					OutputIndex:       s.compactionOutputIndex,
+				}); err != nil {
+					return err
+				}
+
+				if err := s.emitEvent(StreamEvent{
+					Type:              StreamEventCompactionItemDone,
+					CompactionID:      s.compactionID,
+					CompactionContent: s.compactionContent,
+					OutputIndex:       s.compactionOutputIndex,
+				}); err != nil {
+					return err
+				}
+			}
+		}
+
+		// Reasoning — must be emitted before text or tool calls
+		if content.Reasoning != nil && !s.SuppressReasoning {
+			r := content.Reasoning
+
+			if r.ID != "" && s.reasoningID == "" {
+				s.reasoningID = r.ID
+			}
+
+			if r.Signature != "" {
+				s.reasoningSignature = r.Signature
+
+				if err := s.ensureReasoningItem(); err != nil {
+					return err
+				}
+			}
+
+			if r.Text != "" && s.ReasoningAsSummary {
+				// Redirect reasoning text to summary events when summary mode is active
+				r.Summary = r.Text
+				r.Text = ""
+			}
+
+			if r.Text != "" {
+				if err := s.ensureReasoningItem(); err != nil {
+					return err
+				}
+				if err := s.ensureReasoningTextPart(); err != nil {
+					return err
+				}
+
+				s.streamedReasoningText.WriteString(r.Text)
+
+				if err := s.emitEvent(StreamEvent{
+					Type:         StreamEventReasoningTextDelta,
+					ReasoningID:  s.reasoningID,
+					Delta:        r.Text,
+					OutputIndex:  s.reasoningOutputIndex,
+					ContentIndex: 0,
+				}); err != nil {
+					return err
+				}
+			}
+
+			if r.Summary != "" {
+				if err := s.ensureReasoningItem(); err != nil {
+					return err
+				}
+				if err := s.ensureReasoningSummaryPart(); err != nil {
+					return err
+				}
+
+				s.streamedReasoningSummary.WriteString(r.Summary)
+
+				if err := s.emitEvent(StreamEvent{
+					Type:         StreamEventReasoningSummaryDelta,
+					ReasoningID:  s.reasoningID,
+					Delta:        r.Summary,
+					OutputIndex:  s.reasoningOutputIndex,
+					SummaryIndex: 0,
+				}); err != nil {
+					return err
+				}
+			}
+		}
+
+		// Text — only emit if no tool calls have started yet; otherwise
+		// just accumulate (will be flushed in Complete). This prevents
+		// opening a message output item after function_call items when
+		// an upstream provider sends text after tool calls.
+		if content.Text != "" {
+			s.streamedText.WriteString(content.Text)
+
+			if len(s.toolCalls) == 0 {
+				if err := s.closeReasoning(); err != nil {
+					return err
+				}
+
+				if err := s.ensureMessageItem(); err != nil {
+					return err
+				}
+				if err := s.ensureMessageContentPart(); err != nil {
+					return err
+				}
+
 				if err := s.emitEvent(StreamEvent{
 					Type:        StreamEventTextDelta,
 					Delta:       content.Text,
@@ -259,271 +566,218 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 					return err
 				}
 			}
+		}
 
-			// Process tool calls
-			if content.ToolCall != nil {
-				toolCall := content.ToolCall
+		// Tool calls — close pending reasoning and message before starting
+		if content.ToolCall != nil {
+			tc := content.ToolCall
 
-				// If we have an ID, this is a new tool call
-				if toolCall.ID != "" {
-					if _, exists := s.toolCallIndices[toolCall.ID]; !exists {
-						// Assign output index
-						outputIndex := s.nextOutputIndex
-						s.toolCallIndices[toolCall.ID] = outputIndex
-						s.nextOutputIndex++
-						s.lastToolCallID = toolCall.ID
-					}
-				}
-
-				// Find the current tool call ID (either from this chunk or the last one)
-				currentToolCallID := toolCall.ID
-				if currentToolCallID == "" {
-					currentToolCallID = s.lastToolCallID
-				} else {
-					s.lastToolCallID = toolCall.ID
-				}
-
-				if currentToolCallID != "" {
-					outputIndex := s.toolCallIndices[currentToolCallID]
-
-					// Emit function_call.added on first occurrence
-					if !s.toolCallStarted[currentToolCallID] {
-						s.toolCallStarted[currentToolCallID] = true
-
-						if err := s.emitEvent(StreamEvent{
-							Type:         StreamEventFunctionCallAdded,
-							ToolCallID:   currentToolCallID,
-							ToolCallName: toolCall.Name,
-							OutputIndex:  outputIndex,
-						}); err != nil {
-							return err
-						}
-					}
-
-					// Emit arguments delta if we have arguments
-					if toolCall.Arguments != "" {
-						if err := s.emitEvent(StreamEvent{
-							Type:        StreamEventFunctionCallArgumentsDelta,
-							ToolCallID:  currentToolCallID,
-							Delta:       toolCall.Arguments,
-							OutputIndex: outputIndex,
-						}); err != nil {
-							return err
-						}
-					}
-				}
+			if err := s.closePendingItems(); err != nil {
+				return err
 			}
 
-			// Process reasoning content
-			if content.Reasoning != nil {
-				reasoning := content.Reasoning
+			currentID, outputIndex, ok := s.trackToolCall(*tc)
+			if !ok {
+				continue
+			}
 
-				// Capture signature/encrypted_content for conversation continuity
-				if reasoning.Signature != "" {
-					s.reasoningSignature = reasoning.Signature
-				}
+			if err := s.ensureToolCallStarted(currentID, *tc, outputIndex); err != nil {
+				return err
+			}
 
-				// Handle reasoning text
-				if reasoning.Text != "" {
-					// Emit reasoning item added on first reasoning content
-					if !s.hasReasoningItem {
-						s.hasReasoningItem = true
-						s.reasoningOutputIndex = s.nextOutputIndex
-						s.nextOutputIndex++
-						s.reasoningID = reasoning.ID
+			// Accumulate name and arguments
+			entry := &s.toolCalls[s.toolCallByID[currentID]]
 
-						if err := s.emitEvent(StreamEvent{
-							Type:        StreamEventReasoningItemAdded,
-							ReasoningID: s.reasoningID,
-							OutputIndex: s.reasoningOutputIndex,
-						}); err != nil {
-							return err
-						}
-					}
+			if tc.Name != "" {
+				entry.Name = tc.Name
+			}
 
-					// Emit content_part.added on first reasoning text
-					if !s.hasReasoningTextPart {
-						s.hasReasoningTextPart = true
+			if tc.Arguments != "" {
+				entry.Arguments.WriteString(tc.Arguments)
 
-						if err := s.emitEvent(StreamEvent{
-							Type:         StreamEventReasoningContentPartAdded,
-							ReasoningID:  s.reasoningID,
-							OutputIndex:  s.reasoningOutputIndex,
-							ContentIndex: 0,
-						}); err != nil {
-							return err
-						}
-					}
-
-					s.hasReasoningText = true
-					s.streamedReasoningText.WriteString(reasoning.Text)
-
-					// Emit reasoning text delta
-					if err := s.emitEvent(StreamEvent{
-						Type:         StreamEventReasoningTextDelta,
-						ReasoningID:  s.reasoningID,
-						Delta:        reasoning.Text,
-						OutputIndex:  s.reasoningOutputIndex,
-						ContentIndex: 0,
-					}); err != nil {
-						return err
-					}
-				}
-
-				// Handle reasoning summary
-				if reasoning.Summary != "" {
-					// Emit reasoning item added if not already done
-					if !s.hasReasoningItem {
-						s.hasReasoningItem = true
-						s.reasoningOutputIndex = s.nextOutputIndex
-						s.nextOutputIndex++
-						s.reasoningID = reasoning.ID
-
-						if err := s.emitEvent(StreamEvent{
-							Type:        StreamEventReasoningItemAdded,
-							ReasoningID: s.reasoningID,
-							OutputIndex: s.reasoningOutputIndex,
-						}); err != nil {
-							return err
-						}
-					}
-
-					// Emit summary_part.added on first summary
-					if !s.hasReasoningSummaryPart {
-						s.hasReasoningSummaryPart = true
-
-						if err := s.emitEvent(StreamEvent{
-							Type:         StreamEventReasoningSummaryPartAdded,
-							ReasoningID:  s.reasoningID,
-							OutputIndex:  s.reasoningOutputIndex,
-							SummaryIndex: 0,
-						}); err != nil {
-							return err
-						}
-					}
-
-					s.hasReasoningSummary = true
-					s.streamedReasoningSummary.WriteString(reasoning.Summary)
-
-					// Emit reasoning summary delta
-					if err := s.emitEvent(StreamEvent{
-						Type:         StreamEventReasoningSummaryDelta,
-						ReasoningID:  s.reasoningID,
-						Delta:        reasoning.Summary,
-						OutputIndex:  s.reasoningOutputIndex,
-						SummaryIndex: 0,
-					}); err != nil {
-						return err
-					}
+				if err := s.emitEvent(StreamEvent{
+					Type:        StreamEventFunctionCallArgumentsDelta,
+					ToolCallID:  currentID,
+					Delta:       tc.Arguments,
+					OutputIndex: outputIndex,
+				}); err != nil {
+					return err
 				}
 			}
 		}
-	}
 
-	// Add to underlying accumulator
-	s.accumulator.Add(c)
+	}
 
 	return nil
 }
 
-// Complete signals that streaming is done and emits final events
+// Complete signals that streaming is done and emits final events.
 func (s *StreamingAccumulator) Complete() error {
-	result := s.accumulator.Result()
-	text := s.streamedText.String()
-
-	// Only emit text/content done events if we actually had text content
-	if s.streamedText.Len() > 0 {
-		// text.done
-		if err := s.emitEvent(StreamEvent{
-			Type:        StreamEventTextDone,
-			Text:        text,
-			OutputIndex: s.messageOutputIndex,
-			Completion:  result,
-		}); err != nil {
-			return err
-		}
-
-		// content_part.done
-		if err := s.emitEvent(StreamEvent{
-			Type:        StreamEventContentPartDone,
-			Text:        text,
-			OutputIndex: s.messageOutputIndex,
-			Completion:  result,
-		}); err != nil {
-			return err
-		}
-
-		// output_item.done for message
-		if err := s.emitEvent(StreamEvent{
-			Type:        StreamEventOutputItemDone,
-			Text:        text,
-			OutputIndex: s.messageOutputIndex,
-			Completion:  result,
-		}); err != nil {
-			return err
-		}
+	if err := s.start(); err != nil {
+		return err
 	}
 
-	// Emit reasoning done events if reasoning wasn't already closed
+	result := s.Result()
+	text := s.streamedText.String()
+
+	// Close items in Responses API order: reasoning → message → tool calls
+
 	if err := s.closeReasoning(); err != nil {
 		return err
 	}
 
-	// Emit function_call_arguments.done and function_call.done for each tool call
-	if result.Message != nil {
-		for _, call := range result.Message.ToolCalls() {
-			outputIndex := s.toolCallIndices[call.ID]
+	// If text was buffered but never streamed (arrived after tool calls),
+	// emit the full message item now before closing tool calls.
+	if s.streamedText.Len() > 0 && !s.hasOutputItem {
+		s.hasOutputItem = true
+		s.messageOutputIndex = s.reserveOutputIndex()
 
-			// function_call_arguments.done
-			if err := s.emitEvent(StreamEvent{
-				Type:         StreamEventFunctionCallArgumentsDone,
-				ToolCallID:   call.ID,
-				ToolCallName: call.Name,
-				Arguments:    call.Arguments,
-				OutputIndex:  outputIndex,
-			}); err != nil {
-				return err
-			}
+		if err := s.emitEvent(StreamEvent{
+			Type:        StreamEventOutputItemAdded,
+			OutputIndex: s.messageOutputIndex,
+		}); err != nil {
+			return err
+		}
 
-			// function_call.done (output_item.done for the function call)
-			if err := s.emitEvent(StreamEvent{
-				Type:         StreamEventFunctionCallDone,
-				ToolCallID:   call.ID,
-				ToolCallName: call.Name,
-				Arguments:    call.Arguments,
-				OutputIndex:  outputIndex,
-				Completion:   result,
-			}); err != nil {
-				return err
-			}
+		if err := s.emitEvent(StreamEvent{
+			Type:        StreamEventContentPartAdded,
+			OutputIndex: s.messageOutputIndex,
+		}); err != nil {
+			return err
+		}
+
+		if err := s.emitEvent(StreamEvent{
+			Type:        StreamEventTextDelta,
+			Delta:       text,
+			OutputIndex: s.messageOutputIndex,
+		}); err != nil {
+			return err
 		}
 	}
 
-	// response.completed
-	if err := s.emitEvent(StreamEvent{
-		Type:               StreamEventResponseCompleted,
+	// Close message if not already closed
+	if s.streamedText.Len() > 0 && !s.messageClosed {
+		s.messageClosed = true
+
+		if err := s.emitEvent(StreamEvent{
+			Type: StreamEventTextDone, Text: text,
+			OutputIndex: s.messageOutputIndex, Completion: result,
+		}); err != nil {
+			return err
+		}
+		if err := s.emitEvent(StreamEvent{
+			Type: StreamEventContentPartDone, Text: text,
+			OutputIndex: s.messageOutputIndex, Completion: result,
+		}); err != nil {
+			return err
+		}
+		if err := s.emitEvent(StreamEvent{
+			Type: StreamEventOutputItemDone, Text: text,
+			OutputIndex: s.messageOutputIndex, Completion: result,
+		}); err != nil {
+			return err
+		}
+	}
+
+	// Emit done events for each tool call
+	for i := range s.toolCalls {
+		tc := &s.toolCalls[i]
+
+		args := tc.Arguments.String()
+
+		if err := s.emitEvent(StreamEvent{
+			Type:         StreamEventFunctionCallArgumentsDone,
+			ToolCallID:   tc.ID,
+			ToolCallName: tc.Name,
+			Arguments:    args,
+			OutputIndex:  tc.OutputIndex,
+		}); err != nil {
+			return err
+		}
+
+		if err := s.emitEvent(StreamEvent{
+			Type:         StreamEventFunctionCallDone,
+			ToolCallID:   tc.ID,
+			ToolCallName: tc.Name,
+			Arguments:    args,
+			OutputIndex:  tc.OutputIndex,
+			Completion:   result,
+		}); err != nil {
+			return err
+		}
+	}
+
+	terminalType := StreamEventResponseCompleted
+	if s.status == provider.CompletionStatusIncomplete {
+		terminalType = StreamEventResponseIncomplete
+	}
+
+	return s.emitEvent(StreamEvent{
+		Type:               terminalType,
 		Text:               text,
 		ReasoningID:        s.reasoningID,
 		ReasoningSignature: s.reasoningSignature,
+		CompactionID:       s.compactionID,
+		CompactionContent:  s.compactionContent,
 		Completion:         result,
-	}); err != nil {
-		return err
-	}
-
-	return nil
+	})
 }
 
 // Error emits an error event
 func (s *StreamingAccumulator) Error(err error) error {
+	_ = s.start()
+
 	return s.emitEvent(StreamEvent{
 		Type:  StreamEventResponseFailed,
 		Error: err,
 	})
 }
 
-// Result returns the accumulated completion
+// Result builds the accumulated completion from the accumulator's own state.
 func (s *StreamingAccumulator) Result() *provider.Completion {
-	return s.accumulator.Result()
+	var content []provider.Content
+
+	if s.hasReasoningItem {
+		r := provider.Reasoning{
+			ID:        s.reasoningID,
+			Text:      s.streamedReasoningText.String(),
+			Summary:   s.streamedReasoningSummary.String(),
+			Signature: s.reasoningSignature,
+		}
+		content = append(content, provider.ReasoningContent(r))
+	}
+
+	if s.hasCompactionItem {
+		content = append(content, provider.CompactionContent(provider.Compaction{
+			ID:        s.compactionID,
+			Signature: s.compactionContent,
+		}))
+	}
+
+	if s.streamedText.Len() > 0 {
+		content = append(content, provider.TextContent(s.streamedText.String()))
+	}
+
+	for i := range s.toolCalls {
+		tc := &s.toolCalls[i]
+		content = append(content, provider.ToolCallContent(provider.ToolCall{
+			ID:        tc.ID,
+			Name:      tc.Name,
+			Arguments: tc.Arguments.String(),
+		}))
+	}
+
+	return &provider.Completion{
+		ID:     s.id,
+		Model:  s.model,
+		Status: s.status,
+		Usage:  s.usage,
+
+		Message: &provider.Message{
+			Role:    provider.MessageRoleAssistant,
+			Content: content,
+		},
+	}
 }
 
 func (s *StreamingAccumulator) emitEvent(event StreamEvent) error {

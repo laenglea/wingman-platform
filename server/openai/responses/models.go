@@ -16,6 +16,8 @@ type ResponsesRequest struct {
 
 	Input ResponsesInput `json:"input"`
 
+	Include []string `json:"include,omitempty"`
+
 	Tools []Tool `json:"tools,omitempty"`
 
 	Text *TextConfig `json:"text,omitempty"`
@@ -25,13 +27,25 @@ type ResponsesRequest struct {
 
 	Reasoning *ReasoningConfig `json:"reasoning,omitempty"`
 
-	//ToolChoice        any  `json:"tool_choice,omitempty"`
-	//ParallelToolCalls bool `json:"parallel_tool_calls,omitempty"`
+	ContextManagement []ContextManagementConfig `json:"context_management,omitempty"`
+
+	ToolChoice        *ToolChoice `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool       `json:"parallel_tool_calls,omitempty"`
+
+	Truncation string `json:"truncation,omitempty"`
+}
+
+// ContextManagementConfig represents a context management entry
+type ContextManagementConfig struct {
+	Type string `json:"type"`
+
+	CompactThreshold *int64 `json:"compact_threshold,omitempty"`
 }
 
 // ReasoningConfig contains configuration options for reasoning models
 type ReasoningConfig struct {
-	Effort *ReasoningEffort `json:"effort,omitempty"`
+	Effort  *ReasoningEffort `json:"effort"`
+	Summary *any             `json:"summary"`
 }
 
 type ReasoningEffort string
@@ -48,7 +62,7 @@ var (
 // TextConfig represents configuration options for text responses
 type TextConfig struct {
 	Format    *TextFormat `json:"format,omitempty"`
-	Verbosity *Verbosity  `json:"verbosity,omitempty"`
+	Verbosity Verbosity   `json:"verbosity,omitempty"`
 }
 
 type Verbosity string
@@ -74,8 +88,10 @@ type TextFormat struct {
 type ToolType string
 
 const (
-	ToolTypeFunction ToolType = "function"
-	ToolTypeCustom   ToolType = "custom"
+	ToolTypeFunction    ToolType = "function"
+	ToolTypeCustom      ToolType = "custom"
+	ToolTypeApplyPatch  ToolType = "apply_patch"
+	ToolTypeComputer    ToolType = "computer"
 )
 
 // Tool represents a tool in the request
@@ -92,6 +108,74 @@ type Tool struct {
 	Format *CustomToolFormat `json:"format,omitempty"`
 }
 
+type ToolChoice struct {
+	Mode ToolChoiceMode `json:"mode,omitempty"`
+
+	AllowedTools []ToolChoiceAllowedTool `json:"allowed_tools,omitempty"`
+}
+
+type ToolChoiceMode string
+
+const (
+	ToolChoiceModeNone     ToolChoiceMode = "none"
+	ToolChoiceModeAuto     ToolChoiceMode = "auto"
+	ToolChoiceModeRequired ToolChoiceMode = "required"
+)
+
+type ToolChoiceAllowedTool struct {
+	Type string `json:"type"`
+	Name string `json:"name,omitempty"`
+}
+
+func (t *ToolChoice) UnmarshalJSON(data []byte) error {
+	var mode string
+
+	if err := json.Unmarshal(data, &mode); err == nil {
+		t.Mode = ToolChoiceMode(mode)
+		return nil
+	}
+
+	var function struct {
+		Type string `json:"type"`
+		Name string `json:"name,omitempty"`
+	}
+
+	if err := json.Unmarshal(data, &function); err == nil && function.Type == "function" && function.Name != "" {
+		t.Mode = ToolChoiceModeRequired
+		t.AllowedTools = []ToolChoiceAllowedTool{{
+			Type: function.Type,
+			Name: function.Name,
+		}}
+		return nil
+	}
+
+	// Handle {"type":"allowed_tools","mode":"...","tools":[...]} format from OpenAI SDK
+	var allowedTools struct {
+		Type string `json:"type"`
+
+		Mode  ToolChoiceMode          `json:"mode"`
+		Tools []ToolChoiceAllowedTool `json:"tools"`
+	}
+
+	if err := json.Unmarshal(data, &allowedTools); err == nil && allowedTools.Type == "allowed_tools" {
+		t.Mode = allowedTools.Mode
+		t.AllowedTools = allowedTools.Tools
+		return nil
+	}
+
+	type alias ToolChoice
+
+	var value alias
+
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+
+	*t = ToolChoice(value)
+
+	return nil
+}
+
 // CustomToolFormat describes the format for custom tools
 type CustomToolFormat struct {
 	Type       string `json:"type,omitempty"`       // "grammar"
@@ -103,10 +187,15 @@ type CustomToolFormat struct {
 type InputItemType string
 
 const (
-	InputItemTypeMessage            InputItemType = "message"
-	InputItemTypeReasoning          InputItemType = "reasoning"
-	InputItemTypeFunctionCall       InputItemType = "function_call"
-	InputItemTypeFunctionCallOutput InputItemType = "function_call_output"
+	InputItemTypeMessage              InputItemType = "message"
+	InputItemTypeReasoning            InputItemType = "reasoning"
+	InputItemTypeCompaction           InputItemType = "compaction"
+	InputItemTypeFunctionCall         InputItemType = "function_call"
+	InputItemTypeFunctionCallOutput   InputItemType = "function_call_output"
+	InputItemTypeApplyPatchCall       InputItemType = "apply_patch_call"
+	InputItemTypeApplyPatchCallOutput InputItemType = "apply_patch_call_output"
+	InputItemTypeComputerCall         InputItemType = "computer_call"
+	InputItemTypeComputerCallOutput   InputItemType = "computer_call_output"
 )
 
 type ResponsesInput struct {
@@ -123,11 +212,56 @@ type InputItem struct {
 	// For reasoning type
 	*InputReasoning
 
+	// For compaction type
+	*InputCompaction
+
 	// For function_call type
 	*InputFunctionCall
 
 	// For function_call_output type
 	*InputFunctionCallOutput
+
+	// For apply_patch_call type
+	*InputApplyPatchCall
+
+	// For apply_patch_call_output type
+	*InputApplyPatchCallOutput
+
+	// For computer_call type
+	*InputComputerCall
+
+	// For computer_call_output type
+	*InputComputerCallOutput
+}
+
+// InputComputerCall represents a computer call in the input (for multi-turn)
+type InputComputerCall struct {
+	ID      string `json:"id,omitempty"`
+	CallID  string `json:"call_id,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Actions []any  `json:"actions,omitempty"`
+}
+
+// InputComputerCallOutput represents the result of a computer call
+type InputComputerCallOutput struct {
+	CallID string `json:"call_id,omitempty"`
+	Output any    `json:"output,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+// InputApplyPatchCall represents an apply_patch call in the input (for multi-turn)
+type InputApplyPatchCall struct {
+	ID        string              `json:"id,omitempty"`
+	CallID    string              `json:"call_id,omitempty"`
+	Status    string              `json:"status,omitempty"`
+	Operation ApplyPatchOperation `json:"operation,omitempty"`
+}
+
+// InputApplyPatchCallOutput represents the result of an apply_patch call
+type InputApplyPatchCallOutput struct {
+	CallID string `json:"call_id,omitempty"`
+	Output string `json:"output,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 // InputReasoning represents a reasoning item in the input
@@ -136,6 +270,12 @@ type InputReasoning struct {
 	Summary          []ReasoningSummaryPart `json:"summary,omitempty"`
 	Content          json.RawMessage        `json:"content,omitempty"`           // Can be null
 	EncryptedContent string                 `json:"encrypted_content,omitempty"` // Base64 encoded
+}
+
+// InputCompaction represents a compaction item in the input
+type InputCompaction struct {
+	ID               string `json:"id,omitempty"`
+	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
 
 // ReasoningSummaryPart represents a part of the reasoning summary
@@ -216,6 +356,13 @@ func (ri *ResponsesInput) UnmarshalJSON(data []byte) error {
 			}
 			item.InputReasoning = &reasoning
 
+		case InputItemTypeCompaction:
+			var compaction InputCompaction
+			if err := json.Unmarshal(raw, &compaction); err != nil {
+				return err
+			}
+			item.InputCompaction = &compaction
+
 		case InputItemTypeFunctionCall:
 			var fc InputFunctionCall
 			if err := json.Unmarshal(raw, &fc); err != nil {
@@ -229,6 +376,34 @@ func (ri *ResponsesInput) UnmarshalJSON(data []byte) error {
 				return err
 			}
 			item.InputFunctionCallOutput = &fco
+
+		case InputItemTypeApplyPatchCall:
+			var apc InputApplyPatchCall
+			if err := json.Unmarshal(raw, &apc); err != nil {
+				return err
+			}
+			item.InputApplyPatchCall = &apc
+
+		case InputItemTypeApplyPatchCallOutput:
+			var apco InputApplyPatchCallOutput
+			if err := json.Unmarshal(raw, &apco); err != nil {
+				return err
+			}
+			item.InputApplyPatchCallOutput = &apco
+
+		case InputItemTypeComputerCall:
+			var cc InputComputerCall
+			if err := json.Unmarshal(raw, &cc); err != nil {
+				return err
+			}
+			item.InputComputerCall = &cc
+
+		case InputItemTypeComputerCallOutput:
+			var cco InputComputerCallOutput
+			if err := json.Unmarshal(raw, &cco); err != nil {
+				return err
+			}
+			item.InputComputerCallOutput = &cco
 
 		default:
 			return fmt.Errorf("unknown input item type: %s", typeWrapper.Type)
@@ -346,31 +521,86 @@ const (
 	InputContentText  InputContentType = "input_text"
 	InputContentImage InputContentType = "input_image"
 	InputContentFile  InputContentType = "input_file"
+
+	OutputContentText InputContentType = "output_text"
 )
 
 type Response struct {
-	ID string `json:"id,omitempty"`
+	ID     string `json:"id"`
+	Object string `json:"object"` // response
 
-	Object string `json:"object,omitempty"` // response
+	CreatedAt   int64  `json:"created_at"`
+	CompletedAt *int64 `json:"completed_at"`
 
-	CreatedAt int64 `json:"created_at"`
+	Model  string `json:"model"`
+	Status string `json:"status"` // completed, failed, in_progress, incomplete
 
-	Model string `json:"model,omitempty"`
-
-	Status string `json:"status,omitempty"` // completed, failed, in_progress, incomplete
+	Background bool `json:"background"`
 
 	Output []ResponseOutput `json:"output"`
 
-	Usage *Usage `json:"usage,omitempty"`
+	Error             *ResponseError `json:"error"`
+	IncompleteDetails *any           `json:"incomplete_details"`
 
-	Error *ResponseError `json:"error,omitempty"`
+	Instructions       *string `json:"instructions"`
+	MaxOutputTokens    *int    `json:"max_output_tokens"`
+	MaxToolCalls       *int    `json:"max_tool_calls"`
+	Metadata           any     `json:"metadata"`
+	ParallelToolCalls  bool    `json:"parallel_tool_calls"`
+	PreviousResponseID *string `json:"previous_response_id"`
+
+	Reasoning *ReasoningConfig `json:"reasoning"`
+
+	ServiceTier string  `json:"service_tier"`
+	Store       bool    `json:"store"`
+	Temperature float32 `json:"temperature"`
+
+	Text *TextConfig `json:"text"`
+
+	ToolChoice any   `json:"tool_choice"`
+	Tools      []any `json:"tools"`
+
+	TopLogprobs      int     `json:"top_logprobs"`
+	TopP             float32 `json:"top_p"`
+	Truncation       string  `json:"truncation"`
+	FrequencyPenalty float32 `json:"frequency_penalty"`
+	PresencePenalty  float32 `json:"presence_penalty"`
+
+	PromptCacheKey       *string `json:"prompt_cache_key"`
+	PromptCacheRetention *string `json:"prompt_cache_retention"`
+
+	Billing *ResponseBilling `json:"billing,omitempty"`
+
+	SafetyIdentifier *string `json:"safety_identifier"`
+
+	Usage *Usage `json:"usage"`
+	User  *any   `json:"user"`
+}
+
+// ResponseBilling represents billing information
+type ResponseBilling struct {
+	Payer string `json:"payer,omitempty"` // "developer"
 }
 
 // Usage contains token usage information
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens        int                     `json:"input_tokens"`
+	InputTokensDetails *InputTokensDetails     `json:"input_tokens_details"`
+
+	OutputTokens        int                    `json:"output_tokens"`
+	OutputTokensDetails *OutputTokensDetails   `json:"output_tokens_details"`
+
+	TotalTokens int `json:"total_tokens"`
+}
+
+// InputTokensDetails contains detailed input token breakdown
+type InputTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+// OutputTokensDetails contains detailed output token breakdown
+type OutputTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
 // ResponseError contains error details when a response fails
@@ -386,7 +616,10 @@ type ResponseOutput struct {
 
 	*OutputMessage
 	*FunctionCallOutputItem
+	*ApplyPatchCallItem
+	*ComputerCallItem
 	*ReasoningOutputItem
+	*CompactionOutputItem
 }
 
 // MarshalJSON implements custom JSON marshaling to avoid field conflicts
@@ -401,12 +634,14 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 				Role     MessageRole        `json:"role,omitempty"`
 				Status   string             `json:"status,omitempty"`
 				Contents []OutputContent    `json:"content"`
+				Phase    string             `json:"phase,omitempty"`
 			}{
 				Type:     r.Type,
 				ID:       r.OutputMessage.ID,
 				Role:     r.OutputMessage.Role,
 				Status:   r.OutputMessage.Status,
 				Contents: r.OutputMessage.Contents,
+				Phase:    r.OutputMessage.Phase,
 			})
 		}
 	case ResponseOutputTypeFunctionCall:
@@ -427,22 +662,62 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 				Arguments: r.FunctionCallOutputItem.Arguments,
 			})
 		}
+	case ResponseOutputTypeComputerCall:
+		if r.ComputerCallItem != nil {
+			return json.Marshal(struct {
+				Type    ResponseOutputType `json:"type"`
+				ID      string             `json:"id"`
+				Status  string             `json:"status"`
+				CallID  string             `json:"call_id"`
+				Actions []any              `json:"actions"`
+			}{
+				Type:    r.Type,
+				ID:      r.ComputerCallItem.ID,
+				Status:  r.ComputerCallItem.Status,
+				CallID:  r.ComputerCallItem.CallID,
+				Actions: r.ComputerCallItem.Actions,
+			})
+		}
+	case ResponseOutputTypeApplyPatchCall:
+		if r.ApplyPatchCallItem != nil {
+			return json.Marshal(struct {
+				Type      ResponseOutputType  `json:"type"`
+				ID        string              `json:"id"`
+				Status    string              `json:"status"`
+				CallID    string              `json:"call_id"`
+				Operation ApplyPatchOperation `json:"operation"`
+			}{
+				Type:      r.Type,
+				ID:        r.ApplyPatchCallItem.ID,
+				Status:    r.ApplyPatchCallItem.Status,
+				CallID:    r.ApplyPatchCallItem.CallID,
+				Operation: r.ApplyPatchCallItem.Operation,
+			})
+		}
 	case ResponseOutputTypeReasoning:
 		if r.ReasoningOutputItem != nil {
 			return json.Marshal(struct {
 				Type             ResponseOutputType           `json:"type"`
 				ID               string                       `json:"id"`
-				Status           string                       `json:"status"`
 				Summary          []ReasoningOutputSummary     `json:"summary,omitempty"`
-				Content          []ReasoningOutputContentPart `json:"content,omitempty"`
 				EncryptedContent string                       `json:"encrypted_content,omitempty"`
 			}{
 				Type:             r.Type,
 				ID:               r.ReasoningOutputItem.ID,
-				Status:           r.ReasoningOutputItem.Status,
 				Summary:          r.ReasoningOutputItem.Summary,
-				Content:          r.ReasoningOutputItem.Content,
 				EncryptedContent: r.ReasoningOutputItem.EncryptedContent,
+			})
+		}
+	case ResponseOutputTypeCompaction:
+		if r.CompactionOutputItem != nil {
+			return json.Marshal(struct {
+				Type             ResponseOutputType `json:"type"`
+				ID               string             `json:"id"`
+				EncryptedContent string             `json:"encrypted_content,omitempty"`
+			}{
+				Type:             r.Type,
+				ID:               r.CompactionOutputItem.ID,
+				EncryptedContent: r.CompactionOutputItem.EncryptedContent,
 			})
 		}
 	}
@@ -455,10 +730,35 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 type ResponseOutputType string
 
 var (
-	ResponseOutputTypeMessage      ResponseOutputType = "message"
-	ResponseOutputTypeFunctionCall ResponseOutputType = "function_call"
-	ResponseOutputTypeReasoning    ResponseOutputType = "reasoning"
+	ResponseOutputTypeMessage        ResponseOutputType = "message"
+	ResponseOutputTypeFunctionCall   ResponseOutputType = "function_call"
+	ResponseOutputTypeApplyPatchCall ResponseOutputType = "apply_patch_call"
+	ResponseOutputTypeComputerCall   ResponseOutputType = "computer_call"
+	ResponseOutputTypeReasoning      ResponseOutputType = "reasoning"
+	ResponseOutputTypeCompaction     ResponseOutputType = "compaction"
 )
+
+// ComputerCallItem represents a computer use tool call in the output
+type ComputerCallItem struct {
+	ID      string `json:"id"`
+	CallID  string `json:"call_id"`
+	Status  string `json:"status"`
+	Actions []any  `json:"actions"`
+}
+
+// ApplyPatchCallItem represents an apply_patch tool call in the output
+type ApplyPatchCallItem struct {
+	ID     string              `json:"id"`
+	CallID string              `json:"call_id"`
+	Status string              `json:"status"`
+	Operation ApplyPatchOperation `json:"operation"`
+}
+
+type ApplyPatchOperation struct {
+	Type string `json:"type"` // "create_file", "update_file", "delete_file"
+	Path string `json:"path"`
+	Diff string `json:"diff"`
+}
 
 type OutputMessage struct {
 	ID string `json:"id,omitempty"`
@@ -468,11 +768,15 @@ type OutputMessage struct {
 	Status string `json:"status,omitempty"` // completed
 
 	Contents []OutputContent `json:"content"`
+
+	Phase string `json:"phase,omitempty"` // final_answer
 }
 
 type OutputContent struct {
-	Type string `json:"type,omitempty"`
-	Text string `json:"text,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Text        string `json:"text,omitempty"`
+	Annotations []any  `json:"annotations"`
+	Logprobs    []any  `json:"logprobs"`
 }
 
 // https://platform.openai.com/docs/api-reference/responses-streaming/response/created
@@ -492,6 +796,13 @@ type ResponseInProgressEvent struct {
 // https://platform.openai.com/docs/api-reference/responses-streaming/response/completed
 type ResponseCompletedEvent struct {
 	Type           string    `json:"type"` // response.completed
+	SequenceNumber int       `json:"sequence_number"`
+	Response       *Response `json:"response"`
+}
+
+// https://platform.openai.com/docs/api-reference/responses-streaming/response/incomplete
+type ResponseIncompleteEvent struct {
+	Type           string    `json:"type"` // response.incomplete
 	SequenceNumber int       `json:"sequence_number"`
 	Response       *Response `json:"response"`
 }
@@ -524,6 +835,7 @@ type OutputItem struct {
 	Type    string          `json:"type"` // message
 	Status  string          `json:"status"`
 	Content []OutputContent `json:"content"`
+	Phase   string          `json:"phase,omitempty"`
 	Role    MessageRole     `json:"role,omitempty"`
 }
 
@@ -555,6 +867,7 @@ type OutputTextDeltaEvent struct {
 	OutputIndex    int    `json:"output_index"`
 	ContentIndex   int    `json:"content_index"`
 	Delta          string `json:"delta"`
+	Logprobs       []any  `json:"logprobs"`
 }
 
 // https://platform.openai.com/docs/api-reference/responses-streaming/response/output_text/done
@@ -565,6 +878,7 @@ type OutputTextDoneEvent struct {
 	OutputIndex    int    `json:"output_index"`
 	ContentIndex   int    `json:"content_index"`
 	Text           string `json:"text"`
+	Logprobs       []any  `json:"logprobs"`
 }
 
 // https://platform.openai.com/docs/api-reference/responses-streaming/response/function_call_arguments/delta
@@ -610,6 +924,29 @@ type FunctionCallOutputItemDoneEvent struct {
 	SequenceNumber int                     `json:"sequence_number"`
 	OutputIndex    int                     `json:"output_index"`
 	Item           *FunctionCallOutputItem `json:"item"`
+}
+
+// CompactionOutputItem represents a compaction item in the output
+type CompactionOutputItem struct {
+	ID               string `json:"id"`
+	Type             string `json:"type"` // compaction
+	EncryptedContent string `json:"encrypted_content,omitempty"`
+}
+
+// CompactionOutputItemAddedEvent is emitted when a compaction item is added
+type CompactionOutputItemAddedEvent struct {
+	Type           string                `json:"type"` // response.output_item.added
+	SequenceNumber int                   `json:"sequence_number"`
+	OutputIndex    int                   `json:"output_index"`
+	Item           *CompactionOutputItem `json:"item"`
+}
+
+// CompactionOutputItemDoneEvent is emitted when a compaction item is done
+type CompactionOutputItemDoneEvent struct {
+	Type           string                `json:"type"` // response.output_item.done
+	SequenceNumber int                   `json:"sequence_number"`
+	OutputIndex    int                   `json:"output_index"`
+	Item           *CompactionOutputItem `json:"item"`
 }
 
 // ReasoningOutputItem represents a reasoning item in the output

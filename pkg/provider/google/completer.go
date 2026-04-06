@@ -116,43 +116,54 @@ func convertGenerateConfig(instruction *genai.Content, options *provider.Complet
 		SystemInstruction: instruction,
 	}
 
-	// // Configure thinking based on effort level
-	// switch options.Effort {
-	// case provider.EffortMinimal:
-	// 	config.ThinkingConfig = &genai.ThinkingConfig{
-	// 		IncludeThoughts: true,
-	// 		ThinkingLevel:   genai.ThinkingLevelMinimal,
-	// 	}
-	// case provider.EffortLow:
-	// 	config.ThinkingConfig = &genai.ThinkingConfig{
-	// 		IncludeThoughts: true,
-	// 		ThinkingLevel:   genai.ThinkingLevelLow,
-	// 	}
-	// case provider.EffortMedium:
-	// 	config.ThinkingConfig = &genai.ThinkingConfig{
-	// 		IncludeThoughts: true,
-	// 		ThinkingLevel:   genai.ThinkingLevelMedium,
-	// 	}
-	// case provider.EffortHigh:
-	// 	config.ThinkingConfig = &genai.ThinkingConfig{
-	// 		IncludeThoughts: true,
-	// 		ThinkingLevel:   genai.ThinkingLevelHigh,
-	// 	}
-	// }
+	if options.ReasoningOptions != nil {
+		config.ThinkingConfig = &genai.ThinkingConfig{
+			IncludeThoughts: true,
+		}
+
+		switch options.ReasoningOptions.Effort {
+		case provider.EffortMinimal:
+			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelMinimal
+		case provider.EffortLow:
+			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelLow
+		case provider.EffortMedium:
+			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelMedium
+		case provider.EffortHigh, provider.EffortMax:
+			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelHigh
+		}
+	}
 
 	if len(options.Tools) > 0 {
 		config.Tools = convertTools(options.Tools)
 
-		// Check if any tool has Strict=true, if so use VALIDATED mode
-		for _, t := range options.Tools {
-			if t.Strict != nil && *t.Strict {
-				config.ToolConfig = &genai.ToolConfig{
-					FunctionCallingConfig: &genai.FunctionCallingConfig{
-						Mode: genai.FunctionCallingConfigModeValidated,
-					},
-				}
-				break
+		fcc := &genai.FunctionCallingConfig{}
+
+		if options.ToolOptions != nil {
+			switch options.ToolOptions.Choice {
+			case provider.ToolChoiceNone:
+				fcc.Mode = genai.FunctionCallingConfigModeNone
+
+			case provider.ToolChoiceAuto:
+				fcc.Mode = genai.FunctionCallingConfigModeAuto
+
+			case provider.ToolChoiceAny:
+				fcc.Mode = genai.FunctionCallingConfigModeAny
+				fcc.AllowedFunctionNames = options.ToolOptions.Allowed
 			}
+		}
+
+		// Upgrade to VALIDATED mode if any tool has Strict=true (schema enforcement)
+		if fcc.Mode == "" || fcc.Mode == genai.FunctionCallingConfigModeAuto {
+			for _, t := range options.Tools {
+				if t.Strict != nil && *t.Strict {
+					fcc.Mode = genai.FunctionCallingConfigModeValidated
+					break
+				}
+			}
+		}
+
+		config.ToolConfig = &genai.ToolConfig{
+			FunctionCallingConfig: fcc,
 		}
 	}
 
@@ -237,7 +248,7 @@ func convertContent(message provider.Message) (*genai.Content, error) {
 				content.Parts = append(content.Parts, part)
 			}
 
-			if c.Reasoning != nil {
+			if c.Reasoning != nil && c.Reasoning.Signature != "" {
 				part := genai.NewPartFromText(c.Reasoning.Text)
 				part.Thought = true
 				part.ThoughtSignature = []byte(c.Reasoning.Signature)

@@ -8,7 +8,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/semconv/v1.38.0/genaiconv"
+	"go.opentelemetry.io/otel/semconv/v1.40.0/genaiconv"
 )
 
 type Completer interface {
@@ -105,6 +105,30 @@ func (p *observableCompleter) Complete(ctx context.Context, messages []provider.
 						genaiconv.OperationNameChat,
 						providerName,
 						genaiconv.TokenTypeOutput,
+						KeyValues([]KeyValue{
+							p.tokenUsageMetric.AttrRequestModel(p.model),
+							p.tokenUsageMetric.AttrResponseModel(providerModel),
+						}, EndUserAttrs(ctx))...,
+					)
+				}
+
+				if lastResult.Usage.CacheCreationInputTokens > 0 {
+					p.tokenUsageMetric.Record(ctx, int64(lastResult.Usage.CacheCreationInputTokens),
+						genaiconv.OperationNameChat,
+						providerName,
+						TokenTypeCacheCreation,
+						KeyValues([]KeyValue{
+							p.tokenUsageMetric.AttrRequestModel(p.model),
+							p.tokenUsageMetric.AttrResponseModel(providerModel),
+						}, EndUserAttrs(ctx))...,
+					)
+				}
+
+				if lastResult.Usage.CacheReadInputTokens > 0 {
+					p.tokenUsageMetric.Record(ctx, int64(lastResult.Usage.CacheReadInputTokens),
+						genaiconv.OperationNameChat,
+						providerName,
+						TokenTypeCacheRead,
 						KeyValues([]KeyValue{
 							p.tokenUsageMetric.AttrRequestModel(p.model),
 							p.tokenUsageMetric.AttrResponseModel(providerModel),

@@ -13,11 +13,13 @@ import (
 type routerConfig struct {
 	Type string `yaml:"type"`
 
-	Models []string `yaml:"models"`
+	Models   []string `yaml:"models"`
+	Fallback string   `yaml:"fallback"`
 }
 
 type routerContext struct {
 	Completers []provider.Completer
+	Fallback   provider.Completer
 }
 
 func (cfg *Config) registerRouters(f *configFile) error {
@@ -48,6 +50,16 @@ func (cfg *Config) registerRouters(f *configFile) error {
 			context.Completers = append(context.Completers, completer)
 		}
 
+		if config.Fallback != "" {
+			fallback, err := cfg.Completer(config.Fallback)
+
+			if err != nil {
+				return err
+			}
+
+			context.Fallback = fallback
+		}
+
 		router, err := createRouter(config, context)
 
 		if err != nil {
@@ -55,10 +67,7 @@ func (cfg *Config) registerRouters(f *configFile) error {
 		}
 
 		if completer, ok := router.(provider.Completer); ok {
-			if _, ok := completer.(otel.Completer); !ok {
-				completer = otel.NewCompleter(config.Type, id, completer)
-			}
-
+			completer = otel.NewCompleterSpan("router "+id, completer)
 			cfg.RegisterCompleter(id, completer)
 		}
 	}
@@ -80,9 +89,21 @@ func createRouter(cfg routerConfig, context routerContext) (any, error) {
 }
 
 func roundrobinRouter(cfg routerConfig, context routerContext) (any, error) {
-	return roundrobin.NewCompleter(context.Completers...)
+	var options []roundrobin.Option
+
+	if context.Fallback != nil {
+		options = append(options, roundrobin.WithFallback(context.Fallback))
+	}
+
+	return roundrobin.NewCompleter(context.Completers, options...)
 }
 
 func adaptiveRouter(cfg routerConfig, context routerContext) (any, error) {
-	return adaptive.NewCompleter(context.Completers...)
+	var options []adaptive.Option
+
+	if context.Fallback != nil {
+		options = append(options, adaptive.WithFallback(context.Fallback))
+	}
+
+	return adaptive.NewCompleter(context.Completers, options...)
 }

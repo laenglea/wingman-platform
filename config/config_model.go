@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-
-	"golang.org/x/time/rate"
 )
 
 func (cfg *Config) RegisterModel(id string) {
@@ -67,7 +65,7 @@ type modelConfig struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
 
-	Limit *int `yaml:"limit"`
+	MaxRetries *int `yaml:"max_retries"`
 }
 
 type modelContext struct {
@@ -78,8 +76,8 @@ type modelContext struct {
 	Name        string
 	Description string
 
-	Client  *http.Client
-	Limiter *rate.Limiter
+	Client     *http.Client
+	MaxRetries *int
 }
 
 func DetectModelType(id string) ModelType {
@@ -95,14 +93,17 @@ func DetectModelType(id string) ModelType {
 		"falcon",
 		"gemini",
 		"gemma",
+		"glm",
 		"gpt",
 		"grok",
 		"hermes",
+		"kimi",
 		"llama",
 		"llava",
 		"magistral",
 		"mistral",
 		"mixtral",
+		"nemotron",
 		"nova",
 		"o1",
 		"o3",
@@ -148,6 +149,7 @@ func DetectModelType(id string) ModelType {
 		"transcribe",
 		"voxtral",
 		"whisper",
+		"stt",
 	}
 
 	for _, val := range synthesizers {

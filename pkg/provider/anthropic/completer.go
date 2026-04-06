@@ -17,7 +17,7 @@ var _ provider.Completer = (*Completer)(nil)
 
 type Completer struct {
 	*Config
-	messages anthropic.MessageService
+	messages anthropic.BetaMessageService
 }
 
 func NewCompleter(url, model string, options ...Option) (*Completer, error) {
@@ -32,7 +32,7 @@ func NewCompleter(url, model string, options ...Option) (*Completer, error) {
 
 	return &Completer{
 		Config:   cfg,
-		messages: anthropic.NewMessageService(cfg.Options()...),
+		messages: anthropic.NewBetaMessageService(cfg.Options()...),
 	}, nil
 }
 
@@ -49,7 +49,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			return
 		}
 
-		message := anthropic.Message{}
+		message := anthropic.BetaMessage{}
 		stream := c.messages.NewStreaming(ctx, *req)
 
 		for stream.Next() {
@@ -57,7 +57,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 			// HACK: handle empty tool use blocks
 			switch event.AsAny().(type) {
-			case anthropic.ContentBlockStopEvent:
+			case anthropic.BetaRawContentBlockStopEvent:
 				block := &message.Content[len(message.Content)-1]
 
 				if block.Type == "tool_use" && len(block.Input) == 0 {
@@ -90,12 +90,12 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			}
 
 			switch event := event.AsAny().(type) {
-			case anthropic.MessageStartEvent:
+			case anthropic.BetaRawMessageStartEvent:
 				break
 
-			case anthropic.ContentBlockStartEvent:
+			case anthropic.BetaRawContentBlockStartEvent:
 				switch event := event.ContentBlock.AsAny().(type) {
-				case anthropic.ThinkingBlock:
+				case anthropic.BetaThinkingBlock:
 					delta := &provider.Completion{
 						ID:    message.ID,
 						Model: c.model,
@@ -118,7 +118,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 						return
 					}
 
-				case anthropic.TextBlock:
+				case anthropic.BetaTextBlock:
 					delta := &provider.Completion{
 						ID:    message.ID,
 						Model: c.model,
@@ -138,7 +138,30 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 						return
 					}
 
-				case anthropic.ToolUseBlock:
+				case anthropic.BetaRedactedThinkingBlock:
+					// Redacted thinking blocks are silently skipped
+
+				case anthropic.BetaCompactionBlock:
+					delta := &provider.Completion{
+						ID:    message.ID,
+						Model: c.model,
+
+						Message: &provider.Message{
+							Role: provider.MessageRoleAssistant,
+
+							Content: []provider.Content{
+								provider.CompactionContent(provider.Compaction{
+									Signature: event.Content,
+								}),
+							},
+						},
+					}
+
+					if !yield(delta, nil) {
+						return
+					}
+
+				case anthropic.BetaToolUseBlock:
 					delta := &provider.Completion{
 						ID:    message.ID,
 						Model: c.model,
@@ -168,9 +191,9 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					}
 				}
 
-			case anthropic.ContentBlockDeltaEvent:
+			case anthropic.BetaRawContentBlockDeltaEvent:
 				switch event := event.Delta.AsAny().(type) {
-				case anthropic.ThinkingDelta:
+				case anthropic.BetaThinkingDelta:
 					delta := &provider.Completion{
 						ID:    message.ID,
 						Model: c.model,
@@ -190,7 +213,47 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 						return
 					}
 
-				case anthropic.TextDelta:
+				case anthropic.BetaSignatureDelta:
+					delta := &provider.Completion{
+						ID:    message.ID,
+						Model: c.model,
+
+						Message: &provider.Message{
+							Role: provider.MessageRoleAssistant,
+
+							Content: []provider.Content{
+								provider.ReasoningContent(provider.Reasoning{
+									Signature: event.Signature,
+								}),
+							},
+						},
+					}
+
+					if !yield(delta, nil) {
+						return
+					}
+
+				case anthropic.BetaCompactionContentBlockDelta:
+					delta := &provider.Completion{
+						ID:    message.ID,
+						Model: c.model,
+
+						Message: &provider.Message{
+							Role: provider.MessageRoleAssistant,
+
+							Content: []provider.Content{
+								provider.CompactionContent(provider.Compaction{
+									Signature: event.Content,
+								}),
+							},
+						},
+					}
+
+					if !yield(delta, nil) {
+						return
+					}
+
+				case anthropic.BetaTextDelta:
 					delta := &provider.Completion{
 						ID:    message.ID,
 						Model: c.model,
@@ -208,7 +271,9 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 						return
 					}
 
-				case anthropic.InputJSONDelta:
+				case anthropic.BetaInputJSONDelta:
+					currentBlock := message.Content[len(message.Content)-1]
+
 					delta := &provider.Completion{
 						ID:    message.ID,
 						Model: c.model,
@@ -218,6 +283,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 							Content: []provider.Content{
 								provider.ToolCallContent(provider.ToolCall{
+									ID:        currentBlock.ID,
 									Arguments: event.PartialJSON,
 								}),
 							},
@@ -226,9 +292,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 					if options.Schema != nil {
 						delta.Message.Content = []provider.Content{
-							{
-								Text: event.PartialJSON,
-							},
+							provider.TextContent(event.PartialJSON),
 						}
 					}
 
@@ -237,10 +301,10 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					}
 				}
 
-			case anthropic.ContentBlockStopEvent:
+			case anthropic.BetaRawContentBlockStopEvent:
 				break
 
-			case anthropic.MessageStopEvent:
+			case anthropic.BetaRawMessageStopEvent:
 				delta := &provider.Completion{
 					ID:    message.ID,
 					Model: c.model,
@@ -250,6 +314,13 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					},
 
 					Usage: toUsage(message.Usage),
+				}
+
+				switch message.StopReason {
+				case anthropic.BetaStopReasonMaxTokens:
+					delta.Status = provider.CompletionStatusIncomplete
+				case anthropic.BetaStopReasonRefusal:
+					delta.Status = provider.CompletionStatusRefused
 				}
 
 				if !yield(delta, nil) {
@@ -265,42 +336,51 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 	}
 }
 
-func (c *Completer) convertMessageRequest(input []provider.Message, options *provider.CompleteOptions) (*anthropic.MessageNewParams, error) {
+func (c *Completer) convertMessageRequest(input []provider.Message, options *provider.CompleteOptions) (*anthropic.BetaMessageNewParams, error) {
 	if options == nil {
 		options = new(provider.CompleteOptions)
 	}
 
-	req := &anthropic.MessageNewParams{
+	req := &anthropic.BetaMessageNewParams{
 		Model: anthropic.Model(c.model),
 
-		MaxTokens: 64000,
+		MaxTokens:    64000,
+		CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
 	}
 
-	isOpus46 := strings.Contains(c.model, "opus-4-6") || strings.Contains(c.model, "opus-4.6")
+	isOpus46 := strings.Contains(c.model, "opus-4-6")
+	isSonnet46 := strings.Contains(c.model, "sonnet-4-6")
 
-	if isOpus46 {
+	if isOpus46 || isSonnet46 {
 		req.MaxTokens = 128000
+	}
 
-		req.Thinking = anthropic.ThinkingConfigParamUnion{
-			OfAdaptive: anthropic.Ptr(anthropic.NewThinkingConfigAdaptiveParam()),
+	if options.ReasoningOptions != nil && (isOpus46 || isSonnet46) {
+		req.Thinking = anthropic.BetaThinkingConfigParamUnion{
+			OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{
+				Display: anthropic.BetaThinkingConfigAdaptiveDisplaySummarized,
+			},
 		}
 
-		switch options.Effort {
+		switch options.ReasoningOptions.Effort {
 		case provider.EffortMinimal, provider.EffortLow:
-			req.OutputConfig.Effort = anthropic.OutputConfigEffortLow
+			req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortLow
 
 		case provider.EffortMedium:
-			req.OutputConfig.Effort = anthropic.OutputConfigEffortMedium
+			req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMedium
 
 		case provider.EffortHigh:
-			req.OutputConfig.Effort = anthropic.OutputConfigEffortHigh
+			req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortHigh
+
+		case provider.EffortMax:
+			req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMax
 		}
 	}
 
-	var system []anthropic.TextBlockParam
+	var system []anthropic.BetaTextBlockParam
 
-	var tools []anthropic.ToolUnionParam
-	var messages []anthropic.MessageParam
+	var tools []anthropic.BetaToolUnionParam
+	var messages []anthropic.BetaMessageParam
 
 	if options.Stop != nil {
 		req.StopSequences = options.Stop
@@ -314,33 +394,21 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		req.Temperature = anthropic.Float(float64(*options.Temperature))
 	}
 
-	// First pass: collect system messages
-	for _, m := range input {
-		if m.Role == provider.MessageRoleSystem {
-			for _, c := range m.Content {
-				if c.Text != "" {
-					system = append(system, anthropic.TextBlockParam{Text: c.Text})
-				}
-			}
-		}
-	}
-
-	// Add cache control to the last system block
-	if len(system) > 0 {
-		system[len(system)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
-	}
-
 	for _, m := range input {
 		switch m.Role {
 		case provider.MessageRoleSystem:
-			continue // Already processed above
+			for _, c := range m.Content {
+				if c.Text != "" {
+					system = append(system, anthropic.BetaTextBlockParam{Text: c.Text})
+				}
+			}
 
 		case provider.MessageRoleUser:
-			var blocks []anthropic.ContentBlockParamUnion
+			var blocks []anthropic.BetaContentBlockParamUnion
 
 			for _, c := range m.Content {
 				if text := strings.TrimRight(c.Text, " \t\n\r"); text != "" {
-					blocks = append(blocks, anthropic.NewTextBlock(text))
+					blocks = append(blocks, anthropic.NewBetaTextBlock(text))
 				}
 
 				if c.File != nil {
@@ -349,13 +417,13 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 					switch mime {
 					case "image/jpeg", "image/png", "image/gif", "image/webp":
-						blocks = append(blocks, anthropic.NewImageBlock(anthropic.Base64ImageSourceParam{
+						blocks = append(blocks, anthropic.NewBetaImageBlock(anthropic.BetaBase64ImageSourceParam{
 							Data:      content,
-							MediaType: anthropic.Base64ImageSourceMediaType(mime),
+							MediaType: anthropic.BetaBase64ImageSourceMediaType(mime),
 						}))
 
 					case "application/pdf":
-						blocks = append(blocks, anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+						blocks = append(blocks, anthropic.NewBetaDocumentBlock(anthropic.BetaBase64PDFSourceParam{
 							Data: content,
 						}))
 
@@ -365,13 +433,13 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				}
 
 				if c.ToolResult != nil {
-					blocks = append(blocks, anthropic.ContentBlockParamUnion{
-						OfToolResult: &anthropic.ToolResultBlockParam{
+					blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
+						OfToolResult: &anthropic.BetaToolResultBlockParam{
 							ToolUseID: c.ToolResult.ID,
 
-							Content: []anthropic.ToolResultBlockParamContentUnion{
+							Content: []anthropic.BetaToolResultBlockParamContentUnion{
 								{
-									OfText: &anthropic.TextBlockParam{
+									OfText: &anthropic.BetaTextBlockParam{
 										Text: c.ToolResult.Data,
 									},
 								},
@@ -381,23 +449,20 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				}
 			}
 
-			message := anthropic.NewUserMessage(blocks...)
+			message := anthropic.NewBetaUserMessage(blocks...)
 			messages = append(messages, message)
 
-			// Mark user messages for potential cache control (will be set on the last one)
-			// The cache point will be added after all messages are processed
-
 		case provider.MessageRoleAssistant:
-			var blocks []anthropic.ContentBlockParamUnion
+			var blocks []anthropic.BetaContentBlockParamUnion
 
 			for _, c := range m.Content {
 				if text := strings.TrimRight(c.Text, " \t\n\r"); text != "" {
-					blocks = append(blocks, anthropic.NewTextBlock(text))
+					blocks = append(blocks, anthropic.NewBetaTextBlock(text))
 				}
 
-				if c.Reasoning != nil {
+				if c.Reasoning != nil && c.Reasoning.Signature != "" {
 					// Include thinking blocks for conversation continuity
-					blocks = append(blocks, anthropic.NewThinkingBlock(c.Reasoning.Signature, c.Reasoning.Text))
+					blocks = append(blocks, anthropic.NewBetaThinkingBlock(c.Reasoning.Signature, c.Reasoning.Text))
 				}
 
 				if c.ToolCall != nil {
@@ -407,8 +472,8 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 						input = map[string]any{}
 					}
 
-					blocks = append(blocks, anthropic.ContentBlockParamUnion{
-						OfToolUse: &anthropic.ToolUseBlockParam{
+					blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
+						OfToolUse: &anthropic.BetaToolUseBlockParam{
 							ID:    c.ToolCall.ID,
 							Name:  c.ToolCall.Name,
 							Input: input,
@@ -417,8 +482,8 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				}
 			}
 
-			message := anthropic.MessageParam{
-				Role:    anthropic.MessageParamRoleAssistant,
+			message := anthropic.BetaMessageParam{
+				Role:    anthropic.BetaMessageParamRoleAssistant,
 				Content: blocks,
 			}
 
@@ -431,7 +496,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			continue
 		}
 
-		var schema anthropic.ToolInputSchemaParam
+		var schema anthropic.BetaToolInputSchemaParam
 
 		schemaData, _ := json.Marshal(t.Parameters)
 
@@ -439,7 +504,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			return nil, errors.New("invalid tool parameters schema")
 		}
 
-		tool := anthropic.ToolParam{
+		tool := anthropic.BetaToolParam{
 			Name: t.Name,
 
 			InputSchema: schema,
@@ -449,61 +514,114 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			tool.Description = anthropic.String(t.Description)
 		}
 
-		tools = append(tools, anthropic.ToolUnionParam{OfTool: &tool})
-	}
-
-	// Add cache control to the last tool
-	if len(tools) > 0 {
-		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+		tools = append(tools, anthropic.BetaToolUnionParam{OfTool: &tool})
 	}
 
 	if options.Schema != nil {
-		req.OutputConfig.Format = anthropic.JSONOutputFormatParam{Schema: options.Schema.Schema}
+		req.OutputConfig.Format = anthropic.BetaJSONOutputFormatParam{Schema: options.Schema.Schema}
+	}
+
+	if options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 {
+		req.Betas = append(req.Betas, "compact-2026-01-12")
+
+		req.ContextManagement = anthropic.BetaContextManagementConfigParam{
+			Edits: []anthropic.BetaContextManagementConfigEditUnionParam{
+				{
+					OfCompact20260112: &anthropic.BetaCompact20260112EditParam{
+						Trigger: anthropic.BetaInputTokensTriggerParam{
+							Value: int64(options.CompactionOptions.Threshold),
+						},
+					},
+				},
+			},
+		}
 	}
 
 	if len(system) > 0 {
 		req.System = system
 	}
 
-	if len(tools) > 0 {
-		req.Tools = tools
+	if options.TextEditorTool != nil {
+		req.Tools = append(req.Tools, anthropic.BetaToolUnionParam{
+			OfTextEditor20250728: &anthropic.BetaToolTextEditor20250728Param{},
+		})
 	}
 
-	if len(messages) > 0 {
-		// Add cache control to the last content block of the last user message
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Role == anthropic.MessageParamRoleUser {
-				if len(messages[i].Content) > 0 {
-					lastBlock := &messages[i].Content[len(messages[i].Content)-1]
-					setCacheControl(lastBlock)
+	if options.ComputerUseTool != nil {
+		req.Betas = append(req.Betas, "computer-use-2025-11-24")
+
+		w, h := int64(options.ComputerUseTool.DisplayWidth), int64(options.ComputerUseTool.DisplayHeight)
+		if w == 0 {
+			w = 1024
+		}
+		if h == 0 {
+			h = 768
+		}
+
+		req.Tools = append(req.Tools, anthropic.BetaToolUnionParam{
+			OfComputerUseTool20251124: &anthropic.BetaToolComputerUse20251124Param{
+				DisplayWidthPx:  w,
+				DisplayHeightPx: h,
+			},
+		})
+	}
+
+	if len(tools) > 0 {
+		req.Tools = append(req.Tools, tools...)
+	}
+
+	if options.ToolOptions != nil {
+		forcesTool := false
+
+		switch options.ToolOptions.Choice {
+		case provider.ToolChoiceNone:
+			req.ToolChoice = anthropic.BetaToolChoiceUnionParam{
+				OfNone: anthropic.Ptr(anthropic.NewBetaToolChoiceNoneParam()),
+			}
+
+		case provider.ToolChoiceAuto:
+			p := &anthropic.BetaToolChoiceAutoParam{}
+
+			if options.ToolOptions.DisableParallelToolCalls {
+				p.DisableParallelToolUse = anthropic.Bool(true)
+			}
+
+			req.ToolChoice = anthropic.BetaToolChoiceUnionParam{OfAuto: p}
+
+		case provider.ToolChoiceAny:
+			forcesTool = true
+
+			if len(options.ToolOptions.Allowed) == 1 {
+				req.ToolChoice = anthropic.BetaToolChoiceUnionParam{
+					OfTool: &anthropic.BetaToolChoiceToolParam{
+						Name: options.ToolOptions.Allowed[0],
+					},
 				}
-				break
+			} else {
+				p := &anthropic.BetaToolChoiceAnyParam{}
+
+				if options.ToolOptions.DisableParallelToolCalls {
+					p.DisableParallelToolUse = anthropic.Bool(true)
+				}
+
+				req.ToolChoice = anthropic.BetaToolChoiceUnionParam{OfAny: p}
 			}
 		}
 
+		// Claude doesn't allow thinking with forced tool_choice
+		if forcesTool {
+			req.Thinking = anthropic.BetaThinkingConfigParamUnion{}
+		}
+	}
+
+	if len(messages) > 0 {
 		req.Messages = messages
 	}
 
 	return req, nil
 }
 
-// setCacheControl sets the cache control on a content block
-func setCacheControl(block *anthropic.ContentBlockParamUnion) {
-	cacheControl := anthropic.NewCacheControlEphemeralParam()
-
-	switch {
-	case block.OfText != nil:
-		block.OfText.CacheControl = cacheControl
-	case block.OfImage != nil:
-		block.OfImage.CacheControl = cacheControl
-	case block.OfDocument != nil:
-		block.OfDocument.CacheControl = cacheControl
-	case block.OfToolResult != nil:
-		block.OfToolResult.CacheControl = cacheControl
-	}
-}
-
-func toUsage(usage anthropic.Usage) *provider.Usage {
+func toUsage(usage anthropic.BetaUsage) *provider.Usage {
 	if usage.InputTokens == 0 && usage.OutputTokens == 0 {
 		return nil
 	}

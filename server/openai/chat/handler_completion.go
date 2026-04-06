@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
@@ -20,6 +21,11 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
+		writeError(w, http.StatusNotFound, err)
 		return
 	}
 
@@ -51,28 +57,61 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		Stop:  stops,
 		Tools: tools,
 
+		ToolOptions: toToolOptions(req.ToolChoice),
+
 		MaxTokens:   req.MaxCompletionTokens,
 		Temperature: req.Temperature,
 	}
 
-	switch req.ReasoningEffort {
-	case ReasoningEffortMinimal:
-		options.Effort = provider.EffortMinimal
-	case ReasoningEffortLow:
-		options.Effort = provider.EffortLow
-	case ReasoningEffortMedium:
-		options.Effort = provider.EffortMedium
-	case ReasoningEffortHigh:
-		options.Effort = provider.EffortHigh
+	if req.ParallelToolCalls != nil && !*req.ParallelToolCalls {
+		if options.ToolOptions == nil {
+			options.ToolOptions = &provider.ToolOptions{Choice: provider.ToolChoiceAuto}
+		}
+
+		options.ToolOptions.DisableParallelToolCalls = true
 	}
 
-	switch req.Verbosity {
-	case VerbosityLow:
-		options.Verbosity = provider.VerbosityLow
-	case VerbosityMedium:
-		options.Verbosity = provider.VerbosityMedium
-	case VerbosityHigh:
-		options.Verbosity = provider.VerbosityHigh
+	if req.ReasoningEffort != "" {
+		if options.ReasoningOptions == nil {
+			options.ReasoningOptions = &provider.ReasoningOptions{}
+		}
+
+		switch req.ReasoningEffort {
+		case ReasoningEffortNone:
+			options.ReasoningOptions.Effort = provider.EffortNone
+
+		case ReasoningEffortMinimal:
+			options.ReasoningOptions.Effort = provider.EffortMinimal
+
+		case ReasoningEffortLow:
+			options.ReasoningOptions.Effort = provider.EffortLow
+
+		case ReasoningEffortMedium:
+			options.ReasoningOptions.Effort = provider.EffortMedium
+
+		case ReasoningEffortHigh:
+			options.ReasoningOptions.Effort = provider.EffortHigh
+
+		case ReasoningEffortXHigh:
+			options.ReasoningOptions.Effort = provider.EffortMax
+		}
+	}
+
+	if req.Verbosity != "" {
+		if options.OutputOptions == nil {
+			options.OutputOptions = &provider.OutputOptions{}
+		}
+
+		switch req.Verbosity {
+		case VerbosityLow:
+			options.OutputOptions.Verbosity = provider.VerbosityLow
+
+		case VerbosityMedium:
+			options.OutputOptions.Verbosity = provider.VerbosityMedium
+
+		case VerbosityHigh:
+			options.OutputOptions.Verbosity = provider.VerbosityHigh
+		}
 	}
 
 	if req.ResponseFormat != nil {
@@ -125,6 +164,8 @@ func (h *Handler) handleChatCompletionComplete(w http.ResponseWriter, r *http.Re
 		Created: time.Now().Unix(),
 
 		Choices: []ChatCompletionChoice{},
+
+		ServiceTier: "default",
 	}
 
 	if result.Model == "" {
@@ -133,19 +174,26 @@ func (h *Handler) handleChatCompletionComplete(w http.ResponseWriter, r *http.Re
 
 	if completion.Message != nil {
 		message := &ChatCompletionMessage{
-			Role: role,
+			Role:        role,
+			Annotations: []any{},
 		}
 
 		if content := completion.Message.Text(); content != "" {
 			message.Content = &content
 		}
 
+		if refusal := completion.Message.Refusal(); refusal != "" {
+			message.Refusal = &refusal
+		}
+
 		reason := FinishReasonStop
+
+		if completion.Status == provider.CompletionStatusRefused {
+			reason = FinishReasonStop
+		}
 
 		if calls := oaiToolCalls(completion.Message.Content); len(calls) > 0 {
 			reason = FinishReasonToolCalls
-
-			message.Content = nil
 			message.ToolCalls = calls
 		}
 
@@ -173,10 +221,20 @@ func (h *Handler) handleChatCompletionStream(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
+	includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage != nil && *req.StreamOptions.IncludeUsage
+
 	// Create streaming accumulator with event handler
 	accumulator := NewStreamingAccumulator(req.Model, func(event StreamEvent) error {
 		switch event.Type {
-		case StreamEventChunk, StreamEventFinish, StreamEventUsage:
+		case StreamEventUsage:
+			if !includeUsage {
+				return nil
+			}
+
+			event.Chunk.Created = time.Now().Unix()
+			return writeEvent(w, event.Chunk)
+
+		case StreamEventChunk, StreamEventFinish:
 			event.Chunk.Created = time.Now().Unix()
 			return writeEvent(w, event.Chunk)
 

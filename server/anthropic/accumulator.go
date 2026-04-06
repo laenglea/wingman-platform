@@ -92,9 +92,12 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 
 		// Get input tokens from first chunk if available
 		inputTokens := 0
+		var cacheReadInputTokens, cacheCreationInputTokens int
 		if c.Usage != nil && c.Usage.InputTokens > 0 {
 			inputTokens = c.Usage.InputTokens
 			s.inputTokens = inputTokens
+			cacheReadInputTokens = c.Usage.CacheReadInputTokens
+			cacheCreationInputTokens = c.Usage.CacheCreationInputTokens
 		}
 
 		if err := s.emitEvent(StreamEvent{
@@ -110,6 +113,9 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 				Usage: Usage{
 					InputTokens:  inputTokens,
 					OutputTokens: 0,
+
+					CacheReadInputTokens:     cacheReadInputTokens,
+					CacheCreationInputTokens: cacheCreationInputTokens,
 				},
 			},
 		}); err != nil {
@@ -140,6 +146,62 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 
 	// Process content
 	for _, content := range c.Message.Content {
+		// Handle thinking/reasoning content
+		if content.Reasoning != nil && (content.Reasoning.Text != "" || content.Reasoning.Signature != "") {
+			if s.currentBlockType != "thinking" {
+				if s.currentBlockIndex >= 0 {
+					if err := s.emitEvent(StreamEvent{
+						Type:  StreamEventContentBlockStop,
+						Index: s.currentBlockIndex,
+					}); err != nil {
+						return err
+					}
+				}
+
+				s.currentBlockIndex++
+				s.currentBlockType = "thinking"
+				s.hasContent = true
+
+				if err := s.emitEvent(StreamEvent{
+					Type:  StreamEventContentBlockStart,
+					Index: s.currentBlockIndex,
+					ContentBlock: &ContentBlock{
+						Type:      "thinking",
+						Thinking:  "",
+						Signature: "",
+					},
+				}); err != nil {
+					return err
+				}
+			}
+
+			if content.Reasoning.Text != "" {
+				if err := s.emitEvent(StreamEvent{
+					Type:  StreamEventContentBlockDelta,
+					Index: s.currentBlockIndex,
+					Delta: &Delta{
+						Type:     "thinking_delta",
+						Thinking: content.Reasoning.Text,
+					},
+				}); err != nil {
+					return err
+				}
+			}
+
+			if content.Reasoning.Signature != "" {
+				if err := s.emitEvent(StreamEvent{
+					Type:  StreamEventContentBlockDelta,
+					Index: s.currentBlockIndex,
+					Delta: &Delta{
+						Type:      "signature_delta",
+						Signature: content.Reasoning.Signature,
+					},
+				}); err != nil {
+					return err
+				}
+			}
+		}
+
 		// Handle text content
 		if content.Text != "" {
 			// Start text block if needed
@@ -163,7 +225,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 					Index: s.currentBlockIndex,
 					ContentBlock: &ContentBlock{
 						Type: "text",
-						Text: "",
+						Text: ptr(""),
 					},
 				}); err != nil {
 					return err
@@ -218,10 +280,11 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 					Type:  StreamEventContentBlockStart,
 					Index: s.currentBlockIndex,
 					ContentBlock: &ContentBlock{
-						Type:  "tool_use",
-						ID:    s.toolCallID,
-						Name:  s.toolCallName,
-						Input: map[string]any{},
+						Type:   "tool_use",
+						ID:     s.toolCallID,
+						Name:   s.toolCallName,
+						Input:  map[string]any{},
+						Caller: &BlockCaller{Type: "direct"},
 					},
 				}); err != nil {
 					return err
@@ -273,7 +336,7 @@ func (s *StreamingAccumulator) Complete() error {
 			Index: 0,
 			ContentBlock: &ContentBlock{
 				Type: "text",
-				Text: "",
+				Text: ptr(""),
 			},
 		}); err != nil {
 			return err
@@ -289,12 +352,13 @@ func (s *StreamingAccumulator) Complete() error {
 
 	// Determine final stop reason from accumulated result
 	if result.Message != nil {
-		s.stopReason = toStopReason(result.Message.Content)
+		s.stopReason = toStopReason(result.Status, result.Message.Content)
 	}
 
 	// Get final usage from accumulated result (prefer accumulated result over tracked values)
 	inputTokens := s.inputTokens
 	outputTokens := s.outputTokens
+	var cacheReadInputTokens, cacheCreationInputTokens int
 	if result.Usage != nil {
 		if result.Usage.InputTokens > inputTokens {
 			inputTokens = result.Usage.InputTokens
@@ -302,6 +366,8 @@ func (s *StreamingAccumulator) Complete() error {
 		if result.Usage.OutputTokens > outputTokens {
 			outputTokens = result.Usage.OutputTokens
 		}
+		cacheReadInputTokens = result.Usage.CacheReadInputTokens
+		cacheCreationInputTokens = result.Usage.CacheCreationInputTokens
 	}
 
 	// Send message_delta with stop_reason and usage
@@ -313,6 +379,9 @@ func (s *StreamingAccumulator) Complete() error {
 		DeltaUsage: &DeltaUsage{
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,
+
+			CacheReadInputTokens:     cacheReadInputTokens,
+			CacheCreationInputTokens: cacheCreationInputTokens,
 		},
 		Completion: result,
 	}); err != nil {

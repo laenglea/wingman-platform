@@ -79,6 +79,18 @@ func (m Message) Text() string {
 	return strings.Join(parts, "\n\n")
 }
 
+func (m Message) Refusal() string {
+	var parts []string
+
+	for _, c := range m.Content {
+		if c.Refusal != "" {
+			parts = append(parts, c.Refusal)
+		}
+	}
+
+	return strings.Join(parts, "\n\n")
+}
+
 func (m Message) ToolCalls() []ToolCall {
 	var calls []ToolCall
 
@@ -101,152 +113,6 @@ func (m Message) ToolResult() (id string, content string, ok bool) {
 	return "", "", false
 }
 
-type CompletionAccumulator struct {
-	id    string
-	model string
-
-	role MessageRole
-
-	content strings.Builder
-
-	summary   strings.Builder
-	reasoning strings.Builder
-	signature string
-
-	toolCalls      []ToolCall
-	lastToolCallID string
-
-	usage *Usage
-}
-
-func (a *CompletionAccumulator) Add(c Completion) {
-	if c.ID != "" {
-		a.id = c.ID
-	}
-
-	if c.Model != "" {
-		a.model = c.Model
-	}
-
-	if c.Message != nil {
-		if c.Message.Role != "" {
-			a.role = c.Message.Role
-		}
-
-		for _, c := range c.Message.Content {
-			if c.Text != "" {
-				a.content.WriteString(c.Text)
-			}
-
-			if c.Reasoning != nil {
-				if c.Reasoning.Summary != "" {
-					a.summary.WriteString(c.Reasoning.Summary)
-				}
-
-				if c.Reasoning.Text != "" {
-					a.reasoning.WriteString(c.Reasoning.Text)
-				}
-
-				if c.Reasoning.Signature != "" {
-					a.signature = c.Reasoning.Signature
-				}
-			}
-
-			if c.ToolCall != nil {
-				// Only create a new tool call if we have an ID and haven't seen it before
-				if c.ToolCall.ID != "" {
-					found := false
-					for i := range a.toolCalls {
-						if a.toolCalls[i].ID == c.ToolCall.ID {
-							found = true
-							break
-						}
-					}
-					if !found {
-						a.toolCalls = append(a.toolCalls, ToolCall{
-							ID: c.ToolCall.ID,
-						})
-					}
-					a.lastToolCallID = c.ToolCall.ID
-				}
-
-				if len(a.toolCalls) == 0 {
-					continue
-				}
-
-				toolCallIndex := -1
-				targetID := c.ToolCall.ID
-
-				if targetID == "" {
-					targetID = a.lastToolCallID
-				}
-
-				for i := range a.toolCalls {
-					if a.toolCalls[i].ID == targetID {
-						toolCallIndex = i
-						break
-					}
-				}
-
-				if toolCallIndex == -1 {
-					continue
-				}
-
-				if c.ToolCall.Name != "" {
-					a.toolCalls[toolCallIndex].Name = c.ToolCall.Name
-				}
-
-				a.toolCalls[toolCallIndex].Arguments += c.ToolCall.Arguments
-			}
-		}
-	}
-
-	if c.Usage != nil {
-		if a.usage == nil {
-			a.usage = &Usage{}
-		}
-
-		if c.Usage.InputTokens > a.usage.InputTokens {
-			a.usage.InputTokens = c.Usage.InputTokens
-		}
-		if c.Usage.OutputTokens > a.usage.OutputTokens {
-			a.usage.OutputTokens = c.Usage.OutputTokens
-		}
-	}
-}
-
-func (a *CompletionAccumulator) Result() *Completion {
-	var content []Content
-
-	if a.reasoning.Len() > 0 || a.summary.Len() > 0 || a.signature != "" {
-		content = append(content, ReasoningContent(Reasoning{
-			Text:      a.reasoning.String(),
-			Summary:   a.summary.String(),
-			Signature: a.signature,
-		}))
-	}
-
-	if a.content.Len() > 0 {
-		content = append(content, TextContent(a.content.String()))
-	}
-
-	for _, call := range a.toolCalls {
-		content = append(content, ToolCallContent(call))
-	}
-
-	return &Completion{
-		ID:    a.id,
-		Model: a.model,
-
-		Message: &Message{
-			Role:    a.role,
-			Content: content,
-		},
-
-		Usage: a.usage,
-	}
-}
-
 func TextContent(val string) Content {
 	return Content{
 		Text: val,
@@ -256,6 +122,12 @@ func TextContent(val string) Content {
 func FileContent(val *File) Content {
 	return Content{
 		File: val,
+	}
+}
+
+func RefusalContent(val string) Content {
+	return Content{
+		Refusal: val,
 	}
 }
 
@@ -277,12 +149,20 @@ func ReasoningContent(val Reasoning) Content {
 	}
 }
 
+func CompactionContent(val Compaction) Content {
+	return Content{
+		Compaction: &val,
+	}
+}
+
 type Content struct {
-	Text string
+	Text     string
+	Refusal  string
 
 	File *File
 
-	Reasoning *Reasoning
+	Reasoning  *Reasoning
+	Compaction *Compaction
 
 	ToolCall   *ToolCall
 	ToolResult *ToolResult
@@ -303,35 +183,88 @@ type ToolCall struct {
 	Arguments string
 }
 
-type CompleteOptions struct {
-	Effort    Effort
-	Verbosity Verbosity
+type TextEditorOptions struct{}
 
-	Stop  []string
-	Tools []Tool
+type ComputerOptions struct {
+	DisplayWidth  int
+	DisplayHeight int
+	Environment   string // e.g. "browser", "desktop"
+}
+
+type ToolChoice string
+
+const (
+	ToolChoiceAuto ToolChoice = "auto"
+	ToolChoiceAny  ToolChoice = "any"
+	ToolChoiceNone ToolChoice = "none"
+)
+
+type ToolOptions struct {
+	Allowed []string
+
+	Choice ToolChoice
+
+	DisableParallelToolCalls bool
+}
+
+type OutputOptions struct {
+	Verbosity Verbosity
+}
+
+type ReasoningOptions struct {
+	Effort Effort
+
+	IncludeSummary   bool
+	IncludeSignature bool
+}
+
+type CompleteOptions struct {
+	Stop []string
 
 	MaxTokens   *int
 	Temperature *float32
 
+	Tools       []Tool
+	ToolOptions *ToolOptions
+
+	OutputOptions     *OutputOptions
+	ReasoningOptions  *ReasoningOptions
+	CompactionOptions *CompactionOptions
+
+	TextEditorTool  *TextEditorOptions
+	ComputerUseTool *ComputerOptions
+
 	Schema *Schema
 }
 
+type CompletionStatus string
+
+const (
+	CompletionStatusCompleted  CompletionStatus = "completed"
+	CompletionStatusIncomplete CompletionStatus = "incomplete"
+	CompletionStatusFailed     CompletionStatus = "failed"
+	CompletionStatusRefused    CompletionStatus = "refused"
+)
+
 type Completion struct {
-	ID    string
-	Model string
+	ID string
 
+	Model  string
+	Status CompletionStatus
+
+	Usage   *Usage
 	Message *Message
-
-	Usage *Usage
 }
 
 type Effort string
 
 const (
+	EffortNone    Effort = "none"
 	EffortMinimal Effort = "minimal"
 	EffortLow     Effort = "low"
 	EffortMedium  Effort = "medium"
 	EffortHigh    Effort = "high"
+	EffortMax     Effort = "max"
 )
 
 type Verbosity string
@@ -343,8 +276,20 @@ const (
 )
 
 type Reasoning struct {
-	ID        string
-	Text      string
-	Summary   string
+	ID string
+
+	Text    string
+	Summary string
+
 	Signature string
+}
+
+type Compaction struct {
+	ID string
+
+	Signature string
+}
+
+type CompactionOptions struct {
+	Threshold int
 }

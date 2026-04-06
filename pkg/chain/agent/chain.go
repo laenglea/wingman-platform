@@ -92,12 +92,16 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 			options = new(provider.CompleteOptions)
 		}
 
-		if options.Effort == "" {
-			options.Effort = c.effort
+		if options.OutputOptions == nil && c.verbosity != "" {
+			options.OutputOptions = &provider.OutputOptions{
+				Verbosity: c.verbosity,
+			}
 		}
 
-		if options.Verbosity == "" {
-			options.Verbosity = c.verbosity
+		if options.ReasoningOptions == nil && c.effort != "" {
+			options.ReasoningOptions = &provider.ReasoningOptions{
+				Effort: c.effort,
+			}
 		}
 
 		if options.Temperature == nil {
@@ -156,12 +160,15 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 			inputTools[t.Name] = t
 		}
 
-		inputOptions := &provider.CompleteOptions{
-			Effort:    options.Effort,
-			Verbosity: options.Verbosity,
+		inputToolOptions := mergeToolOptions(options.ToolOptions, slices.Collect(maps.Keys(agentTools)))
 
-			Stop:  options.Stop,
-			Tools: slices.Collect(maps.Values(inputTools)),
+		inputOptions := &provider.CompleteOptions{
+			Stop:        options.Stop,
+			Tools:       slices.Collect(maps.Values(inputTools)),
+			ToolOptions: inputToolOptions,
+
+			OutputOptions:    options.OutputOptions,
+			ReasoningOptions: options.ReasoningOptions,
 
 			MaxTokens:   options.MaxTokens,
 			Temperature: options.Temperature,
@@ -288,4 +295,48 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 			}
 		}
 	}
+}
+
+// mergeToolOptions combines user-specified ToolOptions with the agent's internal tool names.
+//
+// Agent tools are transparent to the user — they are executed by the chain loop and
+// never surfaced in the streamed output. Therefore:
+//
+//   - If no agent tools are registered, the user's options pass through unchanged.
+//   - If the user specified ToolChoiceNone, we switch to Auto so agent tools can still
+//     fire, but restrict Allowed to only agent tool names so user tools remain uncallable.
+//   - If the user restricted the allowed list, we union it with agent tool names so the
+//     model can still invoke agent tools while respecting the user's restrictions.
+//   - DisableParallelToolCalls is always forwarded as-is.
+func mergeToolOptions(opts *provider.ToolOptions, agentToolNames []string) *provider.ToolOptions {
+	if len(agentToolNames) == 0 {
+		return opts
+	}
+
+	if opts == nil {
+		return nil
+	}
+
+	merged := *opts // copy
+
+	switch opts.Choice {
+	case provider.ToolChoiceNone:
+		// User wants no user-visible tool calls. Allow agent tools only.
+		merged.Choice = provider.ToolChoiceAuto
+		merged.Allowed = slices.Clone(agentToolNames)
+
+	default:
+		// If the user restricted to specific tools, also allow all agent tools.
+		if len(opts.Allowed) > 0 {
+			combined := slices.Clone(opts.Allowed)
+			for _, name := range agentToolNames {
+				if !slices.Contains(combined, name) {
+					combined = append(combined, name)
+				}
+			}
+			merged.Allowed = combined
+		}
+	}
+
+	return &merged
 }

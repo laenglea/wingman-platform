@@ -69,8 +69,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			Messages: wireMessages(messages),
 		}
 
-		if options.Effort != "" {
-			val := string(options.Effort)
+		if options.ReasoningOptions != nil && options.ReasoningOptions.Effort != "" {
+			val := string(options.ReasoningOptions.Effort)
 			req.Effort = &val
 		}
 

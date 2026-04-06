@@ -10,11 +10,11 @@ func now() time.Time {
 	return time.Now()
 }
 
-func date(fmt string, date interface{}) string {
+func date(fmt string, date any) string {
 	return dateInZone(fmt, date, "Local")
 }
 
-func dateInZone(fmt string, date interface{}, zone string) string {
+func dateInZone(fmt string, date any, zone string) string {
 	var t time.Time
 	switch date := date.(type) {
 	default:

@@ -1,7 +1,7 @@
 package shared
 
 type ErrorResponse struct {
-	Error Error `json:"error,omitempty"`
+	Error Error `json:"error"`
 }
 
 type Error struct {

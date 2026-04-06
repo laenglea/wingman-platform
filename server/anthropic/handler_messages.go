@@ -3,9 +3,13 @@ package anthropic
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
+	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
+
+func ptr[T any](v T) *T { return &v }
 
 func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 	var req MessageRequest
@@ -19,6 +23,11 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
+		writeError(w, http.StatusNotFound, err)
 		return
 	}
 
@@ -41,8 +50,37 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 	options := &provider.CompleteOptions{
 		Tools: tools,
 
+		TextEditorTool:  toTextEditorToolOptions(req.Tools),
+		ComputerUseTool: toComputerUseToolOptions(req.Tools),
+
 		Stop:        req.StopSequences,
 		Temperature: req.Temperature,
+	}
+
+	if req.ToolChoice != nil {
+		switch req.ToolChoice.Type {
+		case "none":
+			options.ToolOptions = &provider.ToolOptions{Choice: provider.ToolChoiceNone}
+
+		case "auto":
+			options.ToolOptions = &provider.ToolOptions{
+				Choice:                   provider.ToolChoiceAuto,
+				DisableParallelToolCalls: req.ToolChoice.DisableParallelToolUse,
+			}
+
+		case "any":
+			options.ToolOptions = &provider.ToolOptions{
+				Choice:                   provider.ToolChoiceAny,
+				DisableParallelToolCalls: req.ToolChoice.DisableParallelToolUse,
+			}
+
+		case "tool":
+			options.ToolOptions = &provider.ToolOptions{
+				Choice:                   provider.ToolChoiceAny,
+				Allowed:                  []string{req.ToolChoice.Name},
+				DisableParallelToolCalls: req.ToolChoice.DisableParallelToolUse,
+			}
+		}
 	}
 
 	if req.MaxTokens > 0 {
@@ -61,6 +99,28 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 			Name:   name,
 			Schema: req.OutputFormat.Schema,
 			Strict: req.OutputFormat.Strict,
+		}
+	}
+
+	if req.Thinking != nil && req.Thinking.Type == "enabled" {
+		if options.ReasoningOptions == nil {
+			options.ReasoningOptions = &provider.ReasoningOptions{}
+		}
+
+		options.ReasoningOptions.IncludeSummary = true
+		options.ReasoningOptions.IncludeSignature = true
+
+		options.ReasoningOptions.Effort = provider.EffortMedium
+	}
+
+	if req.ContextManagement != nil {
+		for _, edit := range req.ContextManagement.Edits {
+			if strings.HasPrefix(edit.Type, "compact") && edit.Trigger != nil {
+				options.CompactionOptions = &provider.CompactionOptions{
+					Threshold: edit.Trigger.Value,
+				}
+				break
+			}
 		}
 	}
 
@@ -94,7 +154,7 @@ func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request,
 		Model:   completion.Model,
 		Content: []ContentBlock{},
 
-		StopReason: StopReasonEndTurn,
+		StopReason: ptr(StopReasonEndTurn),
 	}
 
 	if result.Model == "" {
@@ -105,12 +165,16 @@ func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request,
 		result.Usage = Usage{
 			InputTokens:  completion.Usage.InputTokens,
 			OutputTokens: completion.Usage.OutputTokens,
+
+			CacheReadInputTokens:     completion.Usage.CacheReadInputTokens,
+			CacheCreationInputTokens: completion.Usage.CacheCreationInputTokens,
 		}
 	}
 
 	if completion.Message != nil {
 		result.Content = toContentBlocks(completion.Message.Content)
-		result.StopReason = toStopReason(completion.Message.Content)
+		reason := toStopReason(completion.Status, completion.Message.Content)
+		result.StopReason = &reason
 	}
 
 	writeJson(w, result)

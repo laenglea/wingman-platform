@@ -9,9 +9,6 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider/google"
 	"github.com/adrianliechti/wingman/pkg/provider/huggingface"
 	"github.com/adrianliechti/wingman/pkg/provider/jina"
-	"github.com/adrianliechti/wingman/pkg/provider/llama"
-	"github.com/adrianliechti/wingman/pkg/provider/mistral"
-	"github.com/adrianliechti/wingman/pkg/provider/ollama"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
 )
 
@@ -51,13 +48,23 @@ func createEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, 
 		return jinaEmbedder(cfg, model)
 
 	case "llama":
-		return llamaEmbedder(cfg, model)
+		cfg.URL = normalizeURL(cfg.URL, "/v1")
+		return openaiEmbedder(cfg, model)
 
 	case "mistral":
-		return mistralEmbedder(cfg, model)
+		if cfg.URL == "" {
+			cfg.URL = "https://api.mistral.ai/v1/"
+		}
+
+		return openaiEmbedder(cfg, model)
 
 	case "ollama":
-		return ollamaEmbedder(cfg, model)
+		if cfg.URL == "" {
+			cfg.URL = "http://localhost:11434"
+		}
+
+		cfg.URL = normalizeURL(cfg.URL, "/v1")
+		return openaiEmbedder(cfg, model)
 
 	case "openai", "openai-compatible":
 		return openaiEmbedder(cfg, model)
@@ -112,40 +119,6 @@ func jinaEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, er
 	return jina.NewEmbedder(cfg.URL, model.ID, options...)
 }
 
-func llamaEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, error) {
-	var options []llama.Option
-
-	if model.Client != nil {
-		options = append(options, llama.WithClient(model.Client))
-	}
-
-	return llama.NewEmbedder(model.ID, cfg.URL, options...)
-}
-
-func mistralEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, error) {
-	var options []mistral.Option
-
-	if cfg.Token != "" {
-		options = append(options, mistral.WithToken(cfg.Token))
-	}
-
-	if model.Client != nil {
-		options = append(options, mistral.WithClient(model.Client))
-	}
-
-	return mistral.NewEmbedder(model.ID, options...)
-}
-
-func ollamaEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, error) {
-	var options []ollama.Option
-
-	if model.Client != nil {
-		options = append(options, ollama.WithClient(model.Client))
-	}
-
-	return ollama.NewEmbedder(cfg.URL, model.ID, options...)
-}
-
 func openaiEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, error) {
 	var options []openai.Option
 
@@ -155,6 +128,10 @@ func openaiEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, 
 
 	if model.Client != nil {
 		options = append(options, openai.WithClient(model.Client))
+	}
+
+	if model.MaxRetries != nil {
+		options = append(options, openai.WithMaxRetries(*model.MaxRetries))
 	}
 
 	return openai.NewEmbedder(cfg.URL, model.ID, options...)

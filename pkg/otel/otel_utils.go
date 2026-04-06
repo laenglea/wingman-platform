@@ -5,7 +5,16 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/auth"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/semconv/v1.40.0/genaiconv"
+)
+
+// Cache token type attributes following the GenAI semantic conventions:
+// gen_ai.usage.cache_creation.input_tokens and gen_ai.usage.cache_read.input_tokens
+var (
+	TokenTypeCacheCreation genaiconv.TokenTypeAttr = "cache_creation"
+	TokenTypeCacheRead     genaiconv.TokenTypeAttr = "cache_read"
 )
 
 type KeyValue = attribute.KeyValue
@@ -26,6 +35,16 @@ func KeyValues(attrs ...[]KeyValue) []KeyValue {
 	}
 
 	return result
+}
+
+func Label(ctx context.Context, attrs ...KeyValue) {
+	labeler, ok := otelhttp.LabelerFromContext(ctx)
+
+	if !ok {
+		return
+	}
+
+	labeler.Add(attrs...)
 }
 
 func EndUserAttrs(ctx context.Context) []KeyValue {

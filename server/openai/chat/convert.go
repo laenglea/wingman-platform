@@ -22,6 +22,40 @@ func streamUsage(req ChatCompletionRequest) bool {
 	return *req.StreamOptions.IncludeUsage
 }
 
+func toToolOptions(v *ToolChoice) *provider.ToolOptions {
+	if v == nil {
+		return nil
+	}
+
+	choice := provider.ToolChoiceAuto
+
+	switch v.Mode {
+	case ToolChoiceModeNone:
+		choice = provider.ToolChoiceNone
+	case ToolChoiceModeAuto:
+		choice = provider.ToolChoiceAuto
+	case ToolChoiceModeRequired:
+		choice = provider.ToolChoiceAny
+	}
+
+	if len(v.AllowedTools) == 0 {
+		return &provider.ToolOptions{Choice: choice}
+	}
+
+	var allowed []string
+
+	for _, t := range v.AllowedTools {
+		if t.Function != nil && t.Function.Name != "" {
+			allowed = append(allowed, t.Function.Name)
+		}
+	}
+
+	return &provider.ToolOptions{
+		Choice:  choice,
+		Allowed: allowed,
+	}
+}
+
 func toMessages(s []ChatCompletionMessage) ([]provider.Message, error) {
 	result := make([]provider.Message, 0)
 
@@ -145,6 +179,8 @@ func toTools(tools []Tool) ([]provider.Tool, error) {
 				Name:        t.ToolFunction.Name,
 				Description: t.ToolFunction.Description,
 
+				Strict: t.ToolFunction.Strict,
+
 				Parameters: tool.NormalizeSchema(t.ToolFunction.Parameters),
 			}
 
@@ -164,8 +200,7 @@ func oaiToolCalls(content []provider.Content) []ToolCall {
 		}
 
 		call := ToolCall{
-			ID:    c.ToolCall.ID,
-			Index: len(result),
+			ID: c.ToolCall.ID,
 
 			Type: ToolTypeFunction,
 

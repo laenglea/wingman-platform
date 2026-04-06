@@ -2,6 +2,11 @@ package openai
 
 import (
 	"errors"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/adrianliechti/wingman/pkg/provider"
 
 	"github.com/openai/openai-go/v3"
 )
@@ -10,11 +15,80 @@ func convertError(err error) error {
 	var apierr *openai.Error
 
 	if errors.As(err, &apierr) {
-		//println(string(apierr.DumpRequest(true)))  // Prints the serialized HTTP request
-		//println(string(apierr.DumpResponse(true))) // Prints the serialized HTTP response
+		provErr := &provider.ProviderError{
+			StatusCode: apierr.StatusCode,
+			Message:    apierr.Error(),
+			Err:        err,
+		}
+
+		if apierr.Response != nil {
+			h := apierr.Response.Header
+			provErr.RetryAfter = parseRetryAfter(h)
+		}
+
+		return provErr
 	}
 
 	return err
+}
+
+// parseRetryAfter parses Retry-After (seconds, float, HTTP-date) with retry-after-ms as fallback (Azure OpenAI).
+func parseRetryAfter(h http.Header) time.Duration {
+	if v := h.Get("Retry-After"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil {
+			return time.Duration(secs) * time.Second
+		}
+
+		if secs, err := strconv.ParseFloat(v, 64); err == nil {
+			return time.Duration(secs * float64(time.Second))
+		}
+
+		if t, err := http.ParseTime(v); err == nil {
+			if d := time.Until(t); d > 0 {
+				return d
+			}
+		}
+	}
+
+	if v := h.Get("retry-after-ms"); v != "" {
+		if ms, err := strconv.ParseFloat(v, 64); err == nil {
+			return time.Duration(ms * float64(time.Millisecond))
+		}
+	}
+
+	return 0
+}
+
+
+// ensureAdditionalPropertiesFalse recursively adds additionalProperties: false
+// to all object schemas. Required by OpenAI's strict JSON schema validation.
+func ensureAdditionalPropertiesFalse(schema map[string]any) map[string]any {
+	if schema == nil {
+		return schema
+	}
+
+	schemaType, _ := schema["type"].(string)
+	if schemaType == "object" {
+		if _, ok := schema["additionalProperties"]; !ok {
+			schema["additionalProperties"] = false
+		}
+
+		if props, ok := schema["properties"].(map[string]any); ok {
+			for key, val := range props {
+				if propSchema, ok := val.(map[string]any); ok {
+					props[key] = ensureAdditionalPropertiesFalse(propSchema)
+				}
+			}
+		}
+	}
+
+	if schemaType == "array" {
+		if items, ok := schema["items"].(map[string]any); ok {
+			schema["items"] = ensureAdditionalPropertiesFalse(items)
+		}
+	}
+
+	return schema
 }
 
 var CodingModels = []string{
@@ -34,6 +108,12 @@ var CodingModels = []string{
 }
 
 var ReasoningModels = []string{
+	// GPT 5.4 Family
+	"gpt-5.4",
+	"gpt-5.4-pro",
+	"gpt-5.4-mini",
+	"gpt-5.4-nano",
+
 	// GPT 5.3 Family
 	"gpt-5.3-codex",
 
