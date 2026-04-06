@@ -463,9 +463,16 @@ func responseOutputs(message *provider.Message, messageID, status string, opts r
 }
 
 func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, req ResponsesRequest, completer provider.Completer, messages []provider.Message, options *provider.CompleteOptions) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
+	headersSent := false
+
+	sendHeaders := func() {
+		if !headersSent {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			headersSent = true
+		}
+	}
 
 	createdAt := time.Now().Unix()
 
@@ -1003,10 +1010,17 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 	// Iterate over completions from the provider
 	for completion, err := range completer.Complete(r.Context(), messages, options) {
 		if err != nil {
+			if !headersSent {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+
 			accumulator.Error(err)
 			failed = true
 			break
 		}
+
+		sendHeaders()
 
 		if err := accumulator.Add(*completion); err != nil {
 			accumulator.Error(err)
@@ -1014,6 +1028,8 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			break
 		}
 	}
+
+	sendHeaders()
 
 	// Emit final events
 	if !failed {

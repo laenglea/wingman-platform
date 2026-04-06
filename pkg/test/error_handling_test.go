@@ -2,8 +2,10 @@ package test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +14,9 @@ import (
 	"github.com/adrianliechti/wingman/pkg/policy/noop"
 	"github.com/adrianliechti/wingman/pkg/provider"
 	openaiProvider "github.com/adrianliechti/wingman/pkg/provider/openai"
+	anthropicHandler "github.com/adrianliechti/wingman/server/anthropic"
+	geminiHandler "github.com/adrianliechti/wingman/server/gemini"
+	chatHandler "github.com/adrianliechti/wingman/server/openai/chat"
 	"github.com/adrianliechti/wingman/server/openai/responses"
 	"github.com/adrianliechti/wingman/server/openai/shared"
 
@@ -57,6 +62,17 @@ func newResponder(mockURL string, client *http.Client) *openaiProvider.Responder
 	return r
 }
 
+// errorCompleter is a mock Completer that always returns the given error.
+type errorCompleter struct {
+	err error
+}
+
+func (c *errorCompleter) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
+	return func(yield func(*provider.Completion, error) bool) {
+		yield(nil, c.err)
+	}
+}
+
 // newWingmanServer creates a minimal wingman responses handler backed by
 // the provided completer, mounted on a chi router at /v1/responses.
 func newWingmanServer(completer provider.Completer, modelID string) *httptest.Server {
@@ -66,6 +82,54 @@ func newWingmanServer(completer provider.Completer, modelID string) *httptest.Se
 	cfg.RegisterCompleter(modelID, completer)
 
 	handler := responses.New(cfg)
+
+	r := chi.NewRouter()
+	r.Route("/v1", func(r chi.Router) {
+		handler.Attach(r)
+	})
+
+	return httptest.NewServer(r)
+}
+
+func newChatServer(completer provider.Completer, modelID string) *httptest.Server {
+	cfg := &config.Config{
+		Policy: noop.New(),
+	}
+	cfg.RegisterCompleter(modelID, completer)
+
+	handler := chatHandler.New(cfg)
+
+	r := chi.NewRouter()
+	r.Route("/v1", func(r chi.Router) {
+		handler.Attach(r)
+	})
+
+	return httptest.NewServer(r)
+}
+
+func newAnthropicServer(completer provider.Completer, modelID string) *httptest.Server {
+	cfg := &config.Config{
+		Policy: noop.New(),
+	}
+	cfg.RegisterCompleter(modelID, completer)
+
+	handler := anthropicHandler.New(cfg)
+
+	r := chi.NewRouter()
+	r.Route("/v1", func(r chi.Router) {
+		handler.Attach(r)
+	})
+
+	return httptest.NewServer(r)
+}
+
+func newGeminiServer(completer provider.Completer, modelID string) *httptest.Server {
+	cfg := &config.Config{
+		Policy: noop.New(),
+	}
+	cfg.RegisterCompleter(modelID, completer)
+
+	handler := geminiHandler.New(cfg)
 
 	r := chi.NewRouter()
 	r.Route("/v1", func(r chi.Router) {
@@ -301,7 +365,12 @@ func TestAuthenticationError_HandlerLevel(t *testing.T) {
 	}
 }
 
-func TestStreamingRateLimitError_HandlerLevel(t *testing.T) {
+// --- Streaming pre-stream error tests ---
+// These test that when the upstream provider returns an error before any
+// data is streamed, the server returns a proper HTTP error status code
+// (not 200) with a JSON error body — matching the real API behavior.
+
+func TestStreamingPreStreamError_Responses(t *testing.T) {
 	errBody := mockOpenAIError{}
 	errBody.Error.Message = "Rate limit reached"
 	errBody.Error.Type = "rate_limit_exceeded"
@@ -327,21 +396,285 @@ func TestStreamingRateLimitError_HandlerLevel(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	bodyStr := string(body)
-
-	// For streaming, the handler writes SSE headers (200) then emits
-	// a response.failed event when the completer returns an error.
-	if resp.StatusCode == http.StatusOK {
-		if !bytes.Contains(body, []byte("response.failed")) {
-			t.Errorf("expected response.failed event in SSE stream, got: %s", bodyStr)
-		}
-		return
+	if resp.StatusCode != http.StatusTooManyRequests {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 429, got %d; body: %s", resp.StatusCode, body)
 	}
 
-	// Some implementations may return the error status directly if
-	// the error occurs before any streaming output is written.
+	if ra := resp.Header.Get("Retry-After"); ra != "10" {
+		t.Errorf("expected Retry-After: 10, got %q", ra)
+	}
+
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	if errResp.Error.Type != "rate_limit_exceeded" {
+		t.Errorf("expected error type rate_limit_exceeded, got %q", errResp.Error.Type)
+	}
+}
+
+func TestStreamingPreStreamError_Chat(t *testing.T) {
+	provErr := &provider.ProviderError{
+		StatusCode: http.StatusTooManyRequests,
+		Message:    "Rate limit reached",
+	}
+
+	srv := newChatServer(&errorCompleter{err: provErr}, "test-model")
+	defer srv.Close()
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"model":  "test-model",
+		"stream": true,
+		"messages": []map[string]any{
+			{"role": "user", "content": "hello"},
+		},
+	})
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/chat/completions", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/chat/completions: %v", err)
+	}
+	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("expected status 200 or 429, got %d; body: %s", resp.StatusCode, bodyStr)
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 429, got %d; body: %s", resp.StatusCode, body)
+	}
+
+	// Verify it's a JSON error response, not SSE
+	ct := resp.Header.Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	if errResp.Error.Type != "rate_limit_exceeded" {
+		t.Errorf("expected error type rate_limit_exceeded, got %q", errResp.Error.Type)
+	}
+}
+
+func TestStreamingPreStreamError_Chat_ServerError(t *testing.T) {
+	provErr := &provider.ProviderError{
+		StatusCode: http.StatusInternalServerError,
+		Message:    "Internal server error",
+	}
+
+	srv := newChatServer(&errorCompleter{err: provErr}, "test-model")
+	defer srv.Close()
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"model":  "test-model",
+		"stream": true,
+		"messages": []map[string]any{
+			{"role": "user", "content": "hello"},
+		},
+	})
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/chat/completions", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/chat/completions: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Upstream 500 → 502 Bad Gateway
+	if resp.StatusCode != http.StatusBadGateway {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 502, got %d; body: %s", resp.StatusCode, body)
+	}
+}
+
+func TestStreamingPreStreamError_Anthropic(t *testing.T) {
+	provErr := &provider.ProviderError{
+		StatusCode: http.StatusTooManyRequests,
+		Message:    "Rate limit reached",
+	}
+
+	srv := newAnthropicServer(&errorCompleter{err: provErr}, "test-model")
+	defer srv.Close()
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"model":      "test-model",
+		"stream":     true,
+		"max_tokens": 100,
+		"messages": []map[string]any{
+			{"role": "user", "content": "hello"},
+		},
+	})
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/messages", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/messages: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 429, got %d; body: %s", resp.StatusCode, body)
+	}
+
+	// Verify it's a JSON error response, not SSE
+	ct := resp.Header.Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+
+	// Verify Anthropic error envelope
+	var raw map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	if raw["type"] != "error" {
+		t.Errorf("expected type 'error', got %q", raw["type"])
+	}
+
+	errObj, ok := raw["error"].(map[string]any)
+	if !ok {
+		t.Fatal("expected error object in response")
+	}
+
+	if errObj["type"] != "rate_limit_error" {
+		t.Errorf("expected error type rate_limit_error, got %q", errObj["type"])
+	}
+}
+
+func TestStreamingPreStreamError_Anthropic_AuthError(t *testing.T) {
+	provErr := &provider.ProviderError{
+		StatusCode: http.StatusUnauthorized,
+		Message:    "Invalid API key",
+	}
+
+	srv := newAnthropicServer(&errorCompleter{err: provErr}, "test-model")
+	defer srv.Close()
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"model":      "test-model",
+		"stream":     true,
+		"max_tokens": 100,
+		"messages": []map[string]any{
+			{"role": "user", "content": "hello"},
+		},
+	})
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/messages", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/messages: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 401, got %d; body: %s", resp.StatusCode, body)
+	}
+
+	var raw map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	errObj, _ := raw["error"].(map[string]any)
+	if errObj["type"] != "authentication_error" {
+		t.Errorf("expected error type authentication_error, got %q", errObj["type"])
+	}
+}
+
+func TestStreamingPreStreamError_Gemini(t *testing.T) {
+	provErr := &provider.ProviderError{
+		StatusCode: http.StatusTooManyRequests,
+		Message:    "Rate limit reached",
+	}
+
+	srv := newGeminiServer(&errorCompleter{err: provErr}, "test-model")
+	defer srv.Close()
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"contents": []map[string]any{
+			{
+				"role": "user",
+				"parts": []map[string]any{
+					{"text": "hello"},
+				},
+			},
+		},
+	})
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/models/test-model:streamGenerateContent?alt=sse", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST streamGenerateContent: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 429, got %d; body: %s", resp.StatusCode, body)
+	}
+
+	// Verify it's a JSON error response, not SSE
+	ct := resp.Header.Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+
+	// Verify Gemini error envelope
+	var raw map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	errObj, ok := raw["error"].(map[string]any)
+	if !ok {
+		t.Fatal("expected error object in response")
+	}
+
+	if errObj["status"] != "RESOURCE_EXHAUSTED" {
+		t.Errorf("expected status RESOURCE_EXHAUSTED, got %q", errObj["status"])
+	}
+}
+
+func TestStreamingPreStreamError_Gemini_BadRequest(t *testing.T) {
+	provErr := &provider.ProviderError{
+		StatusCode: http.StatusBadRequest,
+		Message:    "Invalid request",
+	}
+
+	srv := newGeminiServer(&errorCompleter{err: provErr}, "test-model")
+	defer srv.Close()
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"contents": []map[string]any{
+			{
+				"role": "user",
+				"parts": []map[string]any{
+					{"text": "hello"},
+				},
+			},
+		},
+	})
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/models/test-model:streamGenerateContent?alt=sse", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST streamGenerateContent: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 400, got %d; body: %s", resp.StatusCode, body)
+	}
+
+	var raw map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	errObj, _ := raw["error"].(map[string]any)
+	if errObj["status"] != "INVALID_ARGUMENT" {
+		t.Errorf("expected status INVALID_ARGUMENT, got %q", errObj["status"])
 	}
 }
