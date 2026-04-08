@@ -18,16 +18,21 @@ type Handler struct {
 }
 
 func New() *Handler {
-	apiKey := os.Getenv("OPENAI_API_KEY")
-
-	if apiKey == "" {
-		return nil
-	}
-
-	baseURL := os.Getenv("OPENAI_BASE_URL")
+	apiKey := os.Getenv("REALTIME_API_KEY")
+	baseURL := os.Getenv("REALTIME_BASE_URL")
 
 	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
+		apiKey = os.Getenv("OPENAI_API_KEY")
+
+		if apiKey == "" {
+			return nil
+		}
+
+		baseURL = os.Getenv("OPENAI_BASE_URL")
+
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1"
+		}
 	}
 
 	return &Handler{
@@ -54,8 +59,10 @@ func (h *Handler) dial(r *http.Request) (*websocket.Conn, *http.Response, error)
 
 	u.RawQuery = query.Encode()
 
-	headers := http.Header{
-		"Authorization": []string{"Bearer " + h.apiKey},
+	headers := http.Header{}
+
+	if h.apiKey != "" {
+		headers.Set("Authorization", "Bearer "+h.apiKey)
 	}
 
 	dialer := websocket.Dialer{}
