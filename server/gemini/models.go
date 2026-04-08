@@ -124,6 +124,7 @@ type GenerateContentResponse struct {
 	UsageMetadata  *UsageMetadata  `json:"usageMetadata,omitempty"`
 	ModelVersion   string          `json:"modelVersion,omitempty"`
 	PromptFeedback *PromptFeedback `json:"promptFeedback,omitempty"`
+	Error          *APIError       `json:"error,omitempty"`
 }
 
 // Candidate is a single response candidate

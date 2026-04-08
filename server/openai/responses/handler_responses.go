@@ -7,6 +7,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 
 	"github.com/google/uuid"
 )
@@ -986,7 +987,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				Model:     req.Model,
 				Output:    []ResponseOutput{},
 				Error: &ResponseError{
-					Type:    "server_error",
+					Type:    shared.ErrorTypeFromError(event.Error),
 					Message: event.Error.Error(),
 				},
 			}

@@ -16,6 +16,29 @@ func WriteJson(w http.ResponseWriter, v any) {
 	enc.Encode(v)
 }
 
+// ErrorTypeFromError maps a ProviderError to an OpenAI-compatible error type string.
+func ErrorTypeFromError(err error) string {
+	code := provider.StatusCodeFromError(err, 0)
+	return errorTypeFromCode(code)
+}
+
+func errorTypeFromCode(code int) string {
+	switch {
+	case code == http.StatusUnauthorized:
+		return "authentication_error"
+	case code == http.StatusForbidden:
+		return "permission_error"
+	case code == http.StatusNotFound:
+		return "not_found"
+	case code == http.StatusTooManyRequests:
+		return "rate_limit_exceeded"
+	case code >= 500:
+		return "server_error"
+	default:
+		return "server_error"
+	}
+}
+
 func WriteError(w http.ResponseWriter, code int, err error) {
 	// Use real status code from upstream provider if available
 	code = provider.StatusCodeFromError(err, code)
@@ -28,20 +51,7 @@ func WriteError(w http.ResponseWriter, code int, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 
-	errorType := "invalid_request"
-
-	switch {
-	case code == http.StatusUnauthorized:
-		errorType = "authentication_error"
-	case code == http.StatusForbidden:
-		errorType = "permission_error"
-	case code == http.StatusNotFound:
-		errorType = "not_found"
-	case code == http.StatusTooManyRequests:
-		errorType = "rate_limit_exceeded"
-	case code >= 500:
-		errorType = "server_error"
-	}
+	errorType := errorTypeFromCode(code)
 
 	resp := ErrorResponse{
 		Error: Error{

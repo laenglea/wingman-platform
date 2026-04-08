@@ -1,6 +1,8 @@
 package gemini
 
 import (
+	"net/http"
+
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
@@ -129,11 +131,37 @@ func (s *StreamingAccumulator) Complete() error {
 	return s.handler(response)
 }
 
-// Error emits an error response
+// Error emits an error response in the stream
 func (s *StreamingAccumulator) Error(err error) error {
-	// For streaming, we don't have a good way to signal errors in Gemini format
-	// The connection will be closed and the client should handle it
-	return nil
+	code := provider.StatusCodeFromError(err, http.StatusInternalServerError)
+
+	var status string
+	switch {
+	case code == http.StatusBadRequest:
+		status = "INVALID_ARGUMENT"
+	case code == http.StatusUnauthorized:
+		status = "UNAUTHENTICATED"
+	case code == http.StatusForbidden:
+		status = "PERMISSION_DENIED"
+	case code == http.StatusNotFound:
+		status = "NOT_FOUND"
+	case code == http.StatusTooManyRequests:
+		status = "RESOURCE_EXHAUSTED"
+	default:
+		status = "INTERNAL"
+	}
+
+	response := GenerateContentResponse{
+		ResponseId:   s.responseID,
+		ModelVersion: s.model,
+		Error: &APIError{
+			Code:    code,
+			Status:  status,
+			Message: err.Error(),
+		},
+	}
+
+	return s.handler(response)
 }
 
 // Result returns the accumulated completion
