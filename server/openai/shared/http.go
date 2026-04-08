@@ -34,6 +34,8 @@ func errorTypeFromCode(code int) string {
 		return "rate_limit_exceeded"
 	case code >= 500:
 		return "server_error"
+	case code >= 400:
+		return "invalid_request"
 	default:
 		return "server_error"
 	}
