@@ -8,6 +8,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/google"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
+	"github.com/adrianliechti/wingman/pkg/provider/openrouter"
 	"github.com/adrianliechti/wingman/pkg/provider/replicate"
 	"github.com/adrianliechti/wingman/pkg/provider/replicate/flux"
 	"github.com/adrianliechti/wingman/pkg/provider/xai"
@@ -44,6 +45,9 @@ func createRenderer(cfg providerConfig, model modelContext) (provider.Renderer, 
 
 	case "openai", "openai-compatible":
 		return openaiRenderer(cfg, model)
+
+	case "openrouter":
+		return openrouterRenderer(cfg, model)
 
 	case "replicate":
 		return replicateRenderer(cfg, model)
@@ -118,4 +122,18 @@ func xaiRenderer(cfg providerConfig, model modelContext) (provider.Renderer, err
 	}
 
 	return xai.NewRenderer(model.ID, options...)
+}
+
+func openrouterRenderer(cfg providerConfig, model modelContext) (provider.Renderer, error) {
+	var options []openrouter.Option
+
+	if cfg.Token != "" {
+		options = append(options, openrouter.WithToken(cfg.Token))
+	}
+
+	if model.Client != nil {
+		options = append(options, openrouter.WithClient(model.Client))
+	}
+
+	return openrouter.NewRenderer(model.ID, options...)
 }
