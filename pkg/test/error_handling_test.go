@@ -1,6 +1,7 @@
 package test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,7 +9,9 @@ import (
 	"iter"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/pkg/policy/noop"
@@ -69,6 +72,34 @@ type errorCompleter struct {
 
 func (c *errorCompleter) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	return func(yield func(*provider.Completion, error) bool) {
+		yield(nil, c.err)
+	}
+}
+
+// midStreamErrorCompleter yields one successful chunk, then an error.
+// This simulates errors that occur after streaming headers are already sent.
+type midStreamErrorCompleter struct {
+	err error
+}
+
+func (c *midStreamErrorCompleter) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
+	return func(yield func(*provider.Completion, error) bool) {
+		// First chunk succeeds — this causes headers to be sent
+		chunk := &provider.Completion{
+			Model: "test-model",
+			Message: &provider.Message{
+				Role: provider.MessageRoleAssistant,
+				Content: []provider.Content{
+					{Text: "Hello"},
+				},
+			},
+		}
+
+		if !yield(chunk, nil) {
+			return
+		}
+
+		// Second iteration returns the error (mid-stream)
 		yield(nil, c.err)
 	}
 }
@@ -676,5 +707,281 @@ func TestStreamingPreStreamError_Gemini_BadRequest(t *testing.T) {
 	errObj, _ := raw["error"].(map[string]any)
 	if errObj["status"] != "INVALID_ARGUMENT" {
 		t.Errorf("expected status INVALID_ARGUMENT, got %q", errObj["status"])
+	}
+}
+
+// --- Mid-stream error tests ---
+// These test that when the upstream provider returns an error AFTER streaming
+// has already started (headers sent), the error event in the stream contains
+// the correct error type (not a hardcoded generic type).
+
+// readSSEEvents reads all SSE events from a response body.
+func readSSEEvents(body io.Reader) []map[string]string {
+	var events []map[string]string
+	scanner := bufio.NewScanner(body)
+
+	current := map[string]string{}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if line == "" {
+			if len(current) > 0 {
+				events = append(events, current)
+				current = map[string]string{}
+			}
+			continue
+		}
+
+		if strings.HasPrefix(line, "event: ") {
+			current["event"] = strings.TrimPrefix(line, "event: ")
+		} else if strings.HasPrefix(line, "data: ") {
+			current["data"] = strings.TrimPrefix(line, "data: ")
+		}
+	}
+
+	if len(current) > 0 {
+		events = append(events, current)
+	}
+
+	return events
+}
+
+func TestMidStreamError_Chat_RateLimit(t *testing.T) {
+	provErr := &provider.ProviderError{
+		StatusCode: http.StatusTooManyRequests,
+		Message:    "Rate limit reached",
+		RetryAfter: 30 * time.Second,
+	}
+
+	srv := newChatServer(&midStreamErrorCompleter{err: provErr}, "test-model")
+	defer srv.Close()
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"model":  "test-model",
+		"stream": true,
+		"messages": []map[string]any{
+			{"role": "user", "content": "hello"},
+		},
+	})
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/chat/completions", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/chat/completions: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Status is 200 because headers were already sent with first chunk
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 200 (streaming already started), got %d; body: %s", resp.StatusCode, body)
+	}
+
+	// Read all SSE events and find the error event
+	body, _ := io.ReadAll(resp.Body)
+	events := readSSEEvents(bytes.NewReader(body))
+
+	var errorEvent map[string]any
+	for _, ev := range events {
+		data := ev["data"]
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(data), &parsed); err != nil {
+			continue
+		}
+
+		if errObj, ok := parsed["error"].(map[string]any); ok {
+			errorEvent = errObj
+			break
+		}
+	}
+
+	if errorEvent == nil {
+		t.Fatalf("expected error event in stream, got events: %s", body)
+	}
+
+	if errorEvent["type"] != "rate_limit_exceeded" {
+		t.Errorf("expected error type rate_limit_exceeded, got %q", errorEvent["type"])
+	}
+}
+
+func TestMidStreamError_Chat_ServerError(t *testing.T) {
+	provErr := &provider.ProviderError{
+		StatusCode: http.StatusInternalServerError,
+		Message:    "Internal server error",
+	}
+
+	srv := newChatServer(&midStreamErrorCompleter{err: provErr}, "test-model")
+	defer srv.Close()
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"model":  "test-model",
+		"stream": true,
+		"messages": []map[string]any{
+			{"role": "user", "content": "hello"},
+		},
+	})
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/chat/completions", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/chat/completions: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	events := readSSEEvents(bytes.NewReader(body))
+
+	var errorEvent map[string]any
+	for _, ev := range events {
+		data := ev["data"]
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(data), &parsed); err != nil {
+			continue
+		}
+
+		if errObj, ok := parsed["error"].(map[string]any); ok {
+			errorEvent = errObj
+			break
+		}
+	}
+
+	if errorEvent == nil {
+		t.Fatalf("expected error event in stream, got events: %s", body)
+	}
+
+	// 500 → mapped to 502 by StatusCodeFromError → "server_error"
+	if errorEvent["type"] != "server_error" {
+		t.Errorf("expected error type server_error, got %q", errorEvent["type"])
+	}
+}
+
+func TestMidStreamError_Anthropic_RateLimit(t *testing.T) {
+	provErr := &provider.ProviderError{
+		StatusCode: http.StatusTooManyRequests,
+		Message:    "Rate limit reached",
+		RetryAfter: 30 * time.Second,
+	}
+
+	srv := newAnthropicServer(&midStreamErrorCompleter{err: provErr}, "test-model")
+	defer srv.Close()
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"model":      "test-model",
+		"stream":     true,
+		"max_tokens": 100,
+		"messages": []map[string]any{
+			{"role": "user", "content": "hello"},
+		},
+	})
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/messages", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/messages: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Streaming already started, so status is 200
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 200, got %d; body: %s", resp.StatusCode, body)
+	}
+
+	// Read SSE events and find the error event
+	body, _ := io.ReadAll(resp.Body)
+	events := readSSEEvents(bytes.NewReader(body))
+
+	var errorEvent map[string]any
+	for _, ev := range events {
+		if ev["event"] != "error" {
+			continue
+		}
+
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(ev["data"]), &parsed); err != nil {
+			continue
+		}
+
+		if errObj, ok := parsed["error"].(map[string]any); ok {
+			errorEvent = errObj
+			break
+		}
+	}
+
+	if errorEvent == nil {
+		t.Fatalf("expected error event in stream, got events: %s", body)
+	}
+
+	if errorEvent["type"] != "rate_limit_error" {
+		t.Errorf("expected error type rate_limit_error, got %q", errorEvent["type"])
+	}
+}
+
+func TestMidStreamError_Gemini_RateLimit(t *testing.T) {
+	provErr := &provider.ProviderError{
+		StatusCode: http.StatusTooManyRequests,
+		Message:    "Rate limit reached",
+	}
+
+	srv := newGeminiServer(&midStreamErrorCompleter{err: provErr}, "test-model")
+	defer srv.Close()
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"contents": []map[string]any{
+			{
+				"role": "user",
+				"parts": []map[string]any{
+					{"text": "hello"},
+				},
+			},
+		},
+	})
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/models/test-model:streamGenerateContent?alt=sse", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST streamGenerateContent: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Streaming already started, so status is 200
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 200, got %d; body: %s", resp.StatusCode, body)
+	}
+
+	// Read SSE events and find one with an error field
+	body, _ := io.ReadAll(resp.Body)
+	events := readSSEEvents(bytes.NewReader(body))
+
+	var errorObj map[string]any
+	for _, ev := range events {
+		data := ev["data"]
+		if data == "" {
+			continue
+		}
+
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(data), &parsed); err != nil {
+			continue
+		}
+
+		if errField, ok := parsed["error"].(map[string]any); ok {
+			errorObj = errField
+			break
+		}
+	}
+
+	if errorObj == nil {
+		t.Fatalf("expected error in stream, got events: %s", body)
+	}
+
+	if errorObj["status"] != "RESOURCE_EXHAUSTED" {
+		t.Errorf("expected status RESOURCE_EXHAUSTED, got %q", errorObj["status"])
 	}
 }
