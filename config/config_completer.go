@@ -80,6 +80,13 @@ func createCompleter(cfg providerConfig, model modelContext) (provider.Completer
 	case "nim", "nvidia":
 		return openaiCompleter(cfg, model, true)
 
+	case "openrouter":
+		if cfg.URL == "" {
+			cfg.URL = "https://openrouter.ai/api/v1"
+		}
+
+		return openaiCompleter(cfg, model, true)
+
 	case "openai":
 		return openaiCompleter(cfg, model, false)
 

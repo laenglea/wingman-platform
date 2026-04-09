@@ -7,6 +7,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/azurespeech"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
+	"github.com/adrianliechti/wingman/pkg/provider/openrouter"
 )
 
 func (cfg *Config) RegisterTranscriber(id string, p provider.Transcriber) {
@@ -44,6 +45,9 @@ func createTranscriber(cfg providerConfig, model modelContext) (provider.Transcr
 
 	case "openai", "openai-compatible":
 		return openaiTranscriber(cfg, model)
+
+	case "openrouter":
+		return openrouterTranscriber(cfg, model)
 
 	case "azurespeech", "azure-speech":
 		return azureSpeechTranscriber(cfg, model)
@@ -85,4 +89,18 @@ func openaiTranscriber(cfg providerConfig, model modelContext) (provider.Transcr
 	}
 
 	return openai.NewTranscriber(cfg.URL, model.ID, options...)
+}
+
+func openrouterTranscriber(cfg providerConfig, model modelContext) (provider.Transcriber, error) {
+	var options []openrouter.Option
+
+	if cfg.Token != "" {
+		options = append(options, openrouter.WithToken(cfg.Token))
+	}
+
+	if model.Client != nil {
+		options = append(options, openrouter.WithClient(model.Client))
+	}
+
+	return openrouter.NewTranscriber(model.ID, options...)
 }
