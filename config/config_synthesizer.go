@@ -7,6 +7,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/azurespeech"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
+	"github.com/adrianliechti/wingman/pkg/provider/openrouter"
 	"github.com/adrianliechti/wingman/pkg/provider/xai"
 )
 
@@ -38,6 +39,9 @@ func createSynthesizer(cfg providerConfig, model modelContext) (provider.Synthes
 	switch strings.ToLower(cfg.Type) {
 	case "openai", "openai-compatible":
 		return openaiSynthesizer(cfg, model)
+
+	case "openrouter":
+		return openrouterSynthesizer(cfg, model)
 
 	case "azurespeech", "azure-speech":
 		return azureSpeechSynthesizer(cfg, model)
@@ -96,4 +100,18 @@ func xaiSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesize
 	}
 
 	return xai.NewSynthesizer(model.ID, options...)
+}
+
+func openrouterSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesizer, error) {
+	var options []openrouter.Option
+
+	if cfg.Token != "" {
+		options = append(options, openrouter.WithToken(cfg.Token))
+	}
+
+	if model.Client != nil {
+		options = append(options, openrouter.WithClient(model.Client))
+	}
+
+	return openrouter.NewSynthesizer(model.ID, options...)
 }
