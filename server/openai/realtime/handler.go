@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -41,15 +42,29 @@ func New() *Handler {
 	}
 }
 
+func (h *Handler) isAzure() bool {
+	return strings.Contains(h.baseURL, "openai.azure.com") || strings.Contains(h.baseURL, "cognitiveservices.azure.com")
+}
+
 func (h *Handler) Attach(r chi.Router) {
 	r.HandleFunc("/realtime", h.handleRealtime)
 }
 
 func (h *Handler) dial(r *http.Request) (*websocket.Conn, *http.Response, error) {
-	u, _ := url.Parse(h.baseURL)
+	u, err := url.Parse(h.baseURL)
 
-	u.Scheme = "wss"
-	u.Path = "/v1/realtime"
+	if err != nil {
+		return nil, nil, err
+	}
+
+	switch u.Scheme {
+	case "http":
+		u.Scheme = "ws"
+	default:
+		u.Scheme = "wss"
+	}
+
+	u.Path = strings.TrimRight(u.Path, "/") + "/realtime"
 
 	query := u.Query()
 
@@ -62,7 +77,11 @@ func (h *Handler) dial(r *http.Request) (*websocket.Conn, *http.Response, error)
 	headers := http.Header{}
 
 	if h.apiKey != "" {
-		headers.Set("Authorization", "Bearer "+h.apiKey)
+		if h.isAzure() {
+			headers.Set("api-key", h.apiKey)
+		} else {
+			headers.Set("Authorization", "Bearer "+h.apiKey)
+		}
 	}
 
 	dialer := websocket.Dialer{}
@@ -92,6 +111,8 @@ func (h *Handler) handleRealtime(w http.ResponseWriter, r *http.Request) {
 			log.Print(string(data))
 		}
 
+		downstream.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "upstream connection failed"))
 		return
 	}
 
