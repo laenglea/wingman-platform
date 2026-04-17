@@ -51,11 +51,17 @@ func EndUserAttrs(ctx context.Context) []KeyValue {
 	var attrs []KeyValue
 
 	if user, ok := ctx.Value(auth.UserContextKey).(string); ok && user != "" {
-		attrs = append(attrs, attribute.String("enduser.id", user))
+		attrs = append(attrs,
+			attribute.String("user.id", user),
+			attribute.String("enduser.id", user), // deprecated
+		)
 	}
 
 	if email, ok := ctx.Value(auth.EmailContextKey).(string); ok && email != "" {
-		attrs = append(attrs, attribute.String("enduser.email", email))
+		attrs = append(attrs,
+			attribute.String("user.email", email),
+			attribute.String("enduser.email", email), // deprecated
+		)
 	}
 
 	return attrs
