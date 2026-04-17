@@ -37,10 +37,6 @@ func writeJson(w http.ResponseWriter, v any) {
 }
 
 func writeError(w http.ResponseWriter, code int, err error) {
-	if err != nil {
-		println("server error", err.Error())
-	}
-
 	// Use real status code from upstream provider if available
 	code = provider.StatusCodeFromError(err, code)
 
@@ -52,33 +48,11 @@ func writeError(w http.ResponseWriter, code int, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 
-	var errorType string
-	switch code {
-	case http.StatusUnauthorized:
-		errorType = "authentication_error"
-
-	case http.StatusForbidden:
-		errorType = "permission_error"
-
-	case http.StatusNotFound:
-		errorType = "not_found_error"
-
-	case http.StatusTooManyRequests:
-		errorType = "rate_limit_error"
-
-	default:
-		errorType = "invalid_request_error"
-
-		if code >= 500 {
-			errorType = "api_error"
-		}
-	}
-
 	resp := ErrorResponse{
 		Type: "error",
 
 		Error: Error{
-			Type:    errorType,
+			Type:    errorTypeForStatus(code),
 			Message: err.Error(),
 		},
 	}

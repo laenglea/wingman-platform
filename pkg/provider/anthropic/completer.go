@@ -348,32 +348,29 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
 	}
 
-	isOpus46 := strings.Contains(c.model, "opus-4-6")
-	isSonnet46 := strings.Contains(c.model, "sonnet-4-6")
-
-	if isOpus46 || isSonnet46 {
+	if isAdaptiveThinkingModel(c.model) {
 		req.MaxTokens = 128000
-	}
 
-	if options.ReasoningOptions != nil && (isOpus46 || isSonnet46) {
-		req.Thinking = anthropic.BetaThinkingConfigParamUnion{
-			OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{
-				Display: anthropic.BetaThinkingConfigAdaptiveDisplaySummarized,
-			},
-		}
+		if options.ReasoningOptions != nil {
+			req.Thinking = anthropic.BetaThinkingConfigParamUnion{
+				OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{
+					Display: anthropic.BetaThinkingConfigAdaptiveDisplaySummarized,
+				},
+			}
 
-		switch options.ReasoningOptions.Effort {
-		case provider.EffortMinimal, provider.EffortLow:
-			req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortLow
+			switch options.ReasoningOptions.Effort {
+			case provider.EffortMinimal, provider.EffortLow:
+				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortLow
 
-		case provider.EffortMedium:
-			req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMedium
+			case provider.EffortMedium:
+				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMedium
 
-		case provider.EffortHigh:
-			req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortHigh
+			case provider.EffortHigh:
+				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortHigh
 
-		case provider.EffortMax:
-			req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMax
+			case provider.EffortMax:
+				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMax
+			}
 		}
 	}
 

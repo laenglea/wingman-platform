@@ -43,7 +43,7 @@ func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *p
 		Input: content,
 
 		Voice: openai.AudioSpeechNewParamsVoiceUnion{
-			OfString: openai.String(string(openai.AudioSpeechNewParamsVoiceStringAlloy)),
+			OfString: openai.String(string(openai.AudioSpeechNewParamsVoiceString2Alloy)),
 		},
 	}
 

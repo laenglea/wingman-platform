@@ -1,9 +1,11 @@
 package anthropic
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -17,7 +19,7 @@ func convertError(err error) error {
 	if errors.As(err, &apierr) {
 		provErr := &provider.ProviderError{
 			StatusCode: apierr.StatusCode,
-			Message:    apierr.Error(),
+			Message:    extractAnthropicMessage(apierr),
 			Err:        err,
 		}
 
@@ -30,6 +32,30 @@ func convertError(err error) error {
 	}
 
 	return err
+}
+
+// extractAnthropicMessage pulls the clean error.message out of the SDK's
+// raw JSON body. The SDK's Error.Error() string includes the HTTP method,
+// URL, status, Request-ID, and the raw body — too noisy to surface as-is
+// to API clients. Falls back to apierr.Error() if parsing fails.
+func extractAnthropicMessage(apierr *anthropic.Error) string {
+	raw := apierr.RawJSON()
+
+	if raw != "" {
+		var payload struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+
+		if err := json.Unmarshal([]byte(raw), &payload); err == nil {
+			if msg := strings.TrimSpace(payload.Error.Message); msg != "" {
+				return msg
+			}
+		}
+	}
+
+	return apierr.Error()
 }
 
 // parseRetryAfter parses Retry-After (seconds, float, HTTP-date).
@@ -56,3 +82,21 @@ func parseRetryAfter(h http.Header) time.Duration {
 	return 0
 }
 
+func isAdaptiveThinkingModel(model string) bool {
+	model = strings.ToLower(model)
+
+	thinkingPatterns := []string{
+		"sonnet-4-6",
+
+		"opus-4-7",
+		"opus-4-6",
+	}
+
+	for _, p := range thinkingPatterns {
+		if strings.Contains(model, p) {
+			return true
+		}
+	}
+
+	return false
+}
