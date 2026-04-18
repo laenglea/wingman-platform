@@ -200,7 +200,7 @@ func TestRateLimitError_ProviderLevel(t *testing.T) {
 		t.Fatal("expected error from provider, got nil")
 	}
 
-	statusCode := provider.StatusCodeFromError(gotErr, 0)
+	statusCode := provider.CodeFromError(gotErr, 0)
 	if statusCode != http.StatusTooManyRequests {
 		t.Errorf("expected status 429, got %d", statusCode)
 	}
@@ -235,7 +235,7 @@ func TestServerError_ProviderLevel(t *testing.T) {
 	}
 
 	// Upstream 500 → ProviderError maps to 502 (bad gateway).
-	statusCode := provider.StatusCodeFromError(gotErr, 0)
+	statusCode := provider.CodeFromError(gotErr, 0)
 	if statusCode != http.StatusBadGateway {
 		t.Errorf("expected status 502, got %d", statusCode)
 	}
@@ -264,7 +264,7 @@ func TestAuthError_ProviderLevel(t *testing.T) {
 		t.Fatal("expected error from provider, got nil")
 	}
 
-	statusCode := provider.StatusCodeFromError(gotErr, 0)
+	statusCode := provider.CodeFromError(gotErr, 0)
 	if statusCode != http.StatusUnauthorized {
 		t.Errorf("expected status 401, got %d", statusCode)
 	}
@@ -448,8 +448,8 @@ func TestStreamingPreStreamError_Responses(t *testing.T) {
 
 func TestStreamingPreStreamError_Chat(t *testing.T) {
 	provErr := &provider.ProviderError{
-		StatusCode: http.StatusTooManyRequests,
-		Message:    "Rate limit reached",
+		Code:    http.StatusTooManyRequests,
+		Message: "Rate limit reached",
 	}
 
 	srv := newChatServer(&errorCompleter{err: provErr}, "test-model")
@@ -492,8 +492,8 @@ func TestStreamingPreStreamError_Chat(t *testing.T) {
 
 func TestStreamingPreStreamError_Chat_ServerError(t *testing.T) {
 	provErr := &provider.ProviderError{
-		StatusCode: http.StatusInternalServerError,
-		Message:    "Internal server error",
+		Code:    http.StatusInternalServerError,
+		Message: "Internal server error",
 	}
 
 	srv := newChatServer(&errorCompleter{err: provErr}, "test-model")
@@ -522,8 +522,8 @@ func TestStreamingPreStreamError_Chat_ServerError(t *testing.T) {
 
 func TestStreamingPreStreamError_Anthropic(t *testing.T) {
 	provErr := &provider.ProviderError{
-		StatusCode: http.StatusTooManyRequests,
-		Message:    "Rate limit reached",
+		Code:    http.StatusTooManyRequests,
+		Message: "Rate limit reached",
 	}
 
 	srv := newAnthropicServer(&errorCompleter{err: provErr}, "test-model")
@@ -577,8 +577,8 @@ func TestStreamingPreStreamError_Anthropic(t *testing.T) {
 
 func TestStreamingPreStreamError_Anthropic_AuthError(t *testing.T) {
 	provErr := &provider.ProviderError{
-		StatusCode: http.StatusUnauthorized,
-		Message:    "Invalid API key",
+		Code:    http.StatusUnauthorized,
+		Message: "Invalid API key",
 	}
 
 	srv := newAnthropicServer(&errorCompleter{err: provErr}, "test-model")
@@ -617,8 +617,8 @@ func TestStreamingPreStreamError_Anthropic_AuthError(t *testing.T) {
 
 func TestStreamingPreStreamError_Gemini(t *testing.T) {
 	provErr := &provider.ProviderError{
-		StatusCode: http.StatusTooManyRequests,
-		Message:    "Rate limit reached",
+		Code:    http.StatusTooManyRequests,
+		Message: "Rate limit reached",
 	}
 
 	srv := newGeminiServer(&errorCompleter{err: provErr}, "test-model")
@@ -670,8 +670,8 @@ func TestStreamingPreStreamError_Gemini(t *testing.T) {
 
 func TestStreamingPreStreamError_Gemini_BadRequest(t *testing.T) {
 	provErr := &provider.ProviderError{
-		StatusCode: http.StatusBadRequest,
-		Message:    "Invalid request",
+		Code:    http.StatusBadRequest,
+		Message: "Invalid request",
 	}
 
 	srv := newGeminiServer(&errorCompleter{err: provErr}, "test-model")
@@ -749,7 +749,7 @@ func readSSEEvents(body io.Reader) []map[string]string {
 
 func TestMidStreamError_Chat_RateLimit(t *testing.T) {
 	provErr := &provider.ProviderError{
-		StatusCode: http.StatusTooManyRequests,
+		Code:       http.StatusTooManyRequests,
 		Message:    "Rate limit reached",
 		RetryAfter: 30 * time.Second,
 	}
@@ -810,8 +810,8 @@ func TestMidStreamError_Chat_RateLimit(t *testing.T) {
 
 func TestMidStreamError_Chat_ServerError(t *testing.T) {
 	provErr := &provider.ProviderError{
-		StatusCode: http.StatusInternalServerError,
-		Message:    "Internal server error",
+		Code:    http.StatusInternalServerError,
+		Message: "Internal server error",
 	}
 
 	srv := newChatServer(&midStreamErrorCompleter{err: provErr}, "test-model")
@@ -864,7 +864,7 @@ func TestMidStreamError_Chat_ServerError(t *testing.T) {
 
 func TestMidStreamError_Anthropic_RateLimit(t *testing.T) {
 	provErr := &provider.ProviderError{
-		StatusCode: http.StatusTooManyRequests,
+		Code:       http.StatusTooManyRequests,
 		Message:    "Rate limit reached",
 		RetryAfter: 30 * time.Second,
 	}
@@ -925,8 +925,8 @@ func TestMidStreamError_Anthropic_RateLimit(t *testing.T) {
 
 func TestMidStreamError_Gemini_RateLimit(t *testing.T) {
 	provErr := &provider.ProviderError{
-		StatusCode: http.StatusTooManyRequests,
-		Message:    "Rate limit reached",
+		Code:    http.StatusTooManyRequests,
+		Message: "Rate limit reached",
 	}
 
 	srv := newGeminiServer(&midStreamErrorCompleter{err: provErr}, "test-model")

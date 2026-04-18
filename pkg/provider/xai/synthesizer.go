@@ -103,8 +103,8 @@ func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *p
 		errBody, _ := io.ReadAll(resp.Body)
 
 		return nil, &provider.ProviderError{
-			StatusCode: resp.StatusCode,
-			Message:    string(errBody),
+			Code:    resp.StatusCode,
+			Message: string(errBody),
 		}
 	}
 

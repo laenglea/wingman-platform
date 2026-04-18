@@ -404,7 +404,7 @@ func (s *StreamingAccumulator) Error(err error) error {
 	return s.emitEvent(StreamEvent{
 		Type: StreamEventError,
 		Error: &Error{
-			Type:    errorTypeForStatus(provider.StatusCodeFromError(err, 0)),
+			Type:    errorTypeForStatus(provider.CodeFromError(err, 0)),
 			Message: err.Error(),
 		},
 	})

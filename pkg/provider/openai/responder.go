@@ -366,15 +366,21 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 				}
 
 			case responses.ResponseFailedEvent:
-				msg := "response failed"
+				errCode := string(event.Response.Error.Code)
 
-				if event.Response.Error.Message != "" {
-					msg = event.Response.Error.Message
+				msg := event.Response.Error.Message
+				if msg == "" {
+					if errCode != "" {
+						msg = "response failed: " + errCode
+					} else {
+						msg = "response failed"
+					}
 				}
 
 				yield(nil, &provider.ProviderError{
-					StatusCode: statusCodeFromResponseErrorCode(string(event.Response.Error.Code)),
-					Message:    msg,
+					Code:    statusCodeFromResponseErrorCode(errCode),
+					Type:    errCode,
+					Message: msg,
 				})
 				return
 

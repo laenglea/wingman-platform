@@ -39,7 +39,7 @@ func writeError(w http.ResponseWriter, code int, err error) {
 		println("server error", err.Error())
 	}
 
-	code = provider.StatusCodeFromError(err, code)
+	code = provider.CodeFromError(err, code)
 
 	if v := provider.RetryAfterHeaderValue(provider.RetryAfterFromError(err)); v != "" {
 		w.Header().Set("Retry-After", v)

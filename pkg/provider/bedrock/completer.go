@@ -338,9 +338,9 @@ func convertError(err error) error {
 
 	wrap := func(statusCode int, msg string) error {
 		return &provider.ProviderError{
-			StatusCode: statusCode,
-			Message:    msg,
-			Err:        err,
+			Code:    statusCode,
+			Message: msg,
+			Err:     err,
 		}
 	}
 

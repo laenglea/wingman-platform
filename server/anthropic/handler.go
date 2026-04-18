@@ -38,7 +38,7 @@ func writeJson(w http.ResponseWriter, v any) {
 
 func writeError(w http.ResponseWriter, code int, err error) {
 	// Use real status code from upstream provider if available
-	code = provider.StatusCodeFromError(err, code)
+	code = provider.CodeFromError(err, code)
 
 	// Propagate Retry-After from upstream
 	if v := provider.RetryAfterHeaderValue(provider.RetryAfterFromError(err)); v != "" {
