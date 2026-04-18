@@ -1,8 +1,6 @@
 package anthropic
 
 import (
-	"net/http"
-
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
@@ -406,27 +404,10 @@ func (s *StreamingAccumulator) Error(err error) error {
 	return s.emitEvent(StreamEvent{
 		Type: StreamEventError,
 		Error: &Error{
-			Type:    errorTypeFromError(err),
+			Type:    errorTypeForStatus(provider.StatusCodeFromError(err, 0)),
 			Message: err.Error(),
 		},
 	})
-}
-
-func errorTypeFromError(err error) string {
-	code := provider.StatusCodeFromError(err, 0)
-
-	switch code {
-	case http.StatusUnauthorized:
-		return "authentication_error"
-	case http.StatusForbidden:
-		return "permission_error"
-	case http.StatusNotFound:
-		return "not_found_error"
-	case http.StatusTooManyRequests:
-		return "rate_limit_error"
-	default:
-		return "api_error"
-	}
 }
 
 // Result returns the accumulated completion

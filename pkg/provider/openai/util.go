@@ -15,9 +15,27 @@ func convertError(err error) error {
 	var apierr *openai.Error
 
 	if errors.As(err, &apierr) {
+		statusCode := apierr.StatusCode
+
+		// Map rate limit errors to 429 regardless of upstream status code
+		// Azure OpenAI PTU returns 400 with type:too_many_requests instead of 429
+		if apierr.Type == "too_many_requests" ||
+			apierr.Type == "rate_limit_exceeded" ||
+			apierr.Code == "rate_limit_reached" ||
+			apierr.Code == "insufficient_quota" {
+			statusCode = http.StatusTooManyRequests
+		}
+
+		// Prefer the clean, human-readable API message over apierr.Error(),
+		// which includes the HTTP method/URL/status and raw JSON body.
+		message := apierr.Message
+		if message == "" {
+			message = apierr.Error()
+		}
+
 		provErr := &provider.ProviderError{
-			StatusCode: apierr.StatusCode,
-			Message:    apierr.Error(),
+			StatusCode: statusCode,
+			Message:    message,
 			Err:        err,
 		}
 
@@ -57,6 +75,24 @@ func parseRetryAfter(h http.Header) time.Duration {
 	}
 
 	return 0
+}
+
+// statusCodeFromResponseErrorCode maps a Responses API ResponseErrorCode
+// (emitted via response.failed streaming events) to an HTTP status code.
+// See: https://platform.openai.com/docs/api-reference/responses-streaming/response/failed
+func statusCodeFromResponseErrorCode(code string) int {
+	switch code {
+	case "rate_limit_exceeded":
+		return http.StatusTooManyRequests
+	case "server_error", "vector_store_timeout":
+		return http.StatusBadGateway
+	case "":
+		return http.StatusBadGateway
+	default:
+		// All other documented codes are request-payload issues
+		// (invalid_prompt, invalid_image, image_too_large, etc.)
+		return http.StatusBadRequest
+	}
 }
 
 

@@ -34,10 +34,6 @@ func writeJson(w http.ResponseWriter, v any) {
 }
 
 func writeError(w http.ResponseWriter, code int, err error) {
-	if err != nil {
-		println("server error", err.Error())
-	}
-
 	shared.WriteError(w, code, err)
 }
 

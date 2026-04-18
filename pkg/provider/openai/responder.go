@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"iter"
 	"slices"
@@ -373,7 +372,10 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 					msg = event.Response.Error.Message
 				}
 
-				yield(nil, errors.New(msg))
+				yield(nil, &provider.ProviderError{
+					StatusCode: statusCodeFromResponseErrorCode(string(event.Response.Error.Code)),
+					Message:    msg,
+				})
 				return
 
 			case responses.ResponseIncompleteEvent:

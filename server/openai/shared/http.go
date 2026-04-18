@@ -29,13 +29,19 @@ func errorTypeFromCode(code int) string {
 	case code == http.StatusForbidden:
 		return "permission_error"
 	case code == http.StatusNotFound:
-		return "not_found"
+		return "not_found_error"
+	case code == http.StatusRequestTimeout:
+		return "timeout_error"
+	case code == http.StatusConflict:
+		return "conflict_error"
 	case code == http.StatusTooManyRequests:
 		return "rate_limit_exceeded"
+	case code == http.StatusServiceUnavailable:
+		return "overloaded_error"
 	case code >= 500:
 		return "server_error"
 	case code >= 400:
-		return "invalid_request"
+		return "invalid_request_error"
 	default:
 		return "server_error"
 	}

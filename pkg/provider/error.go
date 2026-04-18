@@ -26,9 +26,20 @@ func (e *ProviderError) Unwrap() error {
 
 // StatusCodeFromError extracts the HTTP status code from a ProviderError.
 // Returns the fallback if the error is not a ProviderError.
+//
+// 5xx responses are normalized to gateway-appropriate codes:
+//   - 503 (overloaded / "Slow down") is preserved as-is so clients can back off
+//   - 504 (upstream timeout, e.g. Bedrock ModelTimeoutException) is preserved
+//   - 529 (Anthropic overloaded) is preserved as-is for the same reason
+//   - Other 5xx statuses collapse to 502 Bad Gateway
 func StatusCodeFromError(err error, fallback int) int {
 	var provErr *ProviderError
 	if errors.As(err, &provErr) && provErr.StatusCode > 0 {
+		switch provErr.StatusCode {
+		case http.StatusServiceUnavailable, http.StatusGatewayTimeout, 529:
+			return provErr.StatusCode
+		}
+
 		if provErr.StatusCode >= 500 {
 			return http.StatusBadGateway
 		}

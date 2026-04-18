@@ -19,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"github.com/aws/smithy-go"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 var _ provider.Completer = (*Completer)(nil)
@@ -395,17 +396,39 @@ func convertError(err error) error {
 
 	var modelErr *types.ModelStreamErrorException
 	if errors.As(err, &modelErr) {
-		return wrap(500, fmt.Sprintf("bedrock stream error: %s", aws.ToString(modelErr.Message)))
+		status := 500
+		if modelErr.OriginalStatusCode != nil && *modelErr.OriginalStatusCode > 0 {
+			status = int(*modelErr.OriginalStatusCode)
+		}
+		return wrap(status, fmt.Sprintf("bedrock stream error: %s", aws.ToString(modelErr.Message)))
 	}
 
 	var modelError *types.ModelErrorException
 	if errors.As(err, &modelError) {
-		return wrap(500, fmt.Sprintf("bedrock model error: %s", aws.ToString(modelError.Message)))
+		status := 500
+		if modelError.OriginalStatusCode != nil && *modelError.OriginalStatusCode > 0 {
+			status = int(*modelError.OriginalStatusCode)
+		}
+		return wrap(status, fmt.Sprintf("bedrock model error: %s", aws.ToString(modelError.Message)))
+	}
+
+	// Non-modeled HTTP errors: preserve the real upstream status code.
+	var respErr *smithyhttp.ResponseError
+	if errors.As(err, &respErr) {
+		status := respErr.HTTPStatusCode()
+		if status <= 0 {
+			status = 500
+		}
+		return wrap(status, fmt.Sprintf("bedrock: %s", err.Error()))
 	}
 
 	var ae smithy.APIError
 	if errors.As(err, &ae) {
-		return wrap(500, fmt.Sprintf("bedrock error [%s]: %s", ae.ErrorCode(), ae.ErrorMessage()))
+		status := 500
+		if ae.ErrorFault() == smithy.FaultClient {
+			status = 400
+		}
+		return wrap(status, fmt.Sprintf("bedrock error [%s]: %s", ae.ErrorCode(), ae.ErrorMessage()))
 	}
 
 	return err
