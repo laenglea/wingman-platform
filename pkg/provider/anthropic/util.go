@@ -17,10 +17,13 @@ func convertError(err error) error {
 	var apierr *anthropic.Error
 
 	if errors.As(err, &apierr) {
+		message, errType := extractAnthropicErrorInfo(apierr)
+
 		provErr := &provider.ProviderError{
-			StatusCode: apierr.StatusCode,
-			Message:    extractAnthropicMessage(apierr),
-			Err:        err,
+			Code:    apierr.StatusCode,
+			Type:    errType,
+			Message: message,
+			Err:     err,
 		}
 
 		if apierr.Response != nil {
@@ -34,28 +37,33 @@ func convertError(err error) error {
 	return err
 }
 
-// extractAnthropicMessage pulls the clean error.message out of the SDK's
-// raw JSON body. The SDK's Error.Error() string includes the HTTP method,
-// URL, status, Request-ID, and the raw body — too noisy to surface as-is
-// to API clients. Falls back to apierr.Error() if parsing fails.
-func extractAnthropicMessage(apierr *anthropic.Error) string {
+// extractAnthropicErrorInfo pulls the clean error.message and error.type out
+// of the SDK's raw JSON body (shape: {"error":{"type":"rate_limit_error",
+// "message":"..."}}). The SDK's Error.Error() string includes the HTTP
+// method, URL, status, Request-ID, and the raw body — too noisy to surface
+// as-is to API clients. Falls back to apierr.Error() if parsing fails.
+func extractAnthropicErrorInfo(apierr *anthropic.Error) (message, errType string) {
 	raw := apierr.RawJSON()
 
 	if raw != "" {
 		var payload struct {
 			Error struct {
+				Type    string `json:"type"`
 				Message string `json:"message"`
 			} `json:"error"`
 		}
 
 		if err := json.Unmarshal([]byte(raw), &payload); err == nil {
-			if msg := strings.TrimSpace(payload.Error.Message); msg != "" {
-				return msg
-			}
+			message = strings.TrimSpace(payload.Error.Message)
+			errType = strings.TrimSpace(payload.Error.Type)
 		}
 	}
 
-	return apierr.Error()
+	if message == "" {
+		message = apierr.Error()
+	}
+
+	return message, errType
 }
 
 // parseRetryAfter parses Retry-After (seconds, float, HTTP-date).

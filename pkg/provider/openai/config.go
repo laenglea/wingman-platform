@@ -16,9 +16,6 @@ type Config struct {
 
 	client     *http.Client
 	maxRetries *int
-
-	httpClient *http.Client
-	throttle   *throttleTransport
 }
 
 type Option func(*Config)
@@ -55,17 +52,6 @@ func (c *Config) init() {
 	}
 
 	c.url = strings.TrimRight(c.url, "/") + "/"
-
-	if c.isAzure() {
-		c.throttle = newThrottleTransport(c.client.Transport)
-
-		c.httpClient = &http.Client{
-			Transport: c.throttle,
-			Timeout:   c.client.Timeout,
-		}
-	} else {
-		c.httpClient = c.client
-	}
 }
 
 // Options returns SDK request options using a plain base URL.
@@ -77,7 +63,7 @@ func (c *Config) Options() []option.RequestOption {
 
 	options := []option.RequestOption{
 		option.WithBaseURL(c.url),
-		option.WithHTTPClient(c.httpClient),
+		option.WithHTTPClient(c.client),
 	}
 
 	if c.isAzure() && c.token != "" {
@@ -106,7 +92,7 @@ func (c *Config) AzureOptions() []option.RequestOption {
 	}
 
 	options := []option.RequestOption{
-		option.WithHTTPClient(c.httpClient),
+		option.WithHTTPClient(c.client),
 		azure.WithEndpoint(c.url, "2025-04-01-preview"),
 	}
 
@@ -120,4 +106,3 @@ func (c *Config) AzureOptions() []option.RequestOption {
 
 	return options
 }
-

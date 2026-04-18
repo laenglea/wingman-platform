@@ -30,9 +30,10 @@ func convertError(err error) error {
 		}
 
 		return &provider.ProviderError{
-			StatusCode: statusCode,
-			Message:    message,
-			Err:        err,
+			Code:    statusCode,
+			Type:    apierr.Status,
+			Message: message,
+			Err:     err,
 		}
 	}
 

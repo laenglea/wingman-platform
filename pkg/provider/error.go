@@ -7,11 +7,13 @@ import (
 	"time"
 )
 
-// ProviderError wraps an upstream API error with HTTP status code and rate limit info.
+// ProviderError wraps an upstream API error with HTTP status code, a
+// provider-specific error type, and rate-limit metadata.
 type ProviderError struct {
-	StatusCode int
-	Message    string
-	Err        error
+	Code    int
+	Type    string
+	Message string
+	Err     error
 
 	RetryAfter time.Duration
 }
@@ -24,7 +26,7 @@ func (e *ProviderError) Unwrap() error {
 	return e.Err
 }
 
-// StatusCodeFromError extracts the HTTP status code from a ProviderError.
+// CodeFromError extracts the HTTP status code from a ProviderError.
 // Returns the fallback if the error is not a ProviderError.
 //
 // 5xx responses are normalized to gateway-appropriate codes:
@@ -32,19 +34,19 @@ func (e *ProviderError) Unwrap() error {
 //   - 504 (upstream timeout, e.g. Bedrock ModelTimeoutException) is preserved
 //   - 529 (Anthropic overloaded) is preserved as-is for the same reason
 //   - Other 5xx statuses collapse to 502 Bad Gateway
-func StatusCodeFromError(err error, fallback int) int {
+func CodeFromError(err error, fallback int) int {
 	var provErr *ProviderError
-	if errors.As(err, &provErr) && provErr.StatusCode > 0 {
-		switch provErr.StatusCode {
+	if errors.As(err, &provErr) && provErr.Code > 0 {
+		switch provErr.Code {
 		case http.StatusServiceUnavailable, http.StatusGatewayTimeout, 529:
-			return provErr.StatusCode
+			return provErr.Code
 		}
 
-		if provErr.StatusCode >= 500 {
+		if provErr.Code >= 500 {
 			return http.StatusBadGateway
 		}
 
-		return provErr.StatusCode
+		return provErr.Code
 	}
 
 	return fallback
@@ -57,6 +59,17 @@ func RetryAfterFromError(err error) time.Duration {
 	}
 
 	return 0
+}
+
+// TypeFromError extracts the provider-specific error type (e.g. "insufficient_quota",
+// "rate_limit_error", "RESOURCE_EXHAUSTED") from a ProviderError. Returns "" if none
+// is available.
+func TypeFromError(err error) string {
+	if provErr, ok := errors.AsType[*ProviderError](err); ok {
+		return provErr.Type
+	}
+
+	return ""
 }
 
 // RetryAfterHeaderValue formats a Retry-After duration as an HTTP header value (seconds).
