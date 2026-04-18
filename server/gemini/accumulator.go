@@ -149,6 +149,10 @@ func (s *StreamingAccumulator) Error(err error) error {
 		status = "RESOURCE_EXHAUSTED"
 	default:
 		status = "INTERNAL"
+
+		if code >= 400 && code < 500 {
+			status = "INVALID_ARGUMENT"
+		}
 	}
 
 	response := GenerateContentResponse{
