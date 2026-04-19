@@ -64,5 +64,12 @@ func EndUserAttrs(ctx context.Context) []KeyValue {
 		)
 	}
 
+	if name, ok := ctx.Value(auth.NameContextKey).(string); ok && name != "" {
+		attrs = append(attrs,
+			attribute.String("user.full_name", name),
+			attribute.String("enduser.name", name), // deprecated
+		)
+	}
+
 	return attrs
 }

@@ -56,5 +56,9 @@ func (p *Provider) Authenticate(ctx context.Context, r *http.Request) (context.C
 		ctx = context.WithValue(ctx, auth.EmailContextKey, email)
 	}
 
+	if name := strings.TrimSpace(r.Header.Get("X-Forwarded-Name")); name != "" {
+		ctx = context.WithValue(ctx, auth.NameContextKey, name)
+	}
+
 	return ctx, nil
 }
