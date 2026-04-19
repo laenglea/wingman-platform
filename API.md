@@ -304,7 +304,7 @@ Split text into segments/chunks.
 
 | Parameter          | Type    | Description                   |
 |--------------------|---------|-------------------------------|
-| `input`            | String  | Text to segment               |
+| `text`             | String  | Text to segment               |
 | `file`             | File    | File to extract and segment   |
 | `url`              | String  | URL to scrape and segment     |
 | `segment_length`   | Integer | Target segment length         |
