@@ -109,7 +109,7 @@ func (h *Handler) handleStreamGenerateContent(w http.ResponseWriter, r *http.Req
 	for completion, err := range completer.Complete(r.Context(), messages, options) {
 		if err != nil {
 			if !headersSent {
-				writeError(w, http.StatusBadRequest, err)
+				writeError(w, http.StatusInternalServerError, err)
 				return
 			}
 

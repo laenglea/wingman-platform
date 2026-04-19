@@ -18,7 +18,7 @@ func convertError(resp *http.Response) error {
 	}
 
 	return &provider.ProviderError{
-		StatusCode: resp.StatusCode,
+		Code:       resp.StatusCode,
 		Message:    message,
 		RetryAfter: parseRetryAfter(resp.Header),
 	}

@@ -186,8 +186,8 @@ func (r *Renderer) do(ctx context.Context, url string, body any, result any) err
 		body, _ := io.ReadAll(resp.Body)
 
 		return &provider.ProviderError{
-			StatusCode: resp.StatusCode,
-			Message:    string(body),
+			Code:    resp.StatusCode,
+			Message: string(body),
 		}
 	}
 

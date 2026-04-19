@@ -58,7 +58,7 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 	image, err := client.Models.GenerateContent(ctx, r.model, contents, nil)
 
 	if err != nil {
-		return nil, err
+		return nil, convertError(err)
 	}
 
 	result := &provider.Rendering{

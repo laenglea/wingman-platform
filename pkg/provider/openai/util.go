@@ -33,10 +33,18 @@ func convertError(err error) error {
 			message = apierr.Error()
 		}
 
+		// Prefer the upstream `code` (e.g. "insufficient_quota",
+		// "context_length_exceeded"); fall back to `type` if absent.
+		errType := apierr.Code
+		if errType == "" {
+			errType = apierr.Type
+		}
+
 		provErr := &provider.ProviderError{
-			StatusCode: statusCode,
-			Message:    message,
-			Err:        err,
+			Code:    statusCode,
+			Type:    errType,
+			Message: message,
+			Err:     err,
 		}
 
 		if apierr.Response != nil {
@@ -94,7 +102,6 @@ func statusCodeFromResponseErrorCode(code string) int {
 		return http.StatusBadRequest
 	}
 }
-
 
 // ensureAdditionalPropertiesFalse recursively adds additionalProperties: false
 // to all object schemas. Required by OpenAI's strict JSON schema validation.

@@ -133,7 +133,7 @@ func (s *StreamingAccumulator) Complete() error {
 
 // Error emits an error response in the stream
 func (s *StreamingAccumulator) Error(err error) error {
-	code := provider.StatusCodeFromError(err, http.StatusInternalServerError)
+	code := provider.CodeFromError(err, http.StatusInternalServerError)
 
 	var status string
 	switch {
@@ -149,6 +149,10 @@ func (s *StreamingAccumulator) Error(err error) error {
 		status = "RESOURCE_EXHAUSTED"
 	default:
 		status = "INTERNAL"
+
+		if code >= 400 && code < 500 {
+			status = "INVALID_ARGUMENT"
+		}
 	}
 
 	response := GenerateContentResponse{

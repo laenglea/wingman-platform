@@ -18,7 +18,7 @@ func WriteJson(w http.ResponseWriter, v any) {
 
 // ErrorTypeFromError maps a ProviderError to an OpenAI-compatible error type string.
 func ErrorTypeFromError(err error) string {
-	code := provider.StatusCodeFromError(err, 0)
+	code := provider.CodeFromError(err, 0)
 	return errorTypeFromCode(code)
 }
 
@@ -49,7 +49,7 @@ func errorTypeFromCode(code int) string {
 
 func WriteError(w http.ResponseWriter, code int, err error) {
 	// Use real status code from upstream provider if available
-	code = provider.StatusCodeFromError(err, code)
+	code = provider.CodeFromError(err, code)
 
 	// Propagate Retry-After from upstream
 	if v := provider.RetryAfterHeaderValue(provider.RetryAfterFromError(err)); v != "" {
@@ -64,6 +64,7 @@ func WriteError(w http.ResponseWriter, code int, err error) {
 	resp := ErrorResponse{
 		Error: Error{
 			Type:    errorType,
+			Code:    provider.TypeFromError(err),
 			Message: err.Error(),
 		},
 	}
