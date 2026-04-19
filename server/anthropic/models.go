@@ -143,6 +143,7 @@ type Message struct {
 	Content      []ContentBlock `json:"content"`
 	Model        string         `json:"model"`
 	StopReason   *StopReason    `json:"stop_reason"`
+	StopDetails  *StopDetails   `json:"stop_details"`
 	StopSequence *string        `json:"stop_sequence"`
 	Usage        Usage          `json:"usage"`
 }
@@ -180,6 +181,12 @@ const (
 	StopReasonToolUse      StopReason = "tool_use"
 	StopReasonRefusal      StopReason = "refusal"
 )
+
+type StopDetails struct {
+	Type        string `json:"type"`                  // "refusal"
+	Category    string `json:"category,omitempty"`     // e.g. "cyber"
+	Explanation string `json:"explanation,omitempty"`
+}
 
 type Usage struct {
 	InputTokens  int `json:"input_tokens"`
@@ -237,8 +244,9 @@ type MessageDeltaEvent struct {
 }
 
 type MessageDelta struct {
-	StopReason   StopReason `json:"stop_reason"`
-	StopSequence *string    `json:"stop_sequence"`
+	StopReason   StopReason   `json:"stop_reason"`
+	StopDetails  *StopDetails `json:"stop_details"`
+	StopSequence *string      `json:"stop_sequence"`
 }
 
 type DeltaUsage struct {

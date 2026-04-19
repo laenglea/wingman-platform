@@ -191,6 +191,10 @@ func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request,
 		result.Content = toContentBlocks(completion.Message.Content)
 		reason := toStopReason(completion.Status, completion.Message.Content)
 		result.StopReason = &reason
+
+		if reason == StopReasonRefusal {
+			result.StopDetails = &StopDetails{Type: "refusal"}
+		}
 	}
 
 	writeJson(w, result)

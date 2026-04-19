@@ -371,10 +371,16 @@ func (s *StreamingAccumulator) Complete() error {
 	}
 
 	// Send message_delta with stop_reason and usage
+	stopDetails := (*StopDetails)(nil)
+	if s.stopReason == StopReasonRefusal {
+		stopDetails = &StopDetails{Type: "refusal"}
+	}
+
 	if err := s.emitEvent(StreamEvent{
 		Type: StreamEventMessageDelta,
 		MessageDelta: &MessageDelta{
-			StopReason: s.stopReason,
+			StopReason:  s.stopReason,
+			StopDetails: stopDetails,
 		},
 		DeltaUsage: &DeltaUsage{
 			InputTokens:  inputTokens,
