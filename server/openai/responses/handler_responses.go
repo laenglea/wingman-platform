@@ -103,6 +103,9 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 			options.ReasoningOptions.Effort = provider.EffortHigh
 
 		case ReasoningEffortXHigh:
+			options.ReasoningOptions.Effort = provider.EffortXHigh
+
+		case ReasoningEffortMax:
 			options.ReasoningOptions.Effort = provider.EffortMax
 		}
 	}
@@ -255,7 +258,6 @@ func responseDefaults(resp *Response, req ResponsesRequest) {
 		resp.Text.Verbosity = VerbosityMedium
 	}
 
-
 	if req.ToolChoice != nil {
 		// Echo tool_choice as a string when it's a simple mode (matching OpenAI behavior)
 		if len(req.ToolChoice.AllowedTools) == 0 && req.ToolChoice.Mode != "" {
@@ -318,10 +320,10 @@ func reasoningRequested(req ResponsesRequest) bool {
 }
 
 type responseOutputOptions struct {
-	IncludeSummary  bool
+	IncludeSummary   bool
 	IncludeReasoning bool
-	ApplyPatchTool  bool
-	ComputerUseTool bool
+	ApplyPatchTool   bool
+	ComputerUseTool  bool
 }
 
 func responseOutputs(message *provider.Message, messageID, status string, opts responseOutputOptions) []ResponseOutput {
@@ -1076,7 +1078,7 @@ func (h *Handler) handleResponsesComplete(w http.ResponseWriter, r *http.Request
 			ApplyPatchTool:   options.TextEditorTool != nil,
 			ComputerUseTool:  options.ComputerUseTool != nil,
 		}),
-		Usage:     responseUsage(completion.Usage),
+		Usage: responseUsage(completion.Usage),
 	}
 
 	if result.Status == "completed" {

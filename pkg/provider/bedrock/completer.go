@@ -114,11 +114,34 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		if options.ReasoningOptions != nil && isAdaptiveThinkingModel(c.model) {
 			config.Temperature = nil
 
-			params.AdditionalModelRequestFields = document.NewLazyDocument(map[string]any{
+			additionalFields := map[string]any{
 				"thinking": map[string]any{
 					"type": "adaptive",
 				},
-			})
+			}
+
+			var effort string
+
+			switch options.ReasoningOptions.Effort {
+			case provider.EffortNone, provider.EffortMinimal, provider.EffortLow:
+				effort = "low"
+			case provider.EffortMedium:
+				effort = "medium"
+			case provider.EffortHigh:
+				effort = "high"
+			case provider.EffortXHigh:
+				effort = "xhigh"
+			case provider.EffortMax:
+				effort = "max"
+			}
+
+			if effort != "" {
+				additionalFields["output_config"] = map[string]any{
+					"effort": effort,
+				}
+			}
+
+			params.AdditionalModelRequestFields = document.NewLazyDocument(additionalFields)
 		}
 
 		resp, err := c.client.ConverseStream(ctx, params)

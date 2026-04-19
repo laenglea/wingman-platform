@@ -156,8 +156,8 @@ func CompactionContent(val Compaction) Content {
 }
 
 type Content struct {
-	Text     string
-	Refusal  string
+	Text    string
+	Refusal string
 
 	File *File
 
@@ -264,6 +264,7 @@ const (
 	EffortLow     Effort = "low"
 	EffortMedium  Effort = "medium"
 	EffortHigh    Effort = "high"
+	EffortXHigh   Effort = "xhigh"
 	EffortMax     Effort = "max"
 )
 

@@ -488,7 +488,7 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		case provider.EffortHigh:
 			req.Reasoning.Effort = responses.ReasoningEffortHigh
 
-		case provider.EffortMax:
+		case provider.EffortXHigh, provider.EffortMax:
 			req.Reasoning.Effort = responses.ReasoningEffortXhigh
 		}
 	}
