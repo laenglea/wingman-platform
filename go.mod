@@ -16,7 +16,7 @@ require (
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/joho/godotenv v1.5.1
 	github.com/modelcontextprotocol/go-sdk v1.5.0
-	github.com/odvcencio/gotreesitter v0.14.0
+	github.com/odvcencio/gotreesitter v0.15.1
 	github.com/open-policy-agent/opa v1.15.2
 	github.com/openai/openai-go/v3 v3.32.0
 	github.com/replicate/replicate-go v0.26.0

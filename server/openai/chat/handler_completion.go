@@ -93,6 +93,9 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 			options.ReasoningOptions.Effort = provider.EffortHigh
 
 		case ReasoningEffortXHigh:
+			options.ReasoningOptions.Effort = provider.EffortXHigh
+
+		case ReasoningEffortMax:
 			options.ReasoningOptions.Effort = provider.EffortMax
 		}
 	}

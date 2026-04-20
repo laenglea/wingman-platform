@@ -7,21 +7,22 @@ import (
 // Request types
 
 type MessageRequest struct {
-	Model         string         `json:"model"`
-	Messages      []MessageParam `json:"messages"`
-	System        any            `json:"system,omitempty"` // string or []SystemBlock
-	MaxTokens     int            `json:"max_tokens,omitempty"`
-	Stream        bool           `json:"stream,omitempty"`
-	Temperature   *float32       `json:"temperature,omitempty"`
-	TopP          *float32       `json:"top_p,omitempty"`
-	TopK          *int           `json:"top_k,omitempty"`
-	StopSequences []string       `json:"stop_sequences,omitempty"`
-	Tools         []ToolParam    `json:"tools,omitempty"`
-	ToolChoice    *ToolChoice    `json:"tool_choice,omitempty"`
-	Metadata          *Metadata            `json:"metadata,omitempty"`
-	OutputFormat      *OutputFormat        `json:"output_format,omitempty"`
-	Thinking          *ThinkingConfig      `json:"thinking,omitempty"`
-	ContextManagement *ContextManagement   `json:"context_management,omitempty"`
+	Model             string             `json:"model"`
+	Messages          []MessageParam     `json:"messages"`
+	System            any                `json:"system,omitempty"` // string or []SystemBlock
+	MaxTokens         int                `json:"max_tokens,omitempty"`
+	Stream            bool               `json:"stream,omitempty"`
+	Temperature       *float32           `json:"temperature,omitempty"`
+	TopP              *float32           `json:"top_p,omitempty"`
+	TopK              *int               `json:"top_k,omitempty"`
+	StopSequences     []string           `json:"stop_sequences,omitempty"`
+	Tools             []ToolParam        `json:"tools,omitempty"`
+	ToolChoice        *ToolChoice        `json:"tool_choice,omitempty"`
+	Metadata          *Metadata          `json:"metadata,omitempty"`
+	OutputFormat      *OutputFormat      `json:"output_format,omitempty"`
+	OutputConfig      *OutputConfig      `json:"output_config,omitempty"`
+	Thinking          *ThinkingConfig    `json:"thinking,omitempty"`
+	ContextManagement *ContextManagement `json:"context_management,omitempty"`
 }
 
 type ContextManagement struct {
@@ -31,14 +32,19 @@ type ContextManagement struct {
 type ContextManagementEdit struct {
 	Type    string `json:"type"` // "compact_20260112"
 	Trigger *struct {
-		Type  string `json:"type"`  // "input_tokens"
+		Type  string `json:"type"` // "input_tokens"
 		Value int    `json:"value"`
 	} `json:"trigger,omitempty"`
 }
 
 type ThinkingConfig struct {
-	Type         string `json:"type"`                    // "enabled" or "disabled"
+	Type         string `json:"type"`                    // "enabled", "adaptive", or "disabled"
 	BudgetTokens int    `json:"budget_tokens,omitempty"` // required when type is "enabled"
+	Display      string `json:"display,omitempty"`       // "summarized" or "omitted"
+}
+
+type OutputConfig struct {
+	Effort string `json:"effort,omitempty"` // "low", "medium", "high", "xhigh", "max"
 }
 
 type OutputFormat struct {
@@ -137,6 +143,7 @@ type Message struct {
 	Content      []ContentBlock `json:"content"`
 	Model        string         `json:"model"`
 	StopReason   *StopReason    `json:"stop_reason"`
+	StopDetails  *StopDetails   `json:"stop_details"`
 	StopSequence *string        `json:"stop_sequence"`
 	Usage        Usage          `json:"usage"`
 }
@@ -174,6 +181,12 @@ const (
 	StopReasonToolUse      StopReason = "tool_use"
 	StopReasonRefusal      StopReason = "refusal"
 )
+
+type StopDetails struct {
+	Type        string `json:"type"`                  // "refusal"
+	Category    string `json:"category,omitempty"`     // e.g. "cyber"
+	Explanation string `json:"explanation,omitempty"`
+}
 
 type Usage struct {
 	InputTokens  int `json:"input_tokens"`
@@ -231,8 +244,9 @@ type MessageDeltaEvent struct {
 }
 
 type MessageDelta struct {
-	StopReason   StopReason `json:"stop_reason"`
-	StopSequence *string    `json:"stop_sequence"`
+	StopReason   StopReason   `json:"stop_reason"`
+	StopDetails  *StopDetails `json:"stop_details"`
+	StopSequence *string      `json:"stop_sequence"`
 }
 
 type DeltaUsage struct {

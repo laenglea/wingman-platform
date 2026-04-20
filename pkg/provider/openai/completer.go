@@ -156,7 +156,7 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 		case provider.EffortHigh:
 			req.ReasoningEffort = openai.ReasoningEffortHigh
 
-		case provider.EffortMax:
+		case provider.EffortXHigh, provider.EffortMax:
 			req.ReasoningEffort = openai.ReasoningEffortXhigh
 		}
 	}

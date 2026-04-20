@@ -128,7 +128,7 @@ func convertGenerateConfig(instruction *genai.Content, options *provider.Complet
 			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelLow
 		case provider.EffortMedium:
 			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelMedium
-		case provider.EffortHigh, provider.EffortMax:
+		case provider.EffortHigh, provider.EffortXHigh, provider.EffortMax:
 			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelHigh
 		}
 	}

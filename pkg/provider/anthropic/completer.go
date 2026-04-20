@@ -352,14 +352,20 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		req.MaxTokens = 128000
 
 		if options.ReasoningOptions != nil {
+			display := anthropic.BetaThinkingConfigAdaptiveDisplaySummarized
+
+			if !options.ReasoningOptions.IncludeSummary {
+				display = anthropic.BetaThinkingConfigAdaptiveDisplayOmitted
+			}
+
 			req.Thinking = anthropic.BetaThinkingConfigParamUnion{
 				OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{
-					Display: anthropic.BetaThinkingConfigAdaptiveDisplaySummarized,
+					Display: display,
 				},
 			}
 
 			switch options.ReasoningOptions.Effort {
-			case provider.EffortMinimal, provider.EffortLow:
+			case provider.EffortNone, provider.EffortMinimal, provider.EffortLow:
 				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortLow
 
 			case provider.EffortMedium:
@@ -367,6 +373,9 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 			case provider.EffortHigh:
 				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortHigh
+
+			case provider.EffortXHigh:
+				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortXhigh
 
 			case provider.EffortMax:
 				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMax

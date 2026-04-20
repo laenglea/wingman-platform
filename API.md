@@ -25,7 +25,7 @@ List available models or get a specific model by ID.
 | `tool_choice`            | String/Object| Tool selection mode (auto, none, required)          |
 | `parallel_tool_calls`    | Boolean      | Enable parallel tool execution                      |
 | `response_format`        | Object       | Response format (text, json_object, json_schema)    |
-| `reasoning_effort`       | String       | Reasoning effort (none, minimal, low, medium, high, xhigh) |
+| `reasoning_effort`       | String       | Reasoning effort (none, minimal, low, medium, high, xhigh, max) |
 | `verbosity`              | String       | Output verbosity (low, medium, high)                |
 
 ## Responses
@@ -304,7 +304,7 @@ Split text into segments/chunks.
 
 | Parameter          | Type    | Description                   |
 |--------------------|---------|-------------------------------|
-| `input`            | String  | Text to segment               |
+| `text`             | String  | Text to segment               |
 | `file`             | File    | File to extract and segment   |
 | `url`              | String  | URL to scrape and segment     |
 | `segment_length`   | Integer | Target segment length         |

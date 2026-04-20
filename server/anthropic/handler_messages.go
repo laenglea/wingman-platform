@@ -102,15 +102,31 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.Thinking != nil && req.Thinking.Type == "enabled" {
+	if req.Thinking != nil && req.Thinking.Type != "disabled" {
 		if options.ReasoningOptions == nil {
 			options.ReasoningOptions = &provider.ReasoningOptions{}
 		}
 
-		options.ReasoningOptions.IncludeSummary = true
+		options.ReasoningOptions.IncludeSummary = req.Thinking.Display != "omitted"
 		options.ReasoningOptions.IncludeSignature = true
 
+		// Default effort based on output_config or fall back to medium
 		options.ReasoningOptions.Effort = provider.EffortMedium
+
+		if req.OutputConfig != nil && req.OutputConfig.Effort != "" {
+			switch req.OutputConfig.Effort {
+			case "low":
+				options.ReasoningOptions.Effort = provider.EffortLow
+			case "medium":
+				options.ReasoningOptions.Effort = provider.EffortMedium
+			case "high":
+				options.ReasoningOptions.Effort = provider.EffortHigh
+			case "xhigh":
+				options.ReasoningOptions.Effort = provider.EffortXHigh
+			case "max":
+				options.ReasoningOptions.Effort = provider.EffortMax
+			}
+		}
 	}
 
 	if req.ContextManagement != nil {
@@ -175,6 +191,10 @@ func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request,
 		result.Content = toContentBlocks(completion.Message.Content)
 		reason := toStopReason(completion.Status, completion.Message.Content)
 		result.StopReason = &reason
+
+		if reason == StopReasonRefusal {
+			result.StopDetails = &StopDetails{Type: "refusal"}
+		}
 	}
 
 	writeJson(w, result)

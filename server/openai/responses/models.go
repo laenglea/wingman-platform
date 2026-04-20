@@ -57,6 +57,7 @@ var (
 	ReasoningEffortMedium  ReasoningEffort = "medium"
 	ReasoningEffortHigh    ReasoningEffort = "high"
 	ReasoningEffortXHigh   ReasoningEffort = "xhigh"
+	ReasoningEffortMax     ReasoningEffort = "max"
 )
 
 // TextConfig represents configuration options for text responses
@@ -88,10 +89,10 @@ type TextFormat struct {
 type ToolType string
 
 const (
-	ToolTypeFunction    ToolType = "function"
-	ToolTypeCustom      ToolType = "custom"
-	ToolTypeApplyPatch  ToolType = "apply_patch"
-	ToolTypeComputer    ToolType = "computer"
+	ToolTypeFunction   ToolType = "function"
+	ToolTypeCustom     ToolType = "custom"
+	ToolTypeApplyPatch ToolType = "apply_patch"
+	ToolTypeComputer   ToolType = "computer"
 )
 
 // Tool represents a tool in the request
@@ -584,11 +585,11 @@ type ResponseBilling struct {
 
 // Usage contains token usage information
 type Usage struct {
-	InputTokens        int                     `json:"input_tokens"`
-	InputTokensDetails *InputTokensDetails     `json:"input_tokens_details"`
+	InputTokens        int                 `json:"input_tokens"`
+	InputTokensDetails *InputTokensDetails `json:"input_tokens_details"`
 
-	OutputTokens        int                    `json:"output_tokens"`
-	OutputTokensDetails *OutputTokensDetails   `json:"output_tokens_details"`
+	OutputTokens        int                  `json:"output_tokens"`
+	OutputTokensDetails *OutputTokensDetails `json:"output_tokens_details"`
 
 	TotalTokens int `json:"total_tokens"`
 }
@@ -697,10 +698,10 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 	case ResponseOutputTypeReasoning:
 		if r.ReasoningOutputItem != nil {
 			return json.Marshal(struct {
-				Type             ResponseOutputType           `json:"type"`
-				ID               string                       `json:"id"`
-				Summary          []ReasoningOutputSummary     `json:"summary,omitempty"`
-				EncryptedContent string                       `json:"encrypted_content,omitempty"`
+				Type             ResponseOutputType       `json:"type"`
+				ID               string                   `json:"id"`
+				Summary          []ReasoningOutputSummary `json:"summary,omitempty"`
+				EncryptedContent string                   `json:"encrypted_content,omitempty"`
 			}{
 				Type:             r.Type,
 				ID:               r.ReasoningOutputItem.ID,
@@ -748,9 +749,9 @@ type ComputerCallItem struct {
 
 // ApplyPatchCallItem represents an apply_patch tool call in the output
 type ApplyPatchCallItem struct {
-	ID     string              `json:"id"`
-	CallID string              `json:"call_id"`
-	Status string              `json:"status"`
+	ID        string              `json:"id"`
+	CallID    string              `json:"call_id"`
+	Status    string              `json:"status"`
 	Operation ApplyPatchOperation `json:"operation"`
 }
 

@@ -35,6 +35,16 @@ func New(issuer, audience string) (*Provider, error) {
 	}, nil
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+
+	return ""
+}
+
 func (p *Provider) Authenticate(ctx context.Context, r *http.Request) (context.Context, error) {
 	header := r.Header.Get("Authorization")
 
@@ -55,8 +65,11 @@ func (p *Provider) Authenticate(ctx context.Context, r *http.Request) (context.C
 	}
 
 	var claims struct {
-		Subject string `json:"sub"`
-		Email   string `json:"email"`
+		Subject           string `json:"sub"`
+		Email             string `json:"email"`
+		Name              string `json:"name"`
+		PreferredUsername string `json:"preferred_username"`
+		Azp               string `json:"azp"`
 	}
 
 	if err := idtoken.Claims(&claims); err == nil {
@@ -66,6 +79,10 @@ func (p *Provider) Authenticate(ctx context.Context, r *http.Request) (context.C
 
 		if claims.Email != "" {
 			ctx = context.WithValue(ctx, auth.EmailContextKey, claims.Email)
+		}
+
+		if name := firstNonEmpty(claims.Name, claims.PreferredUsername, claims.Azp); name != "" {
+			ctx = context.WithValue(ctx, auth.NameContextKey, name)
 		}
 	}
 
