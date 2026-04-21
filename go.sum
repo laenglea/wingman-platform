@@ -205,8 +205,8 @@ github.com/modelcontextprotocol/go-sdk v1.5.0 h1:CHU0FIX9kpueNkxuYtfYQn1Z0slhFzB
 github.com/modelcontextprotocol/go-sdk v1.5.0/go.mod h1:gggDIhoemhWs3BGkGwd1umzEXCEMMvAnhTrnbXJKKKA=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
-github.com/odvcencio/gotreesitter v0.15.1 h1:wEjidfzPM2Al95tXtKZfvtyWKZdYXLcjjFCL3my38tI=
-github.com/odvcencio/gotreesitter v0.15.1/go.mod h1:Sx+iYJBfw5xSWkSttLSuFvguJctlH+ma1BTxZ0MPCqo=
+github.com/odvcencio/gotreesitter v0.15.2 h1:XDNuSI1Gg738HGK62Mc06tornEfdteOTtLlpME0F5y4=
+github.com/odvcencio/gotreesitter v0.15.2/go.mod h1:Sx+iYJBfw5xSWkSttLSuFvguJctlH+ma1BTxZ0MPCqo=
 github.com/open-policy-agent/opa v1.15.2 h1:dS9q+0Yvruq/VNvWJc5qCvCchn715OWc3HLHXn/UCCc=
 github.com/open-policy-agent/opa v1.15.2/go.mod h1:c6SN+7jSsUcKJLQc5P4yhwx8YYDRbjpAiGkBOTqxaa4=
 github.com/openai/openai-go/v3 v3.32.0 h1:aHp/3wkX1W6jB8zTtf9xV0aK0qPFSVDqS7AHmlJ4hXs=
