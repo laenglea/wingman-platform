@@ -273,6 +273,7 @@ func (h *Handler) handleMessagesStream(w http.ResponseWriter, r *http.Request, r
 				return
 			}
 
+			writeSSERetry(w, err)
 			accumulator.Error(err)
 			return
 		}
@@ -289,6 +290,7 @@ func (h *Handler) handleMessagesStream(w http.ResponseWriter, r *http.Request, r
 
 	// Emit final events
 	if err := accumulator.Complete(); err != nil {
+		writeSSERetry(w, err)
 		accumulator.Error(err)
 		return
 	}

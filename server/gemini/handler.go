@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/adrianliechti/wingman/config"
@@ -84,4 +85,21 @@ func writeError(w http.ResponseWriter, code int, err error) {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	enc.Encode(resp)
+}
+
+// writeSSERetry emits an SSE "retry:" field (milliseconds) if the error
+// carries a RetryAfter duration. Must be written before the data line of
+// the SSE message block it belongs to.
+func writeSSERetry(w http.ResponseWriter, err error) {
+	d := provider.RetryAfterFromError(err)
+	if d <= 0 {
+		return
+	}
+
+	ms := d.Milliseconds()
+	if ms < 1 {
+		ms = 1
+	}
+
+	fmt.Fprintf(w, "retry: %d\n", ms)
 }

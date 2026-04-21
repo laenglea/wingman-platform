@@ -2,6 +2,7 @@ package shared
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -73,4 +74,21 @@ func WriteError(w http.ResponseWriter, code int, err error) {
 	enc.SetEscapeHTML(false)
 
 	enc.Encode(resp)
+}
+
+// WriteSSERetry emits an SSE "retry:" field (milliseconds) if the error
+// carries a RetryAfter duration. Must be written before the event/data lines
+// of the SSE message block it belongs to.
+func WriteSSERetry(w http.ResponseWriter, err error) {
+	d := provider.RetryAfterFromError(err)
+	if d <= 0 {
+		return
+	}
+
+	ms := d.Milliseconds()
+	if ms < 1 {
+		ms = 1
+	}
+
+	fmt.Fprintf(w, "retry: %d\n", ms)
 }
