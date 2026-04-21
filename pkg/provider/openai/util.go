@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -9,26 +10,69 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/ssestream"
 )
 
 func convertError(err error) error {
-	var apierr *openai.Error
+	if err == nil {
+		return nil
+	}
 
-	if errors.As(err, &apierr) {
+	// Handle streaming errors (e.g. rate limit errors that arrive mid-stream).
+	// The Go OpenAI SDK wraps these as *ssestream.StreamError with the raw JSON
+	// in the Event.Data field rather than as *openai.Error.
+	if streamErr, ok := errors.AsType[*ssestream.StreamError](err); ok {
+		var envelope struct {
+			Error struct {
+				Type    string `json:"type"`
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+
+		if json.Unmarshal(streamErr.Event.Data, &envelope) == nil && envelope.Error.Message != "" {
+			errBody := envelope.Error
+			errType := errBody.Code
+
+			if errType == "" {
+				errType = errBody.Type
+			}
+
+			statusCode := http.StatusBadGateway
+
+			if isRateLimitError(errBody.Type, errBody.Code) {
+				statusCode = http.StatusTooManyRequests
+			}
+
+			return &provider.ProviderError{
+				Code:    statusCode,
+				Type:    errType,
+				Message: errBody.Message,
+				Err:     err,
+			}
+		}
+
+		// Fallback: JSON parse failed; surface the message the SDK already extracted.
+		return &provider.ProviderError{
+			Code:    http.StatusBadGateway,
+			Message: streamErr.Message,
+			Err:     err,
+		}
+	}
+
+	if apierr, ok := errors.AsType[*openai.Error](err); ok {
+		// Map rate limit errors to 429 regardless of upstream status code.
+		// Azure OpenAI PTU returns 400 with type:too_many_requests instead of 429.
 		statusCode := apierr.StatusCode
 
-		// Map rate limit errors to 429 regardless of upstream status code
-		// Azure OpenAI PTU returns 400 with type:too_many_requests instead of 429
-		if apierr.Type == "too_many_requests" ||
-			apierr.Type == "rate_limit_exceeded" ||
-			apierr.Code == "rate_limit_reached" ||
-			apierr.Code == "insufficient_quota" {
+		if isRateLimitError(apierr.Type, apierr.Code) {
 			statusCode = http.StatusTooManyRequests
 		}
 
 		// Prefer the clean, human-readable API message over apierr.Error(),
 		// which includes the HTTP method/URL/status and raw JSON body.
 		message := apierr.Message
+
 		if message == "" {
 			message = apierr.Error()
 		}
@@ -36,6 +80,7 @@ func convertError(err error) error {
 		// Prefer the upstream `code` (e.g. "insufficient_quota",
 		// "context_length_exceeded"); fall back to `type` if absent.
 		errType := apierr.Code
+
 		if errType == "" {
 			errType = apierr.Type
 		}
@@ -48,14 +93,22 @@ func convertError(err error) error {
 		}
 
 		if apierr.Response != nil {
-			h := apierr.Response.Header
-			provErr.RetryAfter = parseRetryAfter(h)
+			provErr.RetryAfter = parseRetryAfter(apierr.Response.Header)
 		}
 
 		return provErr
 	}
 
 	return err
+}
+
+// isRateLimitError reports whether the given API error type/code indicates a
+// rate-limit condition that should be mapped to HTTP 429.
+func isRateLimitError(errType, errCode string) bool {
+	return errType == "too_many_requests" ||
+		errType == "rate_limit_exceeded" ||
+		errCode == "rate_limit_reached" ||
+		errCode == "insufficient_quota"
 }
 
 // parseRetryAfter parses Retry-After (seconds, float, HTTP-date) with retry-after-ms as fallback (Azure OpenAI).
