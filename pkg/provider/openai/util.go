@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -13,14 +15,23 @@ import (
 	"github.com/openai/openai-go/v3/packages/ssestream"
 )
 
+// convertError maps upstream OpenAI / Azure OpenAI errors into a
+// *provider.ProviderError, normalising rate-limit responses to HTTP 429 and
+// extracting a Retry-After hint from headers or message text.
+//
+// Azure rate-limit errors surface their code at `error.code` (e.g.
+// "RateLimitReached"); content-filter errors use `innererror.code` but are
+// already classified via the top-level `error.code == "content_filter"`.
 func convertError(err error) error {
 	if err == nil {
 		return nil
 	}
 
-	// Handle streaming errors (e.g. rate limit errors that arrive mid-stream).
-	// The Go OpenAI SDK wraps these as *ssestream.StreamError with the raw JSON
-	// in the Event.Data field rather than as *openai.Error.
+	// Streaming errors (e.g. rate limits that arrive mid-stream) are wrapped as
+	// *ssestream.StreamError with raw JSON in Event.Data. No HTTP headers are
+	// accessible (the stream already returned 200 OK), so any Retry-After hint
+	// must come from the error body itself (Azure PTU typically embeds one,
+	// e.g. "Please retry after 14 seconds").
 	if streamErr, ok := errors.AsType[*ssestream.StreamError](err); ok {
 		var envelope struct {
 			Error struct {
@@ -29,86 +40,137 @@ func convertError(err error) error {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
+		_ = json.Unmarshal(streamErr.Event.Data, &envelope)
 
-		if json.Unmarshal(streamErr.Event.Data, &envelope) == nil && envelope.Error.Message != "" {
-			errBody := envelope.Error
-			errType := errBody.Code
-
-			if errType == "" {
-				errType = errBody.Type
-			}
-
-			statusCode := http.StatusBadGateway
-
-			if isRateLimitError(errBody.Type, errBody.Code) {
-				statusCode = http.StatusTooManyRequests
-			}
-
-			return &provider.ProviderError{
-				Code:    statusCode,
-				Type:    errType,
-				Message: errBody.Message,
-				Err:     err,
-			}
+		body := envelope.Error
+		if body.Message == "" {
+			body.Message = streamErr.Message
 		}
 
-		// Fallback: JSON parse failed; surface the message the SDK already extracted.
-		return &provider.ProviderError{
-			Code:    http.StatusBadGateway,
-			Message: streamErr.Message,
-			Err:     err,
-		}
+		return newProviderError(body.Type, body.Code, body.Message, http.StatusBadGateway, 0, err)
 	}
 
 	if apierr, ok := errors.AsType[*openai.Error](err); ok {
-		// Map rate limit errors to 429 regardless of upstream status code.
-		// Azure OpenAI PTU returns 400 with type:too_many_requests instead of 429.
-		statusCode := apierr.StatusCode
-
-		if isRateLimitError(apierr.Type, apierr.Code) {
-			statusCode = http.StatusTooManyRequests
-		}
-
-		// Prefer the clean, human-readable API message over apierr.Error(),
-		// which includes the HTTP method/URL/status and raw JSON body.
+		// Prefer the clean API message over apierr.Error(), which includes
+		// the HTTP method/URL/status and raw JSON body.
 		message := apierr.Message
-
 		if message == "" {
 			message = apierr.Error()
 		}
 
-		// Prefer the upstream `code` (e.g. "insufficient_quota",
-		// "context_length_exceeded"); fall back to `type` if absent.
-		errType := apierr.Code
-
-		if errType == "" {
-			errType = apierr.Type
-		}
-
-		provErr := &provider.ProviderError{
-			Code:    statusCode,
-			Type:    errType,
-			Message: message,
-			Err:     err,
-		}
-
+		var retryAfter time.Duration
 		if apierr.Response != nil {
-			provErr.RetryAfter = parseRetryAfter(apierr.Response.Header)
+			retryAfter = parseRetryAfter(apierr.Response.Header)
 		}
 
-		return provErr
+		return newProviderError(apierr.Type, apierr.Code, message, apierr.StatusCode, retryAfter, err)
 	}
 
 	return err
 }
 
+// defaultRateLimitRetry is used when a rate-limit error is detected but the
+// upstream provided neither a Retry-After header nor a parseable hint in the
+// message (observed on some Azure PTU 429s and shared-tier TPM/RPM errors).
+//
+// 5s is a pragmatic middle ground: long enough for PTU token buckets to
+// refill and to avoid hammering shared-tier quotas, short enough that clients
+// with their own backoff policy aren't unduly delayed.
+const defaultRateLimitRetry = 5 * time.Second
+
+// newProviderError builds a ProviderError from the upstream error fields,
+// remapping rate-limit errors to 429 and falling back to a retry hint parsed
+// from the message when no header was provided.
+func newProviderError(errType, errCode, message string, statusCode int, retryAfter time.Duration, cause error) *provider.ProviderError {
+	rateLimited := isRateLimitError(errType, errCode)
+	if rateLimited {
+		statusCode = http.StatusTooManyRequests
+	}
+
+	// Prefer the upstream `code` (e.g. "insufficient_quota",
+	// "context_length_exceeded"); fall back to `type`.
+	t := errCode
+	if t == "" {
+		t = errType
+	}
+
+	if retryAfter <= 0 {
+		retryAfter = parseRetryFromMessage(message)
+	}
+
+	if retryAfter <= 0 && rateLimited {
+		retryAfter = defaultRateLimitRetry
+	}
+
+	return &provider.ProviderError{
+		Code:       statusCode,
+		Type:       t,
+		Message:    message,
+		RetryAfter: retryAfter,
+		Err:        cause,
+	}
+}
+
 // isRateLimitError reports whether the given API error type/code indicates a
 // rate-limit condition that should be mapped to HTTP 429.
+//
+// Covers OpenAI platform errors ("rate_limit_exceeded", "insufficient_quota")
+// as well as Azure OpenAI variants: PTU sometimes returns numeric codes like
+// "429" or Azure-specific innererror codes like "RateLimitReached" /
+// "TokensRateLimit" / "RequestRateLimit".
 func isRateLimitError(errType, errCode string) bool {
-	return errType == "too_many_requests" ||
-		errType == "rate_limit_exceeded" ||
-		errCode == "rate_limit_reached" ||
-		errCode == "insufficient_quota"
+	switch strings.ToLower(errType) {
+	case "too_many_requests",
+		"rate_limit_exceeded",
+		"requests",
+		"tokens":
+		return true
+	}
+
+	switch strings.ToLower(errCode) {
+	case "rate_limit_exceeded",
+		"rate_limit_reached",
+		"insufficient_quota",
+		"too_many_requests",
+		"toomanyrequests",
+		"ratelimitreached",
+		"tokensratelimit",
+		"requestsratelimit",
+		"requestratelimit",
+		"429":
+		return true
+	}
+
+	return false
+}
+
+// retryMsgRE extracts a retry hint from error messages. Covers real-world
+// phrasings from OpenAI ("Please try again in 6s", "retry in 12.345s") and
+// Azure OpenAI PTU ("Please retry after 1101 milliseconds") when no
+// Retry-After header is present.
+var retryMsgRE = regexp.MustCompile(
+	`(?i)(?:retry|try\s+again)\s+(?:after|in)\s+(\d+(?:\.\d+)?)\s*(milliseconds|millisecond|ms|seconds|second|secs|sec|s)\b`,
+)
+
+// parseRetryFromMessage extracts a retry duration from free-form error text
+// as a fallback for upstreams that don't return Retry-After headers.
+func parseRetryFromMessage(msg string) time.Duration {
+	m := retryMsgRE.FindStringSubmatch(msg)
+	if len(m) != 3 {
+		return 0
+	}
+
+	val, err := strconv.ParseFloat(m[1], 64)
+	if err != nil || val <= 0 {
+		return 0
+	}
+
+	switch strings.ToLower(m[2]) {
+	case "ms", "millisecond", "milliseconds":
+		return time.Duration(val * float64(time.Millisecond))
+	default:
+		return time.Duration(val * float64(time.Second))
+	}
 }
 
 // parseRetryAfter parses Retry-After (seconds, float, HTTP-date) with retry-after-ms as fallback (Azure OpenAI).
