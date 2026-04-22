@@ -60,6 +60,8 @@ func writeEvent(w http.ResponseWriter, v any) error {
 }
 
 func writeErrorEvent(w http.ResponseWriter, err error) error {
+	shared.WriteSSERetry(w, err)
+
 	return writeEvent(w, shared.ErrorResponse{
 		Error: shared.Error{
 			Type:    shared.ErrorTypeFromError(err),

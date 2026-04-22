@@ -82,3 +82,20 @@ func writeEvent(w http.ResponseWriter, eventType string, v any) error {
 
 	return nil
 }
+
+// writeSSERetry emits an SSE "retry:" field (milliseconds) if the error
+// carries a RetryAfter duration. Must be written before the event/data
+// lines of the SSE message block it belongs to.
+func writeSSERetry(w http.ResponseWriter, err error) {
+	d := provider.RetryAfterFromError(err)
+	if d <= 0 {
+		return
+	}
+
+	ms := d.Milliseconds()
+	if ms < 1 {
+		ms = 1
+	}
+
+	fmt.Fprintf(w, "retry: %d\n", ms)
+}

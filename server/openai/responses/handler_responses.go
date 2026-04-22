@@ -982,6 +982,8 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventResponseFailed:
+			shared.WriteSSERetry(w, event.Error)
+
 			failResp := &Response{
 				ID:        responseID,
 				CreatedAt: createdAt,

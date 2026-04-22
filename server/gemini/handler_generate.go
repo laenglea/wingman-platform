@@ -113,6 +113,9 @@ func (h *Handler) handleStreamGenerateContent(w http.ResponseWriter, r *http.Req
 				return
 			}
 
+			if useSSE {
+				writeSSERetry(w, err)
+			}
 			accumulator.Error(err)
 			return
 		}
@@ -129,6 +132,9 @@ func (h *Handler) handleStreamGenerateContent(w http.ResponseWriter, r *http.Req
 
 	// Emit final chunk with finish reason
 	if err := accumulator.Complete(); err != nil {
+		if useSSE {
+			writeSSERetry(w, err)
+		}
 		accumulator.Error(err)
 		return
 	}
