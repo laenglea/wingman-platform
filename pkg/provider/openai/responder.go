@@ -410,7 +410,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 }
 
 func (r *Responder) convertResponsesRequest(messages []provider.Message, options *provider.CompleteOptions) (*responses.ResponseNewParams, error) {
-	if slices.Contains(ReasoningModels, r.model) && options.Temperature != nil {
+	if !slices.Contains(LegacyModels, r.model) && options.Temperature != nil {
 		optsCopy := *options
 		optsCopy.Temperature = nil
 		options = &optsCopy
@@ -451,10 +451,6 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		Truncation: responses.ResponseNewParamsTruncationAuto,
 	}
 
-	if slices.Contains(CodingModels, r.model) {
-		req.Truncation = ""
-	}
-
 	if options.ToolOptions != nil {
 		req.ToolChoice = convertResponsesToolChoice(options.ToolOptions)
 
@@ -463,7 +459,7 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		}
 	}
 
-	if options.ReasoningOptions != nil && slices.Contains(ReasoningModels, r.model) {
+	if options.ReasoningOptions != nil && !slices.Contains(LegacyModels, r.model) {
 		if options.ReasoningOptions.IncludeSignature {
 			req.Include = append(req.Include, responses.ResponseIncludableReasoningEncryptedContent)
 		}
@@ -567,7 +563,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 				Role: string(responses.ResponseInputMessageItemRoleSystem),
 			}
 
-			if slices.Contains(ReasoningModels, r.model) {
+			if !slices.Contains(LegacyModels, r.model) {
 				message.Role = string(responses.ResponseInputMessageItemRoleDeveloper)
 			}
 
