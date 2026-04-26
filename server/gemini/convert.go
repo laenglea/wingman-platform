@@ -237,14 +237,43 @@ func toContent(content []provider.Content) *Content {
 	}
 }
 
-func toFinishReason(content []provider.Content) FinishReason {
+func toFinishReason(status provider.CompletionStatus, content []provider.Content) FinishReason {
+	switch status {
+	case provider.CompletionStatusIncomplete:
+		return FinishReasonMaxTokens
+	case provider.CompletionStatusRefused:
+		return FinishReasonSafety
+	case provider.CompletionStatusFailed:
+		return FinishReasonOther
+	}
+
 	for _, c := range content {
 		if c.ToolCall != nil {
-			return FinishReasonStop // Gemini uses STOP for function calls too
+			// Gemini reports STOP for assistant turns that include function
+			// calls; the SDK detects the calls in the candidate parts.
+			return FinishReasonStop
 		}
 	}
 
 	return FinishReasonStop
+}
+
+// toUsageMetadata maps the provider-level usage to Gemini's UsageMetadata.
+// Returns nil when no usage data is available.
+func toUsageMetadata(u *provider.Usage) *UsageMetadata {
+	if u == nil {
+		return nil
+	}
+
+	cached := u.CacheReadInputTokens
+	total := u.InputTokens + u.OutputTokens
+
+	return &UsageMetadata{
+		PromptTokenCount:        u.InputTokens,
+		CachedContentTokenCount: cached,
+		CandidatesTokenCount:    u.OutputTokens,
+		TotalTokenCount:         total,
+	}
 }
 
 func generateResponseID() string {

@@ -6,12 +6,12 @@ type FinishReason = string
 // FinishReason constants for Gemini API
 const (
 	FinishReasonUnspecified           FinishReason = "FINISH_REASON_UNSPECIFIED"
-	FinishReasonStop                               = "STOP"
-	FinishReasonMaxTokens                          = "MAX_TOKENS"
-	FinishReasonSafety                             = "SAFETY"
-	FinishReasonRecitation                         = "RECITATION"
-	FinishReasonMalformedFunctionCall              = "MALFORMED_FUNCTION_CALL"
-	FinishReasonOther                              = "OTHER"
+	FinishReasonStop                  FinishReason = "STOP"
+	FinishReasonMaxTokens             FinishReason = "MAX_TOKENS"
+	FinishReasonSafety                FinishReason = "SAFETY"
+	FinishReasonRecitation            FinishReason = "RECITATION"
+	FinishReasonMalformedFunctionCall FinishReason = "MALFORMED_FUNCTION_CALL"
+	FinishReasonOther                 FinishReason = "OTHER"
 )
 
 // GenerateContentRequest is the request body for generateContent
@@ -99,15 +99,22 @@ type FunctionCallingConfig struct {
 
 // GenerationConfig contains generation parameters
 type GenerationConfig struct {
-	StopSequences      []string `json:"stopSequences,omitempty"`
-	Temperature        *float32 `json:"temperature,omitempty"`
-	TopP               *float32 `json:"topP,omitempty"`
-	TopK               *int     `json:"topK,omitempty"`
-	MaxOutputTokens    *int     `json:"maxOutputTokens,omitempty"`
-	CandidateCount     *int     `json:"candidateCount,omitempty"`
-	ResponseMimeType   string   `json:"responseMimeType,omitempty"`
-	ResponseSchema     any      `json:"responseSchema,omitempty"`
-	ResponseJsonSchema any      `json:"responseJsonSchema,omitempty"`
+	StopSequences      []string        `json:"stopSequences,omitempty"`
+	Temperature        *float32        `json:"temperature,omitempty"`
+	TopP               *float32        `json:"topP,omitempty"`
+	TopK               *int            `json:"topK,omitempty"`
+	MaxOutputTokens    *int            `json:"maxOutputTokens,omitempty"`
+	CandidateCount     *int            `json:"candidateCount,omitempty"`
+	Seed               *int            `json:"seed,omitempty"`
+	PresencePenalty    *float32        `json:"presencePenalty,omitempty"`
+	FrequencyPenalty   *float32        `json:"frequencyPenalty,omitempty"`
+	ResponseLogprobs   bool            `json:"responseLogprobs,omitempty"`
+	Logprobs           *int            `json:"logprobs,omitempty"`
+	ResponseMimeType   string          `json:"responseMimeType,omitempty"`
+	ResponseSchema     any             `json:"responseSchema,omitempty"`
+	ResponseJsonSchema any             `json:"responseJsonSchema,omitempty"`
+	ResponseModalities []string        `json:"responseModalities,omitempty"`
+	MediaResolution    string          `json:"mediaResolution,omitempty"`
 	ThinkingConfig     *ThinkingConfig `json:"thinkingConfig,omitempty"`
 }
 
@@ -145,10 +152,23 @@ type SafetyRating struct {
 
 // UsageMetadata contains token usage information
 type UsageMetadata struct {
-	PromptTokenCount     int `json:"promptTokenCount,omitempty"`
-	CandidatesTokenCount int `json:"candidatesTokenCount,omitempty"`
-	TotalTokenCount      int `json:"totalTokenCount,omitempty"`
-	ThoughtsTokenCount   int `json:"thoughtsTokenCount,omitempty"`
+	PromptTokenCount        int `json:"promptTokenCount,omitempty"`
+	CachedContentTokenCount int `json:"cachedContentTokenCount,omitempty"`
+	CandidatesTokenCount    int `json:"candidatesTokenCount,omitempty"`
+	ToolUsePromptTokenCount int `json:"toolUsePromptTokenCount,omitempty"`
+	ThoughtsTokenCount      int `json:"thoughtsTokenCount,omitempty"`
+	TotalTokenCount         int `json:"totalTokenCount,omitempty"`
+
+	PromptTokensDetails        []*ModalityTokenCount `json:"promptTokensDetails,omitempty"`
+	CacheTokensDetails         []*ModalityTokenCount `json:"cacheTokensDetails,omitempty"`
+	CandidatesTokensDetails    []*ModalityTokenCount `json:"candidatesTokensDetails,omitempty"`
+	ToolUsePromptTokensDetails []*ModalityTokenCount `json:"toolUsePromptTokensDetails,omitempty"`
+}
+
+// ModalityTokenCount reports tokens broken down by modality.
+type ModalityTokenCount struct {
+	Modality   string `json:"modality,omitempty"`
+	TokenCount int    `json:"tokenCount,omitempty"`
 }
 
 // PromptFeedback contains feedback about the prompt

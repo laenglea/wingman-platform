@@ -139,7 +139,7 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 		req.Messages = messages
 	}
 
-	if options.ReasoningOptions != nil && slices.Contains(ReasoningModels, c.model) {
+	if options.ReasoningOptions != nil && !slices.Contains(LegacyModels, c.model) {
 		switch options.ReasoningOptions.Effort {
 		case provider.EffortNone:
 			req.ReasoningEffort = openai.ReasoningEffortNone
@@ -214,15 +214,15 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 	}
 
 	if options.MaxTokens != nil {
-		if slices.Contains(ReasoningModels, c.model) {
-			req.MaxCompletionTokens = openai.Int(int64(*options.MaxTokens))
-		} else {
+		if slices.Contains(LegacyModels, c.model) {
 			req.MaxTokens = openai.Int(int64(*options.MaxTokens))
+		} else {
+			req.MaxCompletionTokens = openai.Int(int64(*options.MaxTokens))
 		}
 	}
 
 	if options.Temperature != nil {
-		if !slices.Contains(ReasoningModels, c.model) {
+		if slices.Contains(LegacyModels, c.model) {
 			req.Temperature = openai.Float(float64(*options.Temperature))
 		}
 	}
@@ -246,7 +246,7 @@ func (c *Completer) convertMessages(input []provider.Message) ([]openai.ChatComp
 
 			message := openai.SystemMessage(parts)
 
-			if slices.Contains(ReasoningModels, c.model) {
+			if !slices.Contains(LegacyModels, c.model) {
 				message = openai.DeveloperMessage(parts)
 			}
 

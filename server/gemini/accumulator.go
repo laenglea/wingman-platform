@@ -38,13 +38,12 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 		ModelVersion: s.model,
 	}
 
-	// Always include usage metadata
-	response.UsageMetadata = &UsageMetadata{}
-
-	if c.Usage != nil {
-		response.UsageMetadata.PromptTokenCount = c.Usage.InputTokens
-		response.UsageMetadata.CandidatesTokenCount = c.Usage.OutputTokens
-		response.UsageMetadata.TotalTokenCount = c.Usage.InputTokens + c.Usage.OutputTokens
+	// Gemini emits usageMetadata on every chunk; default to an empty struct so
+	// the field is always present even before usage data is available.
+	if u := toUsageMetadata(c.Usage); u != nil {
+		response.UsageMetadata = u
+	} else {
+		response.UsageMetadata = &UsageMetadata{}
 	}
 
 	// Convert content to Gemini format
@@ -90,19 +89,14 @@ func (s *StreamingAccumulator) Complete() error {
 		ModelVersion: s.model,
 	}
 
-	// Add final usage metadata
-	if result.Usage != nil {
-		response.UsageMetadata = &UsageMetadata{
-			PromptTokenCount:     result.Usage.InputTokens,
-			CandidatesTokenCount: result.Usage.OutputTokens,
-			TotalTokenCount:      result.Usage.InputTokens + result.Usage.OutputTokens,
-		}
-	}
+	response.UsageMetadata = toUsageMetadata(result.Usage)
 
 	// Determine finish reason
 	finishReason := FinishReasonStop
 	if result.Message != nil {
-		finishReason = toFinishReason(result.Message.Content)
+		finishReason = toFinishReason(result.Status, result.Message.Content)
+	} else if result.Status == provider.CompletionStatusIncomplete {
+		finishReason = FinishReasonMaxTokens
 	}
 
 	// Build final candidate

@@ -249,56 +249,20 @@ func ensureAdditionalPropertiesFalse(schema map[string]any) map[string]any {
 	return schema
 }
 
-var CodingModels = []string{
-	// GPT 5.3 Family
-	"gpt-5.3-codex",
+var LegacyModels = []string{
+	// GPT 3.5 Family
+	"gpt-3.5-turbo",
 
-	// GPT 5.2 Family
-	"gpt-5.2-codex",
+	// GPT 4 Family
+	"gpt-4",
+	"gpt-4-turbo",
 
-	// GPT 5.1 Family
-	"gpt-5.1-codex",
-	"gpt-5.1-codex-max",
-	"gpt-5.1-codex-mini",
+	// GPT 4o Family
+	"gpt-4o",
+	"gpt-4o-mini",
 
-	// GPT 5 Family
-	"gpt-5-codex",
-}
-
-var ReasoningModels = []string{
-	// GPT 5.4 Family
-	"gpt-5.4",
-	"gpt-5.4-pro",
-	"gpt-5.4-mini",
-	"gpt-5.4-nano",
-
-	// GPT 5.3 Family
-	"gpt-5.3-codex",
-
-	// GPT 5.2 Family
-	"gpt-5.2",
-	"gpt-5.2-pro",
-
-	"gpt-5.2-codex",
-
-	// GPT 5.1 Family
-	"gpt-5.1",
-
-	"gpt-5.1-codex",
-	"gpt-5.1-codex-max",
-	"gpt-5.1-codex-mini",
-
-	// GPT 5 Family
-	"gpt-5",
-	"gpt-5-mini",
-	"gpt-5-nano",
-
-	"gpt-5-codex",
-
-	// GPT o Family
-	"o1",
-	"o1-mini",
-	"o3",
-	"o3-mini",
-	"o4-mini",
+	// GPT 4.1 Family
+	"gpt-4.1",
+	"gpt-4.1-mini",
+	"gpt-4.1-nano",
 }

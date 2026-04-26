@@ -1,11 +1,8 @@
 package gemini
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -43,17 +40,11 @@ func (h *Handler) handleGenerateContent(w http.ResponseWriter, r *http.Request) 
 		result.ModelVersion = model
 	}
 
-	if completion.Usage != nil {
-		result.UsageMetadata = &UsageMetadata{
-			PromptTokenCount:     completion.Usage.InputTokens,
-			CandidatesTokenCount: completion.Usage.OutputTokens,
-			TotalTokenCount:      completion.Usage.InputTokens + completion.Usage.OutputTokens,
-		}
-	}
+	result.UsageMetadata = toUsageMetadata(completion.Usage)
 
 	if completion.Message != nil {
 		content := toContent(completion.Message.Content)
-		finishReason := toFinishReason(completion.Message.Content)
+		finishReason := toFinishReason(completion.Status, completion.Message.Content)
 
 		result.Candidates = []*Candidate{
 			{
@@ -84,17 +75,25 @@ func (h *Handler) handleStreamGenerateContent(w http.ResponseWriter, r *http.Req
 	headersSent := false
 
 	sendHeaders := func() {
-		if !headersSent {
-			if useSSE {
-				w.Header().Set("Content-Type", "text/event-stream")
-			} else {
-				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte("["))
-			}
-			w.Header().Set("Cache-Control", "no-cache")
-			w.Header().Set("Connection", "keep-alive")
-			headersSent = true
+		if headersSent {
+			return
 		}
+		// Headers must be set before the first body write — once Write
+		// runs, WriteHeader is implicitly called and later Header() edits
+		// are silently dropped.
+		if useSSE {
+			w.Header().Set("Content-Type", "text/event-stream")
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+		}
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		if !useSSE {
+			w.Write([]byte("["))
+		}
+		headersSent = true
 	}
 
 	responseID := generateResponseID()
@@ -166,13 +165,33 @@ func (h *Handler) parseGenerateRequest(r *http.Request) (provider.Completer, []p
 		return nil, nil, nil, err
 	}
 
-	// Check if VALIDATED mode is requested (equivalent to OpenAI's strict mode)
-	strict := req.ToolConfig != nil &&
-		req.ToolConfig.FunctionCallingConfig != nil &&
-		req.ToolConfig.FunctionCallingConfig.Mode == "VALIDATED"
+	// Per the Gemini spec FunctionCallingConfig.Mode controls function-calling
+	// behavior. VALIDATED is equivalent to OpenAI's strict-schema enforcement.
+	var fcc *FunctionCallingConfig
+	if req.ToolConfig != nil {
+		fcc = req.ToolConfig.FunctionCallingConfig
+	}
+	strict := fcc != nil && fcc.Mode == "VALIDATED"
 
 	options := &provider.CompleteOptions{
 		Tools: toTools(req.Tools, strict),
+	}
+
+	if fcc != nil {
+		toolOptions := &provider.ToolOptions{
+			Allowed: fcc.AllowedFunctionNames,
+		}
+		switch fcc.Mode {
+		case "AUTO":
+			toolOptions.Choice = provider.ToolChoiceAuto
+		case "ANY", "VALIDATED":
+			toolOptions.Choice = provider.ToolChoiceAny
+		case "NONE":
+			toolOptions.Choice = provider.ToolChoiceNone
+		}
+		if toolOptions.Choice != "" || len(toolOptions.Allowed) > 0 {
+			options.ToolOptions = toolOptions
+		}
 	}
 
 	if req.GenerationConfig != nil {
@@ -205,9 +224,14 @@ func (h *Handler) parseGenerateRequest(r *http.Request) (provider.Completer, []p
 	if req.GenerationConfig != nil && req.GenerationConfig.ThinkingConfig != nil {
 		tc := req.GenerationConfig.ThinkingConfig
 
-		if tc.IncludeThoughts {
+		// The model is asked to think when either includeThoughts is set, an
+		// explicit thinkingLevel is provided, or a non-zero thinkingBudget is set.
+		wantThinking := tc.IncludeThoughts || tc.ThinkingLevel != "" ||
+			(tc.ThinkingBudget != nil && *tc.ThinkingBudget != 0)
+
+		if wantThinking {
 			options.ReasoningOptions = &provider.ReasoningOptions{
-				IncludeSummary: true,
+				IncludeSummary: tc.IncludeThoughts,
 			}
 
 			switch tc.ThinkingLevel {
@@ -218,7 +242,7 @@ func (h *Handler) parseGenerateRequest(r *http.Request) (provider.Completer, []p
 			case "THINKING_LEVEL_HIGH":
 				options.ReasoningOptions.Effort = provider.EffortHigh
 			default:
-				options.ReasoningOptions.Effort = provider.EffortMedium
+				options.ReasoningOptions.Effort = effortFromBudget(tc.ThinkingBudget)
 			}
 		}
 	}
@@ -226,19 +250,44 @@ func (h *Handler) parseGenerateRequest(r *http.Request) (provider.Completer, []p
 	return completer, messages, options, nil
 }
 
+// effortFromBudget maps Gemini's numeric thinkingBudget (token allowance) to
+// the provider's coarser Effort scale. -1 is the documented "let the model
+// decide" sentinel; 0 disables thinking.
+func effortFromBudget(budget *int) provider.Effort {
+	if budget == nil {
+		return provider.EffortMedium
+	}
+	switch {
+	case *budget < 0:
+		return provider.EffortMedium
+	case *budget == 0:
+		return provider.EffortNone
+	case *budget <= 1024:
+		return provider.EffortMinimal
+	case *budget <= 4096:
+		return provider.EffortLow
+	case *budget <= 16384:
+		return provider.EffortMedium
+	default:
+		return provider.EffortHigh
+	}
+}
+
 func writeStreamChunk(w http.ResponseWriter, response GenerateContentResponse, useSSE, firstChunk bool) error {
-	rc := http.NewResponseController(w)
-
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.Encode(response)
-
-	data := strings.TrimSpace(buf.String())
+	data, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
 
 	if useSSE {
-		// SSE format: data: {json}\r\n\r\n
-		if _, err := fmt.Fprintf(w, "data: %s\r\n\r\n", data); err != nil {
+		// SSE format: data: {json}\n\n
+		if _, err := w.Write([]byte("data: ")); err != nil {
+			return err
+		}
+		if _, err := w.Write(data); err != nil {
+			return err
+		}
+		if _, err := w.Write([]byte("\n\n")); err != nil {
 			return err
 		}
 	} else {
@@ -248,10 +297,10 @@ func writeStreamChunk(w http.ResponseWriter, response GenerateContentResponse, u
 				return err
 			}
 		}
-		if _, err := w.Write([]byte(data)); err != nil {
+		if _, err := w.Write(data); err != nil {
 			return err
 		}
 	}
 
-	return rc.Flush()
+	return http.NewResponseController(w).Flush()
 }

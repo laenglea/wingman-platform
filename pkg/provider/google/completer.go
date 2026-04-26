@@ -367,9 +367,14 @@ func toCompletionUsage(metadata *genai.GenerateContentResponseUsageMetadata) *pr
 		return nil
 	}
 
+	// Gemini's PromptTokenCount already includes cached tokens, and
+	// thoughts tokens are reported separately from candidates. Add thoughts
+	// to OutputTokens so callers see the full generated-token cost.
 	return &provider.Usage{
 		InputTokens:  int(metadata.PromptTokenCount),
-		OutputTokens: int(metadata.CandidatesTokenCount),
+		OutputTokens: int(metadata.CandidatesTokenCount) + int(metadata.ThoughtsTokenCount),
+
+		CacheReadInputTokens: int(metadata.CachedContentTokenCount),
 	}
 }
 
