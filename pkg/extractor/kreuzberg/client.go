@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -83,6 +84,9 @@ func (c *Client) Extract(ctx context.Context, file extractor.File, options *extr
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(c.url, "/")+"/extract", &body)
 	req.Header.Set("Content-Type", w.FormDataContentType())
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 
 	resp, err := c.client.Do(req)
 
@@ -102,6 +106,10 @@ func (c *Client) Extract(ctx context.Context, file extractor.File, options *extr
 		return nil, err
 	}
 
+	if len(result) == 0 {
+		return nil, errors.New("kreuzberg returned no extraction results")
+	}
+
 	return &extractor.Document{
 		Text: strings.TrimSpace(result[0].Content),
 	}, nil
@@ -117,7 +125,13 @@ func isSupported(file extractor.File) bool {
 	}
 
 	if file.ContentType != "" {
-		if slices.Contains(SupportedMimeTypes, file.ContentType) {
+		mediaType := strings.ToLower(strings.TrimSpace(file.ContentType))
+
+		if strings.HasPrefix(mediaType, "image/") {
+			return true
+		}
+
+		if slices.Contains(SupportedMimeTypes, mediaType) {
 			return true
 		}
 	}
@@ -129,8 +143,8 @@ func convertError(resp *http.Response) error {
 	data, _ := io.ReadAll(resp.Body)
 
 	if len(data) == 0 {
-		return errors.New(http.StatusText(resp.StatusCode))
+		return fmt.Errorf("kreuzberg request failed: %s", http.StatusText(resp.StatusCode))
 	}
 
-	return errors.New(string(data))
+	return fmt.Errorf("kreuzberg request failed: %s", strings.TrimSpace(string(data)))
 }
