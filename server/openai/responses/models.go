@@ -570,6 +570,8 @@ type Response struct {
 	PromptCacheKey       *string `json:"prompt_cache_key"`
 	PromptCacheRetention *string `json:"prompt_cache_retention"`
 
+	Moderation *any `json:"moderation"`
+
 	Billing *ResponseBilling `json:"billing,omitempty"`
 
 	SafetyIdentifier *string `json:"safety_identifier"`

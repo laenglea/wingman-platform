@@ -404,7 +404,7 @@ func convertToolChoice(opts *provider.ToolOptions) openai.ChatCompletionToolChoi
 }
 
 func toUsage(metadata openai.CompletionUsage) *provider.Usage {
-	if metadata.TotalTokens == 0 {
+	if metadata.TotalTokens == 0 && metadata.PromptTokensDetails.CachedTokens == 0 {
 		return nil
 	}
 

@@ -828,7 +828,9 @@ func computerCallToArgs(item responses.ResponseComputerToolCall) map[string]any 
 }
 
 func toResponseUsage(usage responses.ResponseUsage) *provider.Usage {
-	if usage.InputTokens == 0 && usage.OutputTokens == 0 {
+	if usage.InputTokens == 0 &&
+		usage.OutputTokens == 0 &&
+		usage.InputTokensDetails.CachedTokens == 0 {
 		return nil
 	}
 

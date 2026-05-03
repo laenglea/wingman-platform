@@ -189,8 +189,10 @@ func responseUsage(usage *provider.Usage) *Usage {
 	}
 
 	return &Usage{
-		InputTokens:        usage.InputTokens,
-		InputTokensDetails: &InputTokensDetails{},
+		InputTokens: usage.InputTokens,
+		InputTokensDetails: &InputTokensDetails{
+			CachedTokens: usage.CacheReadInputTokens,
+		},
 
 		OutputTokens:        usage.OutputTokens,
 		OutputTokensDetails: &OutputTokensDetails{},
@@ -205,6 +207,10 @@ func responseDefaults(resp *Response, req ResponsesRequest) {
 	resp.Background = false
 	resp.Store = false
 	resp.ServiceTier = "default"
+
+	if resp.PromptCacheRetention == nil {
+		resp.PromptCacheRetention = new("in_memory")
+	}
 
 	resp.ParallelToolCalls = true
 	if req.ParallelToolCalls != nil {

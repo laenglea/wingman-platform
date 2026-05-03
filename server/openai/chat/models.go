@@ -373,7 +373,12 @@ type FunctionCall struct {
 }
 
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens,omitempty"`
-	CompletionTokens int `json:"completion_tokens,omitempty"`
-	TotalTokens      int `json:"total_tokens,omitempty"`
+	PromptTokens        int                  `json:"prompt_tokens,omitempty"`
+	CompletionTokens    int                  `json:"completion_tokens,omitempty"`
+	TotalTokens         int                  `json:"total_tokens,omitempty"`
+	PromptTokensDetails *PromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+}
+
+type PromptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
 }

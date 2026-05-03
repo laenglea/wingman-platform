@@ -44,7 +44,6 @@ const (
 	// Compaction events
 	StreamEventCompactionItemAdded StreamEventType = "compaction_item.added"
 	StreamEventCompactionItemDone  StreamEventType = "compaction_item.done"
-
 )
 
 // StreamEvent represents a streaming event with its data
@@ -150,6 +149,28 @@ func NewStreamingAccumulator(handler StreamEventHandler) *StreamingAccumulator {
 	return &StreamingAccumulator{
 		handler:      handler,
 		toolCallByID: make(map[string]int),
+	}
+}
+
+func mergeUsage(dst **provider.Usage, src *provider.Usage) {
+	if src == nil {
+		return
+	}
+	if *dst == nil {
+		*dst = &provider.Usage{}
+	}
+
+	if src.InputTokens > (*dst).InputTokens {
+		(*dst).InputTokens = src.InputTokens
+	}
+	if src.OutputTokens > (*dst).OutputTokens {
+		(*dst).OutputTokens = src.OutputTokens
+	}
+	if src.CacheReadInputTokens > (*dst).CacheReadInputTokens {
+		(*dst).CacheReadInputTokens = src.CacheReadInputTokens
+	}
+	if src.CacheCreationInputTokens > (*dst).CacheCreationInputTokens {
+		(*dst).CacheCreationInputTokens = src.CacheCreationInputTokens
 	}
 }
 
@@ -423,7 +444,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 		s.status = c.Status
 	}
 	if c.Usage != nil {
-		s.usage = c.Usage
+		mergeUsage(&s.usage, c.Usage)
 	}
 
 	if c.Message == nil {

@@ -213,6 +213,9 @@ func (h *Handler) handleChatCompletionComplete(w http.ResponseWriter, r *http.Re
 			PromptTokens:     completion.Usage.InputTokens,
 			CompletionTokens: completion.Usage.OutputTokens,
 			TotalTokens:      completion.Usage.InputTokens + completion.Usage.OutputTokens,
+			PromptTokensDetails: &PromptTokensDetails{
+				CachedTokens: completion.Usage.CacheReadInputTokens,
+			},
 		}
 	}
 

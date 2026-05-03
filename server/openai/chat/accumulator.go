@@ -183,6 +183,9 @@ func (s *StreamingAccumulator) Complete(includeUsage bool) error {
 				PromptTokens:     result.Usage.InputTokens,
 				CompletionTokens: result.Usage.OutputTokens,
 				TotalTokens:      result.Usage.InputTokens + result.Usage.OutputTokens,
+				PromptTokensDetails: &PromptTokensDetails{
+					CachedTokens: result.Usage.CacheReadInputTokens,
+				},
 			},
 		}
 
