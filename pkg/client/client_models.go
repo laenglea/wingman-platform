@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -24,7 +23,7 @@ type Model = provider.Model
 func (r *ModelService) List(ctx context.Context, opts ...RequestOption) ([]Model, error) {
 	c := newRequestConfig(append(r.Options, opts...)...)
 
-	req, _ := http.NewRequestWithContext(ctx, "GET", c.URL+"/v1/models", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", endpoint(c.URL, "/v1/models"), nil)
 	req.Header.Set("Content-Type", "application/json")
 
 	if c.Token != "" {
@@ -39,8 +38,8 @@ func (r *ModelService) List(ctx context.Context, opts ...RequestOption) ([]Model
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(resp.Status)
+	if err := checkResponse(resp); err != nil {
+		return nil, err
 	}
 
 	// https://platform.openai.com/docs/api-reference/models

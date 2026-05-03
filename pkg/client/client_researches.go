@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"mime/multipart"
 	"net/http"
 
@@ -25,6 +24,7 @@ type ResearchResult = api.ResearchResult
 
 type ResearchRequest struct {
 	Input string
+	Model string
 }
 
 func (r *ResearchService) New(ctx context.Context, input ResearchRequest, opts ...RequestOption) (*ResearchResult, error) {
@@ -35,9 +35,13 @@ func (r *ResearchService) New(ctx context.Context, input ResearchRequest, opts .
 
 	w.WriteField("input", input.Input)
 
+	if input.Model != "" {
+		w.WriteField("model", input.Model)
+	}
+
 	w.Close()
 
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.URL+"/v1/research", &data)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(c.URL, "/v1/research"), &data)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	if c.Token != "" {
@@ -52,8 +56,8 @@ func (r *ResearchService) New(ctx context.Context, input ResearchRequest, opts .
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(resp.Status)
+	if err := checkResponse(resp); err != nil {
+		return nil, err
 	}
 
 	var result ResearchResult

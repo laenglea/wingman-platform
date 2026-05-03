@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 
@@ -25,6 +25,15 @@ type SearchResult = api.SearchResult
 
 type SearchRequest struct {
 	Query string
+
+	Model string
+	Limit *int
+
+	Category string
+	Location string
+
+	Include []string
+	Exclude []string
 }
 
 func (r *SearchService) New(ctx context.Context, input SearchRequest, opts ...RequestOption) ([]SearchResult, error) {
@@ -33,11 +42,35 @@ func (r *SearchService) New(ctx context.Context, input SearchRequest, opts ...Re
 	var data bytes.Buffer
 	w := multipart.NewWriter(&data)
 
-	w.WriteField("query", string(input.Query))
+	w.WriteField("query", input.Query)
+
+	if input.Model != "" {
+		w.WriteField("model", input.Model)
+	}
+
+	if input.Limit != nil {
+		w.WriteField("limit", fmt.Sprintf("%d", *input.Limit))
+	}
+
+	if input.Category != "" {
+		w.WriteField("category", input.Category)
+	}
+
+	if input.Location != "" {
+		w.WriteField("location", input.Location)
+	}
+
+	for _, domain := range input.Include {
+		w.WriteField("domain", domain)
+	}
+
+	for _, domain := range input.Exclude {
+		w.WriteField("domain", "!"+domain)
+	}
 
 	w.Close()
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", c.URL+"/v1/search", &data)
+	req, _ := http.NewRequestWithContext(ctx, "POST", endpoint(c.URL, "/v1/search"), &data)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	if c.Token != "" {
@@ -52,8 +85,8 @@ func (r *SearchService) New(ctx context.Context, input SearchRequest, opts ...Re
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(resp.Status)
+	if err := checkResponse(resp); err != nil {
+		return nil, err
 	}
 
 	var result []SearchResult

@@ -2,7 +2,7 @@ package client
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -21,10 +21,16 @@ func NewScrapeService(opts ...RequestOption) ScrapeService {
 
 type Scrape struct {
 	Text string `json:"text"`
+
+	Content     []byte
+	ContentType string
 }
 
 type ScrapeRequest struct {
-	URL string
+	URL   string
+	Model string
+
+	Schema *Schema
 }
 
 func (r *ScrapeService) New(ctx context.Context, input ScrapeRequest, opts ...RequestOption) (*Scrape, error) {
@@ -33,7 +39,21 @@ func (r *ScrapeService) New(ctx context.Context, input ScrapeRequest, opts ...Re
 	data := url.Values{}
 	data.Set("url", input.URL)
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", c.URL+"/v1/extract", strings.NewReader(data.Encode()))
+	if input.Model != "" {
+		data.Set("model", input.Model)
+	}
+
+	if input.Schema != nil {
+		schema, err := json.Marshal(input.Schema.Schema)
+
+		if err != nil {
+			return nil, err
+		}
+
+		data.Set("schema", string(schema))
+	}
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", endpoint(c.URL, "/v1/extract"), strings.NewReader(data.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	if c.Token != "" {
@@ -48,17 +68,21 @@ func (r *ScrapeService) New(ctx context.Context, input ScrapeRequest, opts ...Re
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(resp.Status)
+	if err := checkResponse(resp); err != nil {
+		return nil, err
 	}
 
-	result, err := io.ReadAll(resp.Body)
+	content, err := io.ReadAll(resp.Body)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return &Scrape{
-		Text: string(result),
-	}, nil
+	result := &Scrape{
+		Text:        string(content),
+		Content:     content,
+		ContentType: resp.Header.Get("Content-Type"),
+	}
+
+	return result, nil
 }

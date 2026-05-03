@@ -1,12 +1,13 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"io"
-	"strings"
+	"mime/multipart"
+	"net/http"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/adrianliechti/wingman/pkg/provider/openai"
 )
 
 type TranscriptionService struct {
@@ -33,34 +34,55 @@ type TranscribeRequest struct {
 
 func (r *TranscriptionService) New(ctx context.Context, input TranscribeRequest, opts ...RequestOption) (*Transcription, error) {
 	cfg := newRequestConfig(append(r.Options, opts...)...)
-	url := strings.TrimRight(cfg.URL, "/") + "/v1/"
 
-	options := []openai.Option{}
+	var data bytes.Buffer
+	w := multipart.NewWriter(&data)
+
+	if input.Model != "" {
+		w.WriteField("model", input.Model)
+	}
+
+	if input.Language != "" {
+		w.WriteField("language", input.Language)
+	}
+
+	if input.Instructions != "" {
+		w.WriteField("instructions", input.Instructions)
+	}
+
+	if err := writeFormFile(w, "file", input.Name, input.Reader); err != nil {
+		return nil, err
+	}
+
+	w.Close()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(cfg.URL, "/v1/transcribe"), &data)
+	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	if cfg.Token != "" {
-		options = append(options, openai.WithToken(cfg.Token))
+		req.Header.Set("Authorization", "Bearer "+cfg.Token)
 	}
 
-	if cfg.Client != nil {
-		options = append(options, openai.WithClient(cfg.Client))
-	}
-
-	p, err := openai.NewTranscriber(url, input.Model, options...)
+	resp, err := cfg.Client.Do(req)
 
 	if err != nil {
 		return nil, err
 	}
 
-	data, err := io.ReadAll(input.Reader)
+	defer resp.Body.Close()
+
+	if err := checkResponse(resp); err != nil {
+		return nil, err
+	}
+
+	text, err := io.ReadAll(resp.Body)
 
 	if err != nil {
 		return nil, err
 	}
 
-	file := provider.File{
-		Name:    input.Name,
-		Content: data,
-	}
-
-	return p.Transcribe(ctx, file, &input.TranscribeOptions)
+	return &provider.Transcription{
+		Model: input.Model,
+		Text:  string(text),
+	}, nil
 }

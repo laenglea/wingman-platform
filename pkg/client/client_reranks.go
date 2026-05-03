@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"github.com/adrianliechti/wingman/server/api"
@@ -14,8 +13,8 @@ type RerankService struct {
 	Options []RequestOption
 }
 
-func NewRerankService(opts ...RequestOption) *RerankService {
-	return &RerankService{
+func NewRerankService(opts ...RequestOption) RerankService {
+	return RerankService{
 		Options: opts,
 	}
 }
@@ -32,7 +31,7 @@ func (r *RerankService) New(ctx context.Context, input RerankRequest, opts ...Re
 		return nil, err
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", c.URL+"/v1/rerank", &data)
+	req, _ := http.NewRequestWithContext(ctx, "POST", endpoint(c.URL, "/v1/rerank"), &data)
 	req.Header.Set("Content-Type", "application/json")
 
 	if c.Token != "" {
@@ -47,8 +46,8 @@ func (r *RerankService) New(ctx context.Context, input RerankRequest, opts ...Re
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(resp.Status)
+	if err := checkResponse(resp); err != nil {
+		return nil, err
 	}
 
 	var result api.RerankResponse
