@@ -93,7 +93,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 		// Get input tokens from first chunk if available
 		inputTokens := 0
 		var cacheReadInputTokens, cacheCreationInputTokens int
-		if c.Usage != nil && c.Usage.InputTokens > 0 {
+		if c.Usage != nil {
 			inputTokens = c.Usage.InputTokens
 			s.inputTokens = inputTokens
 			cacheReadInputTokens = c.Usage.CacheReadInputTokens

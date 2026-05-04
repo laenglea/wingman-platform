@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -49,20 +48,14 @@ func (r *RenderingService) New(ctx context.Context, input RenderingRequest, opts
 	w.WriteField("input", input.Input)
 
 	for _, img := range input.Images {
-		f, err := w.CreateFormFile("image", img.Name)
-
-		if err != nil {
-			return nil, err
-		}
-
-		if _, err := io.Copy(f, img.Reader); err != nil {
+		if err := writeFormFile(w, "image", img.Name, img.Reader); err != nil {
 			return nil, err
 		}
 	}
 
 	w.Close()
 
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL+"/v1/render", &data)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(cfg.URL, "/v1/render"), &data)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	if cfg.Token != "" {
@@ -77,8 +70,8 @@ func (r *RenderingService) New(ctx context.Context, input RenderingRequest, opts
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(resp.Status)
+	if err := checkResponse(resp); err != nil {
+		return nil, err
 	}
 
 	content, err := io.ReadAll(resp.Body)

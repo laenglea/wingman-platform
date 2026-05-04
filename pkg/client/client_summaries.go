@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -24,6 +23,11 @@ type Summary struct {
 }
 
 type SummaryRequest struct {
+	Model string
+
+	Text string
+	URL  string
+
 	Name   string
 	Reader io.Reader
 }
@@ -34,19 +38,27 @@ func (r *SummaryService) New(ctx context.Context, input SummaryRequest, opts ...
 	var data bytes.Buffer
 	w := multipart.NewWriter(&data)
 
-	file, err := w.CreateFormFile("file", input.Name)
-
-	if err != nil {
-		return nil, err
+	if input.Model != "" {
+		w.WriteField("model", input.Model)
 	}
 
-	if _, err := io.Copy(file, input.Reader); err != nil {
-		return nil, err
+	if input.Text != "" {
+		w.WriteField("text", input.Text)
+	}
+
+	if input.URL != "" {
+		w.WriteField("url", input.URL)
+	}
+
+	if input.Reader != nil {
+		if err := writeFormFile(w, "file", input.Name, input.Reader); err != nil {
+			return nil, err
+		}
 	}
 
 	w.Close()
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", c.URL+"/v1/summarize", &data)
+	req, _ := http.NewRequestWithContext(ctx, "POST", endpoint(c.URL, "/v1/summarize"), &data)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	if c.Token != "" {
@@ -61,8 +73,8 @@ func (r *SummaryService) New(ctx context.Context, input SummaryRequest, opts ...
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(resp.Status)
+	if err := checkResponse(resp); err != nil {
+		return nil, err
 	}
 
 	result, err := io.ReadAll(resp.Body)

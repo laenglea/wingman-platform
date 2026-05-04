@@ -20,7 +20,7 @@ func TestExtract(t *testing.T) {
 		Started: true,
 
 		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "goldziher/kreuzberg:4.0.0-core",
+			Image:        "ghcr.io/kreuzberg-dev/kreuzberg:latest",
 			ExposedPorts: []string{"8000/tcp"},
 		},
 	})

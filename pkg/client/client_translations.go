@@ -3,39 +3,39 @@ package client
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
 )
 
-type ExtractionService struct {
+type TranslationService struct {
 	Options []RequestOption
 }
 
-func NewExtractionService(opts ...RequestOption) ExtractionService {
-	return ExtractionService{
+func NewTranslationService(opts ...RequestOption) TranslationService {
+	return TranslationService{
 		Options: opts,
 	}
 }
 
-type Extraction struct {
-	Text string `json:"text"`
-
+type Translation struct {
 	Content     []byte
 	ContentType string
 }
 
-type ExtractionRequest struct {
-	Model string
+func (t *Translation) Text() string {
+	return string(t.Content)
+}
+
+type TranslationRequest struct {
+	Model    string
+	Language string
 
 	Name   string
 	Reader io.Reader
-
-	Schema *Schema
 }
 
-func (r *ExtractionService) New(ctx context.Context, input ExtractionRequest, opts ...RequestOption) (*Extraction, error) {
+func (r *TranslationService) New(ctx context.Context, input TranslationRequest, opts ...RequestOption) (*Translation, error) {
 	c := newRequestConfig(append(r.Options, opts...)...)
 
 	var data bytes.Buffer
@@ -45,14 +45,8 @@ func (r *ExtractionService) New(ctx context.Context, input ExtractionRequest, op
 		w.WriteField("model", input.Model)
 	}
 
-	if input.Schema != nil {
-		schema, err := json.Marshal(input.Schema.Schema)
-
-		if err != nil {
-			return nil, err
-		}
-
-		w.WriteField("schema", string(schema))
+	if input.Language != "" {
+		w.WriteField("language", input.Language)
 	}
 
 	if err := writeFormFile(w, "file", input.Name, input.Reader); err != nil {
@@ -61,8 +55,10 @@ func (r *ExtractionService) New(ctx context.Context, input ExtractionRequest, op
 
 	w.Close()
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", endpoint(c.URL, "/v1/extract"), &data)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(c.URL, "/v1/translate"), &data)
 	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	req.Header.Set("Accept", "application/octet-stream")
 
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
@@ -86,11 +82,8 @@ func (r *ExtractionService) New(ctx context.Context, input ExtractionRequest, op
 		return nil, err
 	}
 
-	result := &Extraction{
-		Text:        string(content),
+	return &Translation{
 		Content:     content,
 		ContentType: resp.Header.Get("Content-Type"),
-	}
-
-	return result, nil
+	}, nil
 }

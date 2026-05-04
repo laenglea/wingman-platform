@@ -1,6 +1,7 @@
 package api
 
 import (
+	"mime"
 	"net/http"
 	"strings"
 
@@ -29,13 +30,15 @@ func (h *Handler) handleTranslate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	acceptText := false
-	acceptHeader := strings.Split(r.Header.Get("Accept"), ", ")
+	acceptHeader := strings.Split(r.Header.Get("Accept"), ",")
 
-	if len(acceptHeader) == 0 {
+	if len(acceptHeader) == 0 || r.Header.Get("Accept") == "" {
 		acceptHeader = []string{"*/*"}
 	}
 
 	for _, accept := range acceptHeader {
+		accept, _, _ := mime.ParseMediaType(strings.TrimSpace(accept))
+
 		if strings.HasPrefix(accept, "text/") || accept == "*/*" {
 			acceptText = true
 			break

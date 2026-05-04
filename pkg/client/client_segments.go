@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -26,6 +25,8 @@ func NewSegmentService(opts ...RequestOption) SegmentService {
 type Segment = api.Segment
 
 type SegmentRequest struct {
+	Model string
+
 	Name   string
 	Reader io.Reader
 
@@ -39,13 +40,11 @@ func (r *SegmentService) New(ctx context.Context, input SegmentRequest, opts ...
 	var data bytes.Buffer
 	w := multipart.NewWriter(&data)
 
-	file, err := w.CreateFormFile("file", input.Name)
-
-	if err != nil {
-		return nil, err
+	if input.Model != "" {
+		w.WriteField("model", input.Model)
 	}
 
-	if _, err := io.Copy(file, input.Reader); err != nil {
+	if err := writeFormFile(w, "file", input.Name, input.Reader); err != nil {
 		return nil, err
 	}
 
@@ -59,7 +58,7 @@ func (r *SegmentService) New(ctx context.Context, input SegmentRequest, opts ...
 
 	w.Close()
 
-	req, _ := http.NewRequestWithContext(ctx, "POST", c.URL+"/v1/segment", &data)
+	req, _ := http.NewRequestWithContext(ctx, "POST", endpoint(c.URL, "/v1/segment"), &data)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	if c.Token != "" {
@@ -74,8 +73,8 @@ func (r *SegmentService) New(ctx context.Context, input SegmentRequest, opts ...
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(resp.Status)
+	if err := checkResponse(resp); err != nil {
+		return nil, err
 	}
 
 	var result []Segment

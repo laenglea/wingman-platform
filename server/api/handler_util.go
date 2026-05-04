@@ -112,7 +112,7 @@ func valueSchema(r *http.Request) (*provider.Schema, error) {
 }
 
 func (h *Handler) readText(r *http.Request) (string, error) {
-	if val := r.FormValue("text"); val != "" {
+	if val := valueInput(r); val != "" {
 		return val, nil
 	}
 

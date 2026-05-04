@@ -524,7 +524,12 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	}
 
 	if options.Schema != nil {
-		req.OutputConfig.Format = anthropic.BetaJSONOutputFormatParam{Schema: options.Schema.Schema}
+		schema := options.Schema.Schema
+		if schema == nil {
+			// json_object mode: Anthropic requires a non-empty schema, so use a permissive one.
+			schema = map[string]any{"type": "object"}
+		}
+		req.OutputConfig.Format = anthropic.BetaJSONOutputFormatParam{Schema: schema}
 	}
 
 	if options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 {
@@ -628,7 +633,10 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 }
 
 func toUsage(usage anthropic.BetaUsage) *provider.Usage {
-	if usage.InputTokens == 0 && usage.OutputTokens == 0 {
+	if usage.InputTokens == 0 &&
+		usage.OutputTokens == 0 &&
+		usage.CacheReadInputTokens == 0 &&
+		usage.CacheCreationInputTokens == 0 {
 		return nil
 	}
 
