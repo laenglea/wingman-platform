@@ -1,4 +1,4 @@
-package claude
+package codex
 
 type Config struct {
 	command string
@@ -7,8 +7,8 @@ type Config struct {
 
 type Option func(*Config)
 
-// WithCommand overrides the path to the `claude` binary. Default is to look
-// up "claude" on PATH.
+// WithCommand overrides the path to the `codex` binary. Default: "codex",
+// invoked as `codex app-server` (stdio transport).
 func WithCommand(command string) Option {
 	return func(c *Config) {
 		c.command = command
