@@ -352,10 +352,15 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	if isAdaptiveThinkingModel(c.model) {
 		req.MaxTokens = 128000
 
-		if options.ReasoningOptions != nil {
+		// Enable adaptive thinking by default. Only skip when the caller
+		// explicitly disables it via Effort == EffortNone.
+		enableAdaptive := options.ReasoningOptions == nil ||
+			options.ReasoningOptions.Effort != provider.EffortNone
+
+		if enableAdaptive {
 			display := anthropic.BetaThinkingConfigAdaptiveDisplaySummarized
 
-			if !options.ReasoningOptions.IncludeSummary {
+			if options.ReasoningOptions != nil && !options.ReasoningOptions.IncludeSummary {
 				display = anthropic.BetaThinkingConfigAdaptiveDisplayOmitted
 			}
 
@@ -365,21 +370,23 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				},
 			}
 
-			switch options.ReasoningOptions.Effort {
-			case provider.EffortNone, provider.EffortMinimal, provider.EffortLow:
-				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortLow
+			if options.ReasoningOptions != nil {
+				switch options.ReasoningOptions.Effort {
+				case provider.EffortMinimal, provider.EffortLow:
+					req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortLow
 
-			case provider.EffortMedium:
-				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMedium
+				case provider.EffortMedium:
+					req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMedium
 
-			case provider.EffortHigh:
-				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortHigh
+				case provider.EffortHigh:
+					req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortHigh
 
-			case provider.EffortXHigh:
-				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortXhigh
+				case provider.EffortXHigh:
+					req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortXhigh
 
-			case provider.EffortMax:
-				req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMax
+				case provider.EffortMax:
+					req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMax
+				}
 			}
 		}
 	}
