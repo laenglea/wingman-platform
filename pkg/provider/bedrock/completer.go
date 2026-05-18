@@ -111,37 +111,46 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			InferenceConfig: config,
 		}
 
-		if options.ReasoningOptions != nil && isAdaptiveThinkingModel(c.model) {
-			config.Temperature = nil
+		if isAdaptiveThinkingModel(c.model) {
+			// Enable adaptive thinking by default. Only skip when the caller
+			// explicitly disables it via Effort == EffortNone.
+			enableAdaptive := options.ReasoningOptions == nil ||
+				options.ReasoningOptions.Effort != provider.EffortNone
 
-			additionalFields := map[string]any{
-				"thinking": map[string]any{
-					"type": "adaptive",
-				},
-			}
+			if enableAdaptive {
+				config.Temperature = nil
 
-			var effort string
-
-			switch options.ReasoningOptions.Effort {
-			case provider.EffortNone, provider.EffortMinimal, provider.EffortLow:
-				effort = "low"
-			case provider.EffortMedium:
-				effort = "medium"
-			case provider.EffortHigh:
-				effort = "high"
-			case provider.EffortXHigh:
-				effort = "xhigh"
-			case provider.EffortMax:
-				effort = "max"
-			}
-
-			if effort != "" {
-				additionalFields["output_config"] = map[string]any{
-					"effort": effort,
+				additionalFields := map[string]any{
+					"thinking": map[string]any{
+						"type": "adaptive",
+					},
 				}
-			}
 
-			params.AdditionalModelRequestFields = document.NewLazyDocument(additionalFields)
+				var effort string
+
+				if options.ReasoningOptions != nil {
+					switch options.ReasoningOptions.Effort {
+					case provider.EffortMinimal, provider.EffortLow:
+						effort = "low"
+					case provider.EffortMedium:
+						effort = "medium"
+					case provider.EffortHigh:
+						effort = "high"
+					case provider.EffortXHigh:
+						effort = "xhigh"
+					case provider.EffortMax:
+						effort = "max"
+					}
+				}
+
+				if effort != "" {
+					additionalFields["output_config"] = map[string]any{
+						"effort": effort,
+					}
+				}
+
+				params.AdditionalModelRequestFields = document.NewLazyDocument(additionalFields)
+			}
 		}
 
 		resp, err := c.client.ConverseStream(ctx, params)
