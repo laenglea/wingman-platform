@@ -266,6 +266,8 @@ const (
 	EffortHigh    Effort = "high"
 	EffortXHigh   Effort = "xhigh"
 	EffortMax     Effort = "max"
+
+	EffortAdaptive Effort = "adaptive"
 )
 
 type Verbosity string

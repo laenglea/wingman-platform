@@ -103,35 +103,27 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Thinking != nil && req.Thinking.Type == "disabled" {
-		// Explicit disable — signal it to the provider so it does not fall
-		// back to adaptive thinking on Claude models.
-		options.ReasoningOptions = &provider.ReasoningOptions{
-			Effort: provider.EffortNone,
-		}
+		options.ReasoningOptions = &provider.ReasoningOptions{Effort: provider.EffortNone}
 	} else if req.Thinking != nil {
-		if options.ReasoningOptions == nil {
-			options.ReasoningOptions = &provider.ReasoningOptions{}
-		}
-
-		options.ReasoningOptions.IncludeSummary = req.Thinking.Display != "omitted"
-		options.ReasoningOptions.IncludeSignature = true
-
-		// Default effort based on output_config or fall back to medium
-		options.ReasoningOptions.Effort = provider.EffortMedium
-
-		if req.OutputConfig != nil && req.OutputConfig.Effort != "" {
+		effort := provider.EffortAdaptive
+		if req.OutputConfig != nil {
 			switch req.OutputConfig.Effort {
 			case "low":
-				options.ReasoningOptions.Effort = provider.EffortLow
+				effort = provider.EffortLow
 			case "medium":
-				options.ReasoningOptions.Effort = provider.EffortMedium
+				effort = provider.EffortMedium
 			case "high":
-				options.ReasoningOptions.Effort = provider.EffortHigh
+				effort = provider.EffortHigh
 			case "xhigh":
-				options.ReasoningOptions.Effort = provider.EffortXHigh
+				effort = provider.EffortXHigh
 			case "max":
-				options.ReasoningOptions.Effort = provider.EffortMax
+				effort = provider.EffortMax
 			}
+		}
+		options.ReasoningOptions = &provider.ReasoningOptions{
+			Effort:           effort,
+			IncludeSummary:   req.Thinking.Display != "omitted",
+			IncludeSignature: true,
 		}
 	}
 
