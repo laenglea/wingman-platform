@@ -103,8 +103,6 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Thinking != nil && req.Thinking.Type == "disabled" {
-		// Explicit disable — signal it to the provider so it does not fall
-		// back to adaptive thinking on Claude models.
 		options.ReasoningOptions = &provider.ReasoningOptions{
 			Effort: provider.EffortNone,
 		}
@@ -116,8 +114,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		options.ReasoningOptions.IncludeSummary = req.Thinking.Display != "omitted"
 		options.ReasoningOptions.IncludeSignature = true
 
-		// Default effort based on output_config or fall back to medium
-		options.ReasoningOptions.Effort = provider.EffortMedium
+		options.ReasoningOptions.Effort = provider.EffortAdaptive
 
 		if req.OutputConfig != nil && req.OutputConfig.Effort != "" {
 			switch req.OutputConfig.Effort {

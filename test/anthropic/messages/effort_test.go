@@ -85,6 +85,38 @@ func TestAdaptiveThinkingEffortSSE(t *testing.T) {
 	}
 }
 
+func TestAdaptiveThinkingNoEffortHTTP(t *testing.T) {
+	h := anthropic.New(t)
+
+	for _, model := range anthropic.DefaultModels() {
+		if !model.Capabilities.Thinking {
+			continue
+		}
+
+		t.Run(model.Name, func(t *testing.T) {
+			body := map[string]any{
+				"max_tokens": 16000,
+				"thinking": map[string]any{
+					"type": "adaptive",
+				},
+				"messages": []map[string]any{
+					{"role": "user", "content": "How many r's are in strawberry?"},
+				},
+			}
+
+			anthropicResp, wingmanResp := compareHTTP(t, h, model.Name, body)
+
+			requireThinkingBlock(t, "anthropic", anthropicResp.Body)
+			requireThinkingBlock(t, "wingman", wingmanResp.Body)
+
+			rules := anthropic.DefaultMessagesResponseRules()
+			rules["content.*.thinking"] = harness.FieldIgnore
+			rules["content.*.signature"] = harness.FieldNonEmpty
+			harness.CompareStructure(t, "response", anthropicResp.Body, wingmanResp.Body, harness.CompareOption{Rules: rules})
+		})
+	}
+}
+
 func TestAdaptiveThinkingDisplayOmittedHTTP(t *testing.T) {
 	h := anthropic.New(t)
 
@@ -121,9 +153,9 @@ func TestAdaptiveThinkingDisplayOmittedHTTP(t *testing.T) {
 }
 
 // isClaudeAdaptiveModel returns true for the Claude families that support
-// adaptive thinking — the default-adaptive behavior is Claude-specific.
+// adaptive thinking.
 func isClaudeAdaptiveModel(name string) bool {
-	for _, p := range []string{"claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-7", "bedrock-sonnet-4-6"} {
+	for _, p := range []string{"claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-7"} {
 		if strings.Contains(name, p) {
 			return true
 		}
@@ -131,71 +163,6 @@ func isClaudeAdaptiveModel(name string) bool {
 	return false
 }
 
-// TestAdaptiveThinkingDefaultHTTP verifies that adaptive-thinking Claude
-// models produce a thinking block by default — when the caller does not
-// pass any `thinking` or `output_config` fields. Wingman-only: the upstream
-// Anthropic API does not enable thinking by default, so we don't compare
-// structurally.
-func TestAdaptiveThinkingDefaultHTTP(t *testing.T) {
-	h := anthropic.New(t)
-
-	for _, model := range anthropic.DefaultModels() {
-		if !isClaudeAdaptiveModel(model.Name) {
-			continue
-		}
-
-		t.Run(model.Name, func(t *testing.T) {
-			body := map[string]any{
-				"max_tokens": 16000,
-				"messages": []map[string]any{
-					{"role": "user", "content": "How many r's are in strawberry?"},
-				},
-			}
-
-			resp := postAnthropic(t, h, h.Wingman, withModel(body, model.Name))
-			if resp.StatusCode != 200 {
-				t.Fatalf("wingman returned status %d: %s", resp.StatusCode, string(resp.RawBody))
-			}
-
-			requireThinkingBlock(t, "wingman", resp.Body)
-		})
-	}
-}
-
-// TestAdaptiveThinkingDefaultSSE mirrors TestAdaptiveThinkingDefaultHTTP for
-// the streaming surface — when no thinking config is sent, wingman should
-// still emit a thinking content_block_start event for adaptive-thinking
-// Claude models.
-func TestAdaptiveThinkingDefaultSSE(t *testing.T) {
-	h := anthropic.New(t)
-
-	for _, model := range anthropic.DefaultModels() {
-		if !isClaudeAdaptiveModel(model.Name) {
-			continue
-		}
-
-		t.Run(model.Name, func(t *testing.T) {
-			body := map[string]any{
-				"max_tokens": 16000,
-				"stream":     true,
-				"messages": []map[string]any{
-					{"role": "user", "content": "How many r's are in strawberry?"},
-				},
-			}
-
-			events := postAnthropicSSE(t, h, h.Wingman, withModel(body, model.Name))
-			if len(events) == 0 {
-				t.Fatal("wingman returned no SSE events")
-			}
-
-			requireThinkingSSEEvent(t, "wingman", events)
-		})
-	}
-}
-
-// TestThinkingExplicitlyDisabledHTTP verifies that the explicit
-// `thinking: {type: "disabled"}` request still suppresses thinking on
-// adaptive thinking Claude models, even after the default-adaptive change.
 func TestThinkingExplicitlyDisabledHTTP(t *testing.T) {
 	h := anthropic.New(t)
 

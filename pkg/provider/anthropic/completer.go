@@ -352,40 +352,19 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	if isAdaptiveThinkingModel(c.model) {
 		req.MaxTokens = 128000
 
-		// Enable adaptive thinking by default. Only skip when the caller
-		// explicitly disables it via Effort == EffortNone.
-		enableAdaptive := options.ReasoningOptions == nil ||
-			options.ReasoningOptions.Effort != provider.EffortNone
+		if options.ReasoningOptions != nil {
+			if effort, enable := adaptiveEffort(options.ReasoningOptions.Effort); enable {
+				display := anthropic.BetaThinkingConfigAdaptiveDisplaySummarized
+				if !options.ReasoningOptions.IncludeSummary {
+					display = anthropic.BetaThinkingConfigAdaptiveDisplayOmitted
+				}
 
-		if enableAdaptive {
-			display := anthropic.BetaThinkingConfigAdaptiveDisplaySummarized
+				req.Thinking = anthropic.BetaThinkingConfigParamUnion{
+					OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{Display: display},
+				}
 
-			if options.ReasoningOptions != nil && !options.ReasoningOptions.IncludeSummary {
-				display = anthropic.BetaThinkingConfigAdaptiveDisplayOmitted
-			}
-
-			req.Thinking = anthropic.BetaThinkingConfigParamUnion{
-				OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{
-					Display: display,
-				},
-			}
-
-			if options.ReasoningOptions != nil {
-				switch options.ReasoningOptions.Effort {
-				case provider.EffortMinimal, provider.EffortLow:
-					req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortLow
-
-				case provider.EffortMedium:
-					req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMedium
-
-				case provider.EffortHigh:
-					req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortHigh
-
-				case provider.EffortXHigh:
-					req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortXhigh
-
-				case provider.EffortMax:
-					req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortMax
+				if effort != "" {
+					req.OutputConfig.Effort = effort
 				}
 			}
 		}

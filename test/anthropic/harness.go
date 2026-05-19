@@ -3,6 +3,7 @@ package anthropic
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adrianliechti/wingman/test/harness"
@@ -65,11 +66,50 @@ type Model struct {
 
 // DefaultModels returns the list of models to test against the Anthropic API.
 func DefaultModels() []Model {
-	return []Model{
-		{Name: "claude-sonnet-4-6", Capabilities: ModelCapabilities{Thinking: true, TextEditor: true, Compaction: true, ComputerUse: true}},
-		{Name: "bedrock-sonnet-4-6", Capabilities: ModelCapabilities{Thinking: true}},
-		{Name: "gpt-5.4-mini", Capabilities: ModelCapabilities{Thinking: true, Compaction: true}},
+	bedrockRouted := os.Getenv("TEST_BEDROCK_ROUTED") != ""
+
+	if env := os.Getenv("TEST_ANTHROPIC_MODELS"); env != "" {
+		var models []Model
+		for name := range strings.SplitSeq(env, ",") {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			caps := knownCapabilities(name)
+			if bedrockRouted {
+				caps = bedrockCapabilities(caps)
+			}
+			models = append(models, Model{Name: name, Capabilities: caps})
+		}
+		if len(models) > 0 {
+			return models
+		}
 	}
+
+	caps := knownCapabilities("claude-sonnet-4-6")
+	if bedrockRouted {
+		caps = bedrockCapabilities(caps)
+	}
+	return []Model{{Name: "claude-sonnet-4-6", Capabilities: caps}}
+}
+
+func knownCapabilities(name string) ModelCapabilities {
+	switch name {
+	case "claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-7":
+		return ModelCapabilities{Thinking: true, TextEditor: true, Compaction: true, ComputerUse: true}
+	case "claude-sonnet-4-5", "claude-opus-4-5":
+		return ModelCapabilities{Thinking: true, TextEditor: true, ComputerUse: true}
+	case "claude-haiku-4-5":
+		return ModelCapabilities{}
+	}
+	return ModelCapabilities{Thinking: true}
+}
+
+func bedrockCapabilities(c ModelCapabilities) ModelCapabilities {
+	c.TextEditor = false
+	c.ComputerUse = false
+	c.Compaction = false
+	return c
 }
 
 func envOr(key, fallback string) string {

@@ -109,6 +109,24 @@ func isAdaptiveThinkingModel(model string) bool {
 	return false
 }
 
+func adaptiveEffort(e provider.Effort) (effort anthropic.BetaOutputConfigEffort, enabled bool) {
+	switch e {
+	case provider.EffortAdaptive:
+		return "", true
+	case provider.EffortMinimal, provider.EffortLow:
+		return anthropic.BetaOutputConfigEffortLow, true
+	case provider.EffortMedium:
+		return anthropic.BetaOutputConfigEffortMedium, true
+	case provider.EffortHigh:
+		return anthropic.BetaOutputConfigEffortHigh, true
+	case provider.EffortXHigh:
+		return anthropic.BetaOutputConfigEffortXhigh, true
+	case provider.EffortMax:
+		return anthropic.BetaOutputConfigEffortMax, true
+	}
+	return "", false
+}
+
 func isCompactionSupportedModel(model string) bool {
 	model = strings.ToLower(model)
 

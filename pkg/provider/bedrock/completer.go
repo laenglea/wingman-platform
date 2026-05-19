@@ -122,42 +122,24 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			params.OutputConfig = outputConfig
 		}
 
-		if isAdaptiveThinkingModel(c.model) {
-			// Enable adaptive thinking by default. Only skip when the caller
-			// explicitly disables it via Effort == EffortNone.
-			enableAdaptive := options.ReasoningOptions == nil ||
-				options.ReasoningOptions.Effort != provider.EffortNone
+		if isAdaptiveThinkingModel(c.model) && options.ReasoningOptions != nil {
+			effort, enable := adaptiveEffort(options.ReasoningOptions.Effort)
 
-			if enableAdaptive {
+			if options.ToolOptions != nil && options.ToolOptions.Choice == provider.ToolChoiceAny {
+				enable = false
+			}
+
+			if enable {
 				config.Temperature = nil
 
-				additionalFields := map[string]any{
-					"thinking": map[string]any{
-						"type": "adaptive",
-					},
+				thinkingFields := map[string]any{"type": "adaptive"}
+				if !options.ReasoningOptions.IncludeSummary {
+					thinkingFields["display"] = "omitted"
 				}
 
-				var effort string
-
-				if options.ReasoningOptions != nil {
-					switch options.ReasoningOptions.Effort {
-					case provider.EffortMinimal, provider.EffortLow:
-						effort = "low"
-					case provider.EffortMedium:
-						effort = "medium"
-					case provider.EffortHigh:
-						effort = "high"
-					case provider.EffortXHigh:
-						effort = "xhigh"
-					case provider.EffortMax:
-						effort = "max"
-					}
-				}
-
+				additionalFields := map[string]any{"thinking": thinkingFields}
 				if effort != "" {
-					additionalFields["output_config"] = map[string]any{
-						"effort": effort,
-					}
+					additionalFields["output_config"] = map[string]any{"effort": effort}
 				}
 
 				params.AdditionalModelRequestFields = document.NewLazyDocument(additionalFields)
@@ -317,6 +299,10 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 							provider.TextContent(""),
 						},
 					},
+				}
+
+				if v.Value.StopReason == types.StopReasonMaxTokens {
+					delta.Status = provider.CompletionStatusIncomplete
 				}
 
 				if !yield(delta, nil) {

@@ -115,7 +115,7 @@ func convertGenerateConfig(instruction *genai.Content, options *provider.Complet
 		SystemInstruction: instruction,
 	}
 
-	if options.ReasoningOptions != nil {
+	if options.ReasoningOptions != nil && options.ReasoningOptions.Effort != provider.EffortNone {
 		config.ThinkingConfig = &genai.ThinkingConfig{
 			IncludeThoughts: true,
 		}
