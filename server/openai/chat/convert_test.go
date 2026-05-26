@@ -1,6 +1,8 @@
 package chat
 
 import (
+	"encoding/base64"
+	"strings"
 	"testing"
 )
 
@@ -76,5 +78,55 @@ func TestToolMessageVsRegularUserMessage(t *testing.T) {
 	}
 	if messages[0].Content[0].Text != "regular text" {
 		t.Fatalf("expected 'regular text', got %q", messages[0].Content[0].Text)
+	}
+}
+
+func TestInputAudioContentDecodes(t *testing.T) {
+	raw := []byte{0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45}
+	encoded := base64.StdEncoding.EncodeToString(raw)
+
+	cases := []struct {
+		format string
+		mime   string
+		ext    string
+	}{
+		{"wav", "audio/wav", ".wav"},
+		{"mp3", "audio/mpeg", ".mp3"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.format, func(t *testing.T) {
+			messages, err := toMessages([]ChatCompletionMessage{
+				{
+					Role: MessageRoleUser,
+					Contents: []MessageContent{
+						{Type: MessageContentTypeText, Text: "describe this"},
+						{
+							Type:  MessageContentTypeAudio,
+							Audio: &MessageContentAudio{Data: encoded, Format: tc.format},
+						},
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("toMessages: %v", err)
+			}
+			if len(messages) != 1 || len(messages[0].Content) != 2 {
+				t.Fatalf("expected 1 message with 2 content parts, got %+v", messages)
+			}
+			file := messages[0].Content[1].File
+			if file == nil {
+				t.Fatalf("expected File content, got %+v", messages[0].Content[1])
+			}
+			if string(file.Content) != string(raw) {
+				t.Fatalf("audio bytes round-trip mismatch")
+			}
+			if file.ContentType != tc.mime {
+				t.Fatalf("expected ContentType %q, got %q", tc.mime, file.ContentType)
+			}
+			if !strings.HasSuffix(file.Name, tc.ext) {
+				t.Fatalf("expected Name to end with %q, got %q", tc.ext, file.Name)
+			}
+		})
 	}
 }
