@@ -260,6 +260,11 @@ func responseDefaults(resp *Response, req ResponsesRequest) {
 		}
 	}
 
+	// OpenAI always returns a format on `text`, defaulting to {"type": "text"}.
+	if resp.Text.Format == nil {
+		resp.Text.Format = &TextFormat{Type: "text"}
+	}
+
 	if resp.Text.Verbosity == "" {
 		resp.Text.Verbosity = VerbosityMedium
 	}

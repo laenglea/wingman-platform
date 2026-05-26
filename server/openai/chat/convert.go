@@ -130,7 +130,12 @@ func toMessages(s []ChatCompletionMessage) ([]provider.Message, error) {
 					}
 
 					if c.Audio.Format != "" {
-						file.Name = uuid.NewString() + c.Audio.Format
+						file.Name = uuid.NewString() + "." + c.Audio.Format
+
+						file.ContentType = "audio/" + c.Audio.Format
+						if c.Audio.Format == "mp3" {
+							file.ContentType = "audio/mpeg"
+						}
 					}
 
 					content = append(content, provider.FileContent(file))
