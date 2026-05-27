@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -89,9 +90,10 @@ type accumulatedToolCall struct {
 	ID string // call ID (e.g. call_xxx)
 
 	Name        string
-	Arguments   strings.Builder
+	Arguments   string
 	OutputIndex int
 	Started     bool
+	Closed      bool // arguments.done + output_item.done already emitted
 }
 
 // StreamingAccumulator accumulates streaming completion chunks and emits
@@ -282,6 +284,56 @@ func (s *StreamingAccumulator) ensureToolCallStarted(callID string, toolCall pro
 		ToolCallName: tc.Name,
 		OutputIndex:  outputIndex,
 	})
+}
+
+// closeToolCall emits arguments.done + output_item.done for the given call.
+func (s *StreamingAccumulator) closeToolCall(callID string) error {
+	idx, ok := s.toolCallByID[callID]
+	if !ok {
+		return nil
+	}
+
+	tc := &s.toolCalls[idx]
+	if !tc.Started || tc.Closed {
+		return nil
+	}
+
+	tc.Closed = true
+
+	if err := s.emitEvent(StreamEvent{
+		Type:         StreamEventFunctionCallArgumentsDone,
+		ToolCallID:   tc.ID,
+		ToolCallName: tc.Name,
+		Arguments:    tc.Arguments,
+		OutputIndex:  tc.OutputIndex,
+	}); err != nil {
+		return err
+	}
+
+	return s.emitEvent(StreamEvent{
+		Type:         StreamEventFunctionCallDone,
+		ToolCallID:   tc.ID,
+		ToolCallName: tc.Name,
+		Arguments:    tc.Arguments,
+		OutputIndex:  tc.OutputIndex,
+	})
+}
+
+func (s *StreamingAccumulator) toolCallArgumentsComplete(callID string) bool {
+	idx, ok := s.toolCallByID[callID]
+	if !ok {
+		return false
+	}
+
+	args := strings.TrimSpace(s.toolCalls[idx].Arguments)
+	return args != "" && json.Valid([]byte(args))
+}
+
+func (s *StreamingAccumulator) shouldClosePreviousToolCall(nextID string) bool {
+	return nextID != "" &&
+		nextID != s.lastToolCallID &&
+		s.lastToolCallID != "" &&
+		s.toolCallArgumentsComplete(s.lastToolCallID)
 }
 
 func (s *StreamingAccumulator) ensureReasoningItem() error {
@@ -644,6 +696,16 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 				return err
 			}
 
+			// If this chunk introduces a new tool call ID and the previous
+			// call's arguments are complete, close the previous item before
+			// starting the next one. If the JSON is still incomplete, leave it
+			// open so later fragments cannot arrive after arguments.done.
+			if s.shouldClosePreviousToolCall(tc.ID) {
+				if err := s.closeToolCall(s.lastToolCallID); err != nil {
+					return err
+				}
+			}
+
 			currentID, outputIndex, ok := s.trackToolCall(*tc)
 			if !ok {
 				continue
@@ -661,13 +723,14 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			}
 
 			if tc.Arguments != "" {
-				entry.Arguments.WriteString(tc.Arguments)
+				entry.Arguments += tc.Arguments
 
 				if err := s.emitEvent(StreamEvent{
-					Type:        StreamEventFunctionCallArgumentsDelta,
-					ToolCallID:  currentID,
-					Delta:       tc.Arguments,
-					OutputIndex: outputIndex,
+					Type:         StreamEventFunctionCallArgumentsDelta,
+					ToolCallID:   currentID,
+					ToolCallName: entry.Name,
+					Delta:        tc.Arguments,
+					OutputIndex:  outputIndex,
 				}); err != nil {
 					return err
 				}
@@ -747,30 +810,10 @@ func (s *StreamingAccumulator) Complete() error {
 		}
 	}
 
-	// Emit done events for each tool call
+	// Flush any tool calls still open. closeToolCall is idempotent, so calls
+	// already closed inline (when a later call started) are no-ops here.
 	for i := range s.toolCalls {
-		tc := &s.toolCalls[i]
-
-		args := tc.Arguments.String()
-
-		if err := s.emitEvent(StreamEvent{
-			Type:         StreamEventFunctionCallArgumentsDone,
-			ToolCallID:   tc.ID,
-			ToolCallName: tc.Name,
-			Arguments:    args,
-			OutputIndex:  tc.OutputIndex,
-		}); err != nil {
-			return err
-		}
-
-		if err := s.emitEvent(StreamEvent{
-			Type:         StreamEventFunctionCallDone,
-			ToolCallID:   tc.ID,
-			ToolCallName: tc.Name,
-			Arguments:    args,
-			OutputIndex:  tc.OutputIndex,
-			Completion:   result,
-		}); err != nil {
+		if err := s.closeToolCall(s.toolCalls[i].ID); err != nil {
 			return err
 		}
 	}
@@ -828,7 +871,7 @@ func (s *StreamingAccumulator) Result() *provider.Completion {
 		content = append(content, provider.ToolCallContent(provider.ToolCall{
 			ID:        tc.ID,
 			Name:      tc.Name,
-			Arguments: tc.Arguments.String(),
+			Arguments: tc.Arguments,
 		}))
 	}
 

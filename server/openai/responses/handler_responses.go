@@ -252,6 +252,10 @@ func responseDefaults(resp *Response, req ResponsesRequest) {
 		resp.Reasoning.Effort = &effort
 	}
 
+	if resp.Reasoning.Context == nil {
+		resp.Reasoning.Context = new("current_turn")
+	}
+
 	if req.Text != nil {
 		resp.Text = req.Text
 	} else {
@@ -632,6 +636,16 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventFunctionCallArgumentsDelta:
+			// computer / apply_patch are emitted as their own item types in
+			// FunctionCallDone; they don't carry function_call_arguments.* on
+			// the wire (the args/actions ride inside the output_item itself).
+			if outputOpts.ComputerUseTool && event.ToolCallName == "computer" {
+				return nil
+			}
+			if outputOpts.ApplyPatchTool && (event.ToolCallName == "apply_patch" || event.ToolCallName == "str_replace_based_edit_tool") {
+				return nil
+			}
+
 			return writeEvent(w, "response.function_call_arguments.delta", FunctionCallArgumentsDeltaEvent{
 				Type:           "response.function_call_arguments.delta",
 				SequenceNumber: nextSeq(),
@@ -641,11 +655,17 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventFunctionCallArgumentsDone:
+			if outputOpts.ComputerUseTool && event.ToolCallName == "computer" {
+				return nil
+			}
+			if outputOpts.ApplyPatchTool && (event.ToolCallName == "apply_patch" || event.ToolCallName == "str_replace_based_edit_tool") {
+				return nil
+			}
+
 			return writeEvent(w, "response.function_call_arguments.done", FunctionCallArgumentsDoneEvent{
 				Type:           "response.function_call_arguments.done",
 				SequenceNumber: nextSeq(),
 				ItemID:         "fc_" + event.ToolCallID,
-				Name:           event.ToolCallName,
 				OutputIndex:    event.OutputIndex,
 				Arguments:      event.Arguments,
 			})

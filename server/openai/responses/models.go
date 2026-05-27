@@ -46,6 +46,7 @@ type ContextManagementConfig struct {
 type ReasoningConfig struct {
 	Effort  *ReasoningEffort `json:"effort"`
 	Summary *any             `json:"summary"`
+	Context *string          `json:"context,omitempty"`
 }
 
 type ReasoningEffort string
@@ -754,14 +755,16 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 	case ResponseOutputTypeReasoning:
 		if r.ReasoningOutputItem != nil {
 			return json.Marshal(struct {
-				Type             ResponseOutputType       `json:"type"`
-				ID               string                   `json:"id"`
-				Summary          []ReasoningOutputSummary `json:"summary"`
-				EncryptedContent string                   `json:"encrypted_content,omitempty"`
+				Type             ResponseOutputType           `json:"type"`
+				ID               string                       `json:"id"`
+				Summary          []ReasoningOutputSummary     `json:"summary"`
+				Content          []ReasoningOutputContentPart `json:"content,omitempty"`
+				EncryptedContent string                       `json:"encrypted_content,omitempty"`
 			}{
 				Type:             r.Type,
 				ID:               r.ReasoningOutputItem.ID,
 				Summary:          r.ReasoningOutputItem.Summary,
+				Content:          r.ReasoningOutputItem.Content,
 				EncryptedContent: r.ReasoningOutputItem.EncryptedContent,
 			})
 		}
@@ -952,7 +955,6 @@ type FunctionCallArgumentsDoneEvent struct {
 	Type           string `json:"type"` // response.function_call_arguments.done
 	SequenceNumber int    `json:"sequence_number"`
 	ItemID         string `json:"item_id"`
-	Name           string `json:"name"`
 	OutputIndex    int    `json:"output_index"`
 	Arguments      string `json:"arguments"`
 }

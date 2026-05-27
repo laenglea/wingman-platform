@@ -312,7 +312,7 @@ func toTools(tools []Tool) []provider.Tool {
 
 func toTextEditorToolOptions(tools []Tool) *provider.TextEditorOptions {
 	for _, t := range tools {
-		if t.Type == ToolTypeApplyPatch {
+		if isApplyPatchTool(t) {
 			return &provider.TextEditorOptions{}
 		}
 	}
@@ -332,6 +332,16 @@ func isComputerToolCall(call provider.ToolCall) bool {
 	return call.Name == "computer"
 }
 
+func isApplyPatchTool(t Tool) bool {
+	if t.Type == ToolTypeApplyPatch {
+		return true
+	}
+
+	// Codex 0.132 sends apply_patch as a Responses custom grammar tool. Treat
+	// that as the native apply_patch capability when forwarding upstream.
+	return t.Type == ToolTypeCustom && t.Name == "apply_patch"
+}
+
 func toolCallToComputerCall(call provider.ToolCall, status string) *ComputerCallItem {
 	item := &ComputerCallItem{
 		ID:     "cu_" + call.ID,
@@ -348,7 +358,6 @@ func toolCallToComputerCall(call provider.ToolCall, status string) *ComputerCall
 
 	return item
 }
-
 
 // isApplyPatchToolCall returns true if the tool call is an apply_patch or text_editor call.
 func isApplyPatchToolCall(call provider.ToolCall) bool {

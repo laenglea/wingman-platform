@@ -452,7 +452,7 @@ func convertError(err error) error {
 func (c *Completer) convertOutputConfig(schema *provider.Schema) (*types.OutputConfig, error) {
 	s := schema.Schema
 	if s == nil {
-		s = map[string]any{"type": "object"}
+		s = map[string]any{"type": "object", "additionalProperties": false}
 	}
 
 	schemaJSON, err := json.Marshal(s)

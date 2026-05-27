@@ -185,3 +185,63 @@ func TestStreamingAccumulatorPreservesCompactionOrder(t *testing.T) {
 		t.Fatalf("content 2: expected cmp_2, got %+v", contents[2])
 	}
 }
+
+func TestStreamingAccumulatorDoesNotCloseIncompleteToolCall(t *testing.T) {
+	type event struct {
+		Type       StreamEventType
+		ToolCallID string
+	}
+
+	var events []event
+
+	acc := NewStreamingAccumulator(func(e StreamEvent) error {
+		switch e.Type {
+		case StreamEventFunctionCallArgumentsDelta,
+			StreamEventFunctionCallArgumentsDone,
+			StreamEventFunctionCallDone:
+			events = append(events, event{Type: e.Type, ToolCallID: e.ToolCallID})
+		}
+		return nil
+	})
+
+	for _, call := range []provider.ToolCall{
+		{ID: "c1", Name: "shell_command", Arguments: `{"command":`},
+		{ID: "c2", Name: "shell_command", Arguments: `{"command":"b"}`},
+		{ID: "c1", Name: "shell_command", Arguments: `"a"}`},
+	} {
+		c := call
+		if err := acc.Add(provider.Completion{
+			Message: &provider.Message{
+				Role:    provider.MessageRoleAssistant,
+				Content: []provider.Content{provider.ToolCallContent(c)},
+			},
+		}); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+	}
+
+	if err := acc.Complete(); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	c1DoneAt := -1
+	c1LastDeltaAt := -1
+	for i, e := range events {
+		if e.ToolCallID != "c1" {
+			continue
+		}
+		switch e.Type {
+		case StreamEventFunctionCallArgumentsDelta:
+			c1LastDeltaAt = i
+		case StreamEventFunctionCallArgumentsDone:
+			c1DoneAt = i
+		}
+	}
+
+	if c1DoneAt == -1 {
+		t.Fatalf("expected c1 arguments.done in %+v", events)
+	}
+	if c1LastDeltaAt > c1DoneAt {
+		t.Fatalf("c1 received delta after arguments.done: %+v", events)
+	}
+}
