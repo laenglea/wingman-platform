@@ -111,7 +111,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			InferenceConfig: config,
 		}
 
-		if isAdaptiveThinkingModel(c.model) && options.ReasoningOptions != nil {
+		if !isLegacyModel(c.model) && options.ReasoningOptions != nil {
 			effort, enable := adaptiveEffort(options.ReasoningOptions.Effort)
 
 			// Schema mode forces a specific tool call, which is incompatible

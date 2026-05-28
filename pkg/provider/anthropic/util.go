@@ -90,18 +90,23 @@ func parseRetryAfter(h http.Header) time.Duration {
 	return 0
 }
 
-func isAdaptiveThinkingModel(model string) bool {
+var LegacyModels = []string{
+	"claude-3",
+
+	"sonnet-4-0",
+	"sonnet-4-5",
+
+	"opus-4-0",
+	"opus-4-1",
+	"opus-4-5",
+
+	"haiku-4-5",
+}
+
+func isLegacyModel(model string) bool {
 	model = strings.ToLower(model)
 
-	thinkingPatterns := []string{
-		"sonnet-4-6",
-
-		"opus-4-8",
-		"opus-4-7",
-		"opus-4-6",
-	}
-
-	for _, p := range thinkingPatterns {
+	for _, p := range LegacyModels {
 		if strings.Contains(model, p) {
 			return true
 		}
@@ -126,24 +131,4 @@ func adaptiveEffort(e provider.Effort) (effort anthropic.BetaOutputConfigEffort,
 		return anthropic.BetaOutputConfigEffortMax, true
 	}
 	return "", false
-}
-
-func isCompactionSupportedModel(model string) bool {
-	model = strings.ToLower(model)
-
-	compactionPatterns := []string{
-		"sonnet-4-6",
-
-		"opus-4-8",
-		"opus-4-7",
-		"opus-4-6",
-	}
-
-	for _, p := range compactionPatterns {
-		if strings.Contains(model, p) {
-			return true
-		}
-	}
-
-	return false
 }

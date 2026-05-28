@@ -30,6 +30,12 @@ func WithToken(token string) Option {
 	}
 }
 
+func WithModel(model string) Option {
+	return func(c *Config) {
+		c.model = model
+	}
+}
+
 func (c *Config) Options() []option.RequestOption {
 	url := c.url
 

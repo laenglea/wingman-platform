@@ -169,6 +169,10 @@ func anthropicResearcher(cfg researcherConfig, context researcherContext) (resea
 		options = append(options, anthropic.WithClient(context.Client))
 	}
 
+	if cfg.Model != "" {
+		options = append(options, anthropic.WithModel(cfg.Model))
+	}
+
 	return anthropic.New(cfg.Token, options...)
 }
 

@@ -349,7 +349,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
 	}
 
-	if isAdaptiveThinkingModel(c.model) {
+	if !isLegacyModel(c.model) {
 		req.MaxTokens = 128000
 
 		if options.ReasoningOptions != nil {
@@ -562,7 +562,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		req.OutputConfig.Format = anthropic.BetaJSONOutputFormatParam{Schema: schema}
 	}
 
-	if options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 && isCompactionSupportedModel(c.model) {
+	if options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 && !isLegacyModel(c.model) {
 		req.Betas = append(req.Betas, "compact-2026-01-12")
 
 		req.ContextManagement = anthropic.BetaContextManagementConfigParam{

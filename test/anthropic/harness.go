@@ -73,15 +73,18 @@ func DefaultModels() []Model {
 }
 
 func knownCapabilities(name string) ModelCapabilities {
-	switch name {
-	case "claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8":
-		return ModelCapabilities{Thinking: true, TextEditor: true, Compaction: true, ComputerUse: true}
-	case "claude-sonnet-4-5", "claude-opus-4-5":
-		return ModelCapabilities{Thinking: true, TextEditor: true, ComputerUse: true}
-	case "claude-haiku-4-5":
+	name = strings.ToLower(name)
+
+	switch {
+	case strings.Contains(name, "claude-3"):
+		return ModelCapabilities{Thinking: true}
+	case strings.Contains(name, "haiku-4-5"):
 		return ModelCapabilities{}
+	case strings.Contains(name, "-4-0"), strings.Contains(name, "opus-4-1"), strings.Contains(name, "-4-5"):
+		return ModelCapabilities{Thinking: true, TextEditor: true, ComputerUse: true}
+	default:
+		return ModelCapabilities{Thinking: true, TextEditor: true, Compaction: true, ComputerUse: true}
 	}
-	return ModelCapabilities{Thinking: true}
 }
 
 func env(key, fallback string) string {
