@@ -155,7 +155,7 @@ func TestAdaptiveThinkingDisplayOmittedHTTP(t *testing.T) {
 // isClaudeAdaptiveModel returns true for the Claude families that support
 // adaptive thinking.
 func isClaudeAdaptiveModel(name string) bool {
-	for _, p := range []string{"claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-7"} {
+	for _, p := range []string{"claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8"} {
 		if strings.Contains(name, p) {
 			return true
 		}

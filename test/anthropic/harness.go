@@ -74,7 +74,7 @@ func DefaultModels() []Model {
 
 func knownCapabilities(name string) ModelCapabilities {
 	switch name {
-	case "claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-7":
+	case "claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8":
 		return ModelCapabilities{Thinking: true, TextEditor: true, Compaction: true, ComputerUse: true}
 	case "claude-sonnet-4-5", "claude-opus-4-5":
 		return ModelCapabilities{Thinking: true, TextEditor: true, ComputerUse: true}

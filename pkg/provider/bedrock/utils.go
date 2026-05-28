@@ -12,6 +12,7 @@ func isAdaptiveThinkingModel(model string) bool {
 	thinkingPatterns := []string{
 		"sonnet-4-6",
 
+		"opus-4-8",
 		"opus-4-7",
 		"opus-4-6",
 	}
