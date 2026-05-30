@@ -1,9 +1,10 @@
-package agent
+package react
 
 import (
 	"context"
 	"errors"
 	"iter"
+	"strings"
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -704,40 +705,6 @@ func TestComplete_Errors(t *testing.T) {
 		require.Contains(t, err.Error(), "tools discovery failed")
 	})
 
-	t.Run("tool execute error propagates", func(t *testing.T) {
-		completer := &mockCompleter{
-			responses: [][]provider.Completion{
-				{
-					{
-						Message: &provider.Message{
-							Role: provider.MessageRoleAssistant,
-							Content: []provider.Content{
-								{ToolCall: &provider.ToolCall{ID: "call-1", Name: "failing_tool", Arguments: `{}`}},
-							},
-						},
-					},
-				},
-			},
-		}
-
-		toolProvider := &mockToolProvider{
-			tools: []provider.Tool{{Name: "failing_tool", Description: "Fails"}},
-			executeFunc: func(ctx context.Context, name string, params map[string]any) (any, error) {
-				return nil, errors.New("tool execution failed")
-			},
-		}
-
-		chain, err := New("test-model",
-			WithCompleter(completer),
-			WithTools(toolProvider),
-		)
-		require.NoError(t, err)
-
-		_, err = collectCompletions(chain.Complete(context.Background(), nil, nil))
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "tool execution failed")
-	})
-
 	t.Run("invalid JSON arguments error propagates", func(t *testing.T) {
 		completer := &mockCompleter{
 			responses: [][]provider.Completion{
@@ -1292,4 +1259,150 @@ func TestComplete_MixedToolTurn(t *testing.T) {
 		require.NotNil(t, completer.capturedOptions[0].ToolOptions)
 		require.False(t, completer.capturedOptions[0].ToolOptions.DisableParallelToolCalls)
 	})
+}
+
+func TestComplete_ToolErrorIsSurfaced(t *testing.T) {
+	toolCall := provider.Content{
+		ToolCall: &provider.ToolCall{
+			ID:        "tc-err",
+			Name:      "broken",
+			Arguments: `{}`,
+		},
+	}
+
+	completer := &mockCompleter{
+		responses: [][]provider.Completion{
+			{{Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{toolCall}}}},
+			{{Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{{Text: "sorry, that failed"}}}}},
+		},
+	}
+	toolProvider := &mockToolProvider{
+		tools: []provider.Tool{{Name: "broken"}},
+		executeFunc: func(ctx context.Context, name string, params map[string]any) (any, error) {
+			return nil, errors.New("rate limited")
+		},
+	}
+
+	chain, err := New("test-model", WithCompleter(completer), WithTools(toolProvider))
+	require.NoError(t, err)
+
+	result, err := accumulateCompletion(chain.Complete(context.Background(), nil, nil))
+	require.NoError(t, err)
+	require.NotNil(t, result.Message)
+	require.Equal(t, "sorry, that failed", result.Message.Text())
+
+	require.GreaterOrEqual(t, len(completer.capturedMessages), 2)
+	secondCallMessages := completer.capturedMessages[1]
+	var sawErrorResult bool
+	for _, m := range secondCallMessages {
+		for _, c := range m.Content {
+			if c.ToolResult != nil && len(c.ToolResult.Parts) > 0 {
+				if strings.Contains(c.ToolResult.Parts[0].Text, "rate limited") {
+					sawErrorResult = true
+				}
+			}
+		}
+	}
+	require.True(t, sawErrorResult, "expected surfaced tool result on retry call")
+}
+
+func TestComplete_ToolObserver(t *testing.T) {
+	toolCall := provider.Content{
+		ToolCall: &provider.ToolCall{
+			ID:        "tc-obs",
+			Name:      "echo",
+			Arguments: `{"q":"hello"}`,
+		},
+	}
+
+	completer := &mockCompleter{
+		responses: [][]provider.Completion{
+			{{Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{toolCall}}}},
+			{{Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{{Text: "done"}}}}},
+		},
+	}
+	toolProvider := &mockToolProvider{
+		tools: []provider.Tool{{Name: "echo"}},
+		executeFunc: func(ctx context.Context, name string, params map[string]any) (any, error) {
+			return map[string]any{"echoed": params["q"]}, nil
+		},
+	}
+
+	var events []ToolEvent
+	chain, err := New("test-model",
+		WithCompleter(completer),
+		WithTools(toolProvider),
+		WithToolObserver(func(ctx context.Context, e ToolEvent) {
+			events = append(events, e)
+		}),
+	)
+	require.NoError(t, err)
+
+	_, err = accumulateCompletion(chain.Complete(context.Background(), nil, nil))
+	require.NoError(t, err)
+
+	require.Len(t, events, 2)
+	require.Equal(t, ToolPhaseStart, events[0].Phase)
+	require.Equal(t, "tc-obs", events[0].CallID)
+	require.Equal(t, "echo", events[0].Name)
+	require.Equal(t, "hello", events[0].Input["q"])
+
+	require.Equal(t, ToolPhaseResult, events[1].Phase)
+	require.NotNil(t, events[1].Result)
+	require.Equal(t, "tc-obs", events[1].Result.ID)
+}
+
+type resulterToolProvider struct {
+	mockToolProvider
+}
+
+func (r *resulterToolProvider) Result(name string, value any) provider.ToolResult {
+	return provider.ToolResult{
+		Parts: []provider.Part{{Text: "rendered-" + name}},
+	}
+}
+
+func TestComplete_Resulter(t *testing.T) {
+	toolCall := provider.Content{
+		ToolCall: &provider.ToolCall{
+			ID:        "tc-r",
+			Name:      "fancy",
+			Arguments: `{}`,
+		},
+	}
+
+	completer := &mockCompleter{
+		responses: [][]provider.Completion{
+			{{Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{toolCall}}}},
+			{{Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{{Text: "ok"}}}}},
+		},
+	}
+	toolProvider := &resulterToolProvider{
+		mockToolProvider: mockToolProvider{
+			tools: []provider.Tool{{Name: "fancy"}},
+			executeFunc: func(ctx context.Context, name string, params map[string]any) (any, error) {
+				return "raw-value", nil
+			},
+		},
+	}
+
+	chain, err := New("test-model", WithCompleter(completer), WithTools(toolProvider))
+	require.NoError(t, err)
+
+	_, err = accumulateCompletion(chain.Complete(context.Background(), nil, nil))
+	require.NoError(t, err)
+
+	require.GreaterOrEqual(t, len(completer.capturedMessages), 2)
+	second := completer.capturedMessages[1]
+	var sawRendered bool
+	for _, m := range second {
+		for _, c := range m.Content {
+			if c.ToolResult != nil && len(c.ToolResult.Parts) > 0 {
+				if c.ToolResult.Parts[0].Text == "rendered-fancy" {
+					sawRendered = true
+				}
+			}
+		}
+	}
+	require.True(t, sawRendered, "expected Resulter output to be fed back to the model")
 }

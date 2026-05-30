@@ -1,4 +1,4 @@
-package agent
+package react
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/adrianliechti/wingman/pkg/chain"
+	"github.com/adrianliechti/wingman/pkg/agent"
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/template"
 	"github.com/adrianliechti/wingman/pkg/tool"
@@ -16,9 +16,31 @@ import (
 	"github.com/google/uuid"
 )
 
-var _ chain.Provider = &Chain{}
+var _ agent.Agent = &Agent{}
 
-type Chain struct {
+type ToolPhase int
+
+const (
+	ToolPhaseStart ToolPhase = iota + 1
+	ToolPhaseResult
+	ToolPhaseError
+)
+
+type ToolEvent struct {
+	Phase ToolPhase
+
+	CallID string
+	Name   string
+
+	Input map[string]any
+
+	Result *provider.ToolResult
+	Error  error
+}
+
+type ToolObserver func(ctx context.Context, event ToolEvent)
+
+type Agent struct {
 	model string
 
 	completer provider.Completer
@@ -30,12 +52,14 @@ type Chain struct {
 	verbosity provider.Verbosity
 
 	temperature *float32
+
+	observer ToolObserver
 }
 
-type Option func(*Chain)
+type Option func(*Agent)
 
-func New(model string, options ...Option) (*Chain, error) {
-	c := &Chain{
+func New(model string, options ...Option) (*Agent, error) {
+	c := &Agent{
 		model: model,
 	}
 
@@ -51,42 +75,48 @@ func New(model string, options ...Option) (*Chain, error) {
 }
 
 func WithCompleter(completer provider.Completer) Option {
-	return func(c *Chain) {
+	return func(c *Agent) {
 		c.completer = completer
 	}
 }
 
 func WithMessages(messages ...provider.Message) Option {
-	return func(c *Chain) {
+	return func(c *Agent) {
 		c.messages = messages
 	}
 }
 
 func WithTools(tool ...tool.Provider) Option {
-	return func(c *Chain) {
+	return func(c *Agent) {
 		c.tools = tool
 	}
 }
 
 func WithEffort(effort provider.Effort) Option {
-	return func(c *Chain) {
+	return func(c *Agent) {
 		c.effort = effort
 	}
 }
 
 func WithVerbosity(verbosity provider.Verbosity) Option {
-	return func(c *Chain) {
+	return func(c *Agent) {
 		c.verbosity = verbosity
 	}
 }
 
 func WithTemperature(temperature float32) Option {
-	return func(c *Chain) {
+	return func(c *Agent) {
 		c.temperature = &temperature
 	}
 }
 
-func (c *Chain) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
+func WithToolObserver(observer ToolObserver) Option {
+	return func(c *Agent) {
+		c.observer = observer
+	}
+}
+
+func (c *Agent) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	return func(yield func(*provider.Completion, error) bool) {
 		// Work on a local copy so the caller's CompleteOptions is never mutated.
 		var opts provider.CompleteOptions
@@ -277,28 +307,63 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 					return
 				}
 
+				if c.observer != nil {
+					c.observer(ctx, ToolEvent{
+						Phase:  ToolPhaseStart,
+						CallID: cnt.ToolCall.ID,
+						Name:   cnt.ToolCall.Name,
+						Input:  params,
+					})
+				}
+
 				result, err := t.Execute(ctx, cnt.ToolCall.Name, params)
+
+				if err != nil {
+					if c.observer != nil {
+						c.observer(ctx, ToolEvent{
+							Phase:  ToolPhaseError,
+							CallID: cnt.ToolCall.ID,
+							Name:   cnt.ToolCall.Name,
+							Input:  params,
+							Error:  err,
+						})
+					}
+
+					input = append(input, provider.Message{
+						Role: provider.MessageRoleUser,
+						Content: []provider.Content{
+							provider.ToolResultContent(provider.ToolResult{
+								ID:    cnt.ToolCall.ID,
+								Parts: []provider.Part{{Text: "Error: " + err.Error()}},
+							}),
+						},
+					})
+
+					continue
+				}
+
+				toolResult, err := renderToolResult(t, cnt.ToolCall.ID, cnt.ToolCall.Name, result)
 
 				if err != nil {
 					yield(nil, err)
 					return
 				}
 
-				data, err := json.Marshal(result)
-
-				if err != nil {
-					yield(nil, err)
-					return
+				if c.observer != nil {
+					c.observer(ctx, ToolEvent{
+						Phase:  ToolPhaseResult,
+						CallID: cnt.ToolCall.ID,
+						Name:   cnt.ToolCall.Name,
+						Input:  params,
+						Result: &toolResult,
+					})
 				}
 
 				input = append(input, provider.Message{
 					Role: provider.MessageRoleUser,
 
 					Content: []provider.Content{
-						provider.ToolResultContent(provider.ToolResult{
-							ID:    cnt.ToolCall.ID,
-							Parts: []provider.Part{{Text: string(data)}},
-						}),
+						provider.ToolResultContent(toolResult),
 					},
 				})
 			}
@@ -337,6 +402,9 @@ func mergeToolOptions(opts *provider.ToolOptions, agentToolNames []string) *prov
 		merged.Choice = provider.ToolChoiceAuto
 		merged.Allowed = slices.Clone(agentToolNames)
 
+	case "":
+		merged.Choice = provider.ToolChoiceAuto
+
 	default:
 		// If the user restricted to specific tools, also allow all agent tools.
 		if len(merged.Allowed) > 0 {
@@ -351,4 +419,24 @@ func mergeToolOptions(opts *provider.ToolOptions, agentToolNames []string) *prov
 	}
 
 	return &merged
+}
+
+func renderToolResult(t tool.Provider, id, name string, value any) (provider.ToolResult, error) {
+	if r, ok := t.(tool.Resulter); ok {
+		result := r.Result(name, value)
+		if result.ID == "" {
+			result.ID = id
+		}
+		return result, nil
+	}
+
+	data, err := json.Marshal(value)
+	if err != nil {
+		return provider.ToolResult{}, err
+	}
+
+	return provider.ToolResult{
+		ID:    id,
+		Parts: []provider.Part{{Text: string(data)}},
+	}, nil
 }

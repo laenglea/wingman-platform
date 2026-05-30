@@ -3,6 +3,7 @@ package anthropic
 import (
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -24,7 +25,7 @@ func TestToMessage_ThinkingBlocks(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	msg, err := toMessage(MessageParam{Role: MessageRoleAssistant, Content: blocksToAny(blocks)})
+	msg, err := toMessage(0, MessageParam{Role: MessageRoleAssistant, Content: blocksToAny(blocks)})
 	if err != nil {
 		t.Fatalf("toMessage: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestToMessage_DocumentBlocks(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	msg, err := toMessage(MessageParam{Role: MessageRoleUser, Content: blocksToAny(blocks)})
+	msg, err := toMessage(0, MessageParam{Role: MessageRoleUser, Content: blocksToAny(blocks)})
 	if err != nil {
 		t.Fatalf("toMessage: %v", err)
 	}
@@ -123,4 +124,86 @@ func blocksToAny(blocks []ContentBlockParam) any {
 		out[i] = v
 	}
 	return out
+}
+
+func TestToMessage_ServerToolUseRoundTripsAsText(t *testing.T) {
+	body := []byte(`[
+		{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{"query":"go 1.24 release"}},
+		{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[
+			{"type":"web_search_result","url":"https://go.dev/blog/go1.24","title":"Go 1.24","encrypted_content":"x"}
+		]},
+		{"type":"server_tool_use","id":"srvtoolu_2","name":"web_fetch","input":{"url":"https://go.dev/blog/go1.24"}},
+		{"type":"web_fetch_tool_result","tool_use_id":"srvtoolu_2","content":{"url":"https://go.dev/blog/go1.24","retrieved_at":"2025-05-30T00:00:00Z"}},
+		{"type":"text","text":"final answer"}
+	]`)
+
+	var blocks []ContentBlockParam
+	if err := json.Unmarshal(body, &blocks); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	msg, err := toMessage(0, MessageParam{Role: MessageRoleAssistant, Content: blocksToAny(blocks)})
+	if err != nil {
+		t.Fatalf("toMessage: %v", err)
+	}
+
+	if len(msg.Content) != 5 {
+		t.Fatalf("expected 5 content blocks, got %d", len(msg.Content))
+	}
+
+	want := []string{
+		`[web_search: "go 1.24 release"]`,
+		`[web_search_result: Go 1.24 (https://go.dev/blog/go1.24)]`,
+		`[web_fetch: https://go.dev/blog/go1.24]`,
+		`[web_fetch_result: https://go.dev/blog/go1.24]`,
+		"final answer",
+	}
+	for i, w := range want {
+		if msg.Content[i].Text != w {
+			t.Errorf("content[%d].Text = %q, want %q", i, msg.Content[i].Text, w)
+		}
+	}
+}
+
+func TestToTools_RejectsWebSearch(t *testing.T) {
+	in := []ToolParam{
+		{Type: "custom", Name: "get_weather", InputSchema: map[string]any{"type": "object"}},
+		{Type: "web_search_20250305", Name: "web_search"},
+	}
+
+	_, err := toTools(in)
+	if err == nil {
+		t.Fatal("expected error for web_search_20250305")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "tools.1") || !strings.Contains(msg, "web_search_20250305") {
+		t.Errorf("error = %q", msg)
+	}
+}
+
+func TestToTools_RejectsWebFetch(t *testing.T) {
+	in := []ToolParam{
+		{Type: "web_fetch_20250910", Name: "web_fetch"},
+	}
+
+	_, err := toTools(in)
+	if err == nil {
+		t.Fatal("expected error for web_fetch_20250910")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "tools.0") || !strings.Contains(msg, "web_fetch_20250910") {
+		t.Errorf("error = %q", msg)
+	}
+}
+
+func TestToTools_PassesThroughRegular(t *testing.T) {
+	in := []ToolParam{
+		{Type: "custom", Name: "get_weather", InputSchema: map[string]any{"type": "object"}},
+	}
+
+	tools, err := toTools(in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("tools length = %d", len(tools))
+	}
 }
