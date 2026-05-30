@@ -184,6 +184,8 @@ type ToolCall struct {
 	Name      string
 	Namespace string
 
+	Execution string
+
 	Arguments string
 }
 

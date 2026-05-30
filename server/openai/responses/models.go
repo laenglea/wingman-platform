@@ -95,6 +95,7 @@ const (
 	ToolTypeApplyPatch ToolType = "apply_patch"
 	ToolTypeComputer   ToolType = "computer"
 	ToolTypeNamespace  ToolType = "namespace"
+	ToolTypeToolSearch ToolType = "tool_search"
 )
 
 // Tool represents a tool in the request
@@ -113,6 +114,13 @@ type Tool struct {
 
 	// For custom tools (like apply_patch)
 	Format *CustomToolFormat `json:"format,omitempty"`
+
+	// For tool_search tools: "server" or "client".
+	Execution string `json:"execution,omitempty"`
+
+	// For function/custom tools paired with a tool_search tool: hide from the
+	// initial tool list, surface via tool_search instead.
+	DeferLoading *bool `json:"defer_loading,omitempty"`
 
 	// For computer tool
 	DisplayWidth  int    `json:"display_width,omitempty"`
@@ -210,6 +218,8 @@ const (
 	InputItemTypeCustomToolCallOutput InputItemType = "custom_tool_call_output"
 	InputItemTypeComputerCall         InputItemType = "computer_call"
 	InputItemTypeComputerCallOutput   InputItemType = "computer_call_output"
+	InputItemTypeToolSearchCall       InputItemType = "tool_search_call"
+	InputItemTypeToolSearchOutput     InputItemType = "tool_search_output"
 )
 
 type ResponsesInput struct {
@@ -252,6 +262,12 @@ type InputItem struct {
 
 	// For computer_call_output type
 	*InputComputerCallOutput
+
+	// For tool_search_call type
+	*InputToolSearchCall
+
+	// For tool_search_output type
+	*InputToolSearchOutput
 }
 
 // InputComputerCall represents a computer call in the input (for multi-turn)
@@ -301,6 +317,28 @@ func (o *InputApplyPatchCallOutput) UnmarshalJSON(data []byte) error {
 	}
 	o.Output = output
 	return nil
+}
+
+// InputToolSearchCall represents a prior tool_search call (codex echoes
+// these back on multi-turn). Arguments is raw JSON because the model is free
+// to choose its own argument shape.
+type InputToolSearchCall struct {
+	ID        string          `json:"id,omitempty"`
+	CallID    string          `json:"call_id,omitempty"`
+	Status    string          `json:"status,omitempty"`
+	Execution string          `json:"execution,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
+// InputToolSearchOutput represents the tools returned by the client (or the
+// server, for hosted tool_search) for a prior tool_search_call. Tools is the
+// raw JSON array of tool definitions so it passes through unmodified.
+type InputToolSearchOutput struct {
+	ID        string          `json:"id,omitempty"`
+	CallID    string          `json:"call_id,omitempty"`
+	Status    string          `json:"status,omitempty"`
+	Execution string          `json:"execution,omitempty"`
+	Tools     json.RawMessage `json:"tools,omitempty"`
 }
 
 // InputCustomToolCall represents a custom (freeform grammar) tool call in the
@@ -534,6 +572,20 @@ func (ri *ResponsesInput) UnmarshalJSON(data []byte) error {
 			}
 			item.InputComputerCallOutput = &cco
 
+		case InputItemTypeToolSearchCall:
+			var tsc InputToolSearchCall
+			if err := json.Unmarshal(raw, &tsc); err != nil {
+				return err
+			}
+			item.InputToolSearchCall = &tsc
+
+		case InputItemTypeToolSearchOutput:
+			var tso InputToolSearchOutput
+			if err := json.Unmarshal(raw, &tso); err != nil {
+				return err
+			}
+			item.InputToolSearchOutput = &tso
+
 		default:
 			return fmt.Errorf("unknown input item type: %s", typeWrapper.Type)
 		}
@@ -750,6 +802,7 @@ type ResponseOutput struct {
 	*ApplyPatchCallItem
 	*CustomToolCallItem
 	*ComputerCallItem
+	*ToolSearchCallItem
 	*ReasoningOutputItem
 	*CompactionOutputItem
 }
@@ -828,6 +881,24 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 				Operation: r.ApplyPatchCallItem.Operation,
 			})
 		}
+	case ResponseOutputTypeToolSearchCall:
+		if r.ToolSearchCallItem != nil {
+			return json.Marshal(struct {
+				Type      ResponseOutputType `json:"type"`
+				ID        string             `json:"id"`
+				Status    string             `json:"status"`
+				CallID    string             `json:"call_id"`
+				Execution string             `json:"execution,omitempty"`
+				Arguments json.RawMessage    `json:"arguments,omitempty"`
+			}{
+				Type:      r.Type,
+				ID:        r.ToolSearchCallItem.ID,
+				Status:    r.ToolSearchCallItem.Status,
+				CallID:    r.ToolSearchCallItem.CallID,
+				Execution: r.ToolSearchCallItem.Execution,
+				Arguments: r.ToolSearchCallItem.Arguments,
+			})
+		}
 	case ResponseOutputTypeCustomToolCall:
 		if r.CustomToolCallItem != nil {
 			return json.Marshal(struct {
@@ -889,9 +960,20 @@ var (
 	ResponseOutputTypeApplyPatchCall ResponseOutputType = "apply_patch_call"
 	ResponseOutputTypeCustomToolCall ResponseOutputType = "custom_tool_call"
 	ResponseOutputTypeComputerCall   ResponseOutputType = "computer_call"
+	ResponseOutputTypeToolSearchCall ResponseOutputType = "tool_search_call"
 	ResponseOutputTypeReasoning      ResponseOutputType = "reasoning"
 	ResponseOutputTypeCompaction     ResponseOutputType = "compaction"
 )
+
+// ToolSearchCallItem represents a tool_search call in the output.
+type ToolSearchCallItem struct {
+	ID        string          `json:"id"`
+	Type      string          `json:"type"` // tool_search_call
+	CallID    string          `json:"call_id"`
+	Status    string          `json:"status"`
+	Execution string          `json:"execution,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
 
 // ComputerCallItem represents a computer use tool call in the output
 type ComputerCallItem struct {
@@ -1372,4 +1454,20 @@ type ComputerCallOutputItemDoneEvent struct {
 	SequenceNumber int               `json:"sequence_number"`
 	OutputIndex    int               `json:"output_index"`
 	Item           *ComputerCallItem `json:"item"`
+}
+
+// ToolSearchCallOutputItemAddedEvent wraps tool_search_call in output_item.added
+type ToolSearchCallOutputItemAddedEvent struct {
+	Type           string              `json:"type"` // response.output_item.added
+	SequenceNumber int                 `json:"sequence_number"`
+	OutputIndex    int                 `json:"output_index"`
+	Item           *ToolSearchCallItem `json:"item"`
+}
+
+// ToolSearchCallOutputItemDoneEvent wraps tool_search_call in output_item.done
+type ToolSearchCallOutputItemDoneEvent struct {
+	Type           string              `json:"type"` // response.output_item.done
+	SequenceNumber int                 `json:"sequence_number"`
+	OutputIndex    int                 `json:"output_index"`
+	Item           *ToolSearchCallItem `json:"item"`
 }

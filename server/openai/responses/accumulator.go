@@ -74,6 +74,7 @@ type StreamEvent struct {
 	ToolCallID        string
 	ToolCallName      string
 	ToolCallNamespace string
+	ToolCallExecution string
 	Arguments         string
 	OutputIndex       int
 
@@ -105,6 +106,7 @@ type accumulatedToolCall struct {
 
 	Name        string
 	Namespace   string
+	Execution   string
 	Arguments   string
 	OutputIndex int
 	Started     bool
@@ -313,11 +315,16 @@ func (s *StreamingAccumulator) ensureToolCallStarted(callID string, toolCall pro
 		tc.Namespace = toolCall.Namespace
 	}
 
+	if toolCall.Execution != "" {
+		tc.Execution = toolCall.Execution
+	}
+
 	return s.emitEvent(StreamEvent{
 		Type:              StreamEventFunctionCallAdded,
 		ToolCallID:        callID,
 		ToolCallName:      tc.Name,
 		ToolCallNamespace: tc.Namespace,
+		ToolCallExecution: tc.Execution,
 		OutputIndex:       outputIndex,
 	})
 }
@@ -341,6 +348,7 @@ func (s *StreamingAccumulator) closeToolCall(callID string) error {
 		ToolCallID:        tc.ID,
 		ToolCallName:      tc.Name,
 		ToolCallNamespace: tc.Namespace,
+		ToolCallExecution: tc.Execution,
 		Arguments:         tc.Arguments,
 		OutputIndex:       tc.OutputIndex,
 	}); err != nil {
@@ -352,6 +360,7 @@ func (s *StreamingAccumulator) closeToolCall(callID string) error {
 		ToolCallID:        tc.ID,
 		ToolCallName:      tc.Name,
 		ToolCallNamespace: tc.Namespace,
+		ToolCallExecution: tc.Execution,
 		Arguments:         tc.Arguments,
 		OutputIndex:       tc.OutputIndex,
 	})
@@ -817,6 +826,10 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 
 			if tc.Namespace != "" {
 				entry.Namespace = tc.Namespace
+			}
+
+			if tc.Execution != "" {
+				entry.Execution = tc.Execution
 			}
 
 			if tc.Arguments != "" {

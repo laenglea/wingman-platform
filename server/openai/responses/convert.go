@@ -341,6 +341,38 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 				Kind:  provider.ToolKindComputer,
 				Parts: parts,
 			}))
+
+		case InputItemTypeToolSearchCall:
+			if item.InputToolSearchCall == nil {
+				continue
+			}
+
+			flushResults()
+
+			call := item.InputToolSearchCall
+
+			pendingCalls = append(pendingCalls, provider.ToolCallContent(provider.ToolCall{
+				ID:        call.CallID,
+				Kind:      provider.ToolKindToolSearch,
+				Execution: call.Execution,
+				Arguments: string(call.Arguments),
+			}))
+
+		case InputItemTypeToolSearchOutput:
+			if item.InputToolSearchOutput == nil {
+				continue
+			}
+
+			flushCalls()
+
+			output := item.InputToolSearchOutput
+
+			pendingResults = append(pendingResults, provider.ToolResultContent(provider.ToolResult{
+				ID:        output.CallID,
+				Kind:      provider.ToolKindToolSearch,
+				Execution: output.Execution,
+				Payload:   []byte(output.Tools),
+			}))
 		}
 	}
 
@@ -363,6 +395,7 @@ func toTools(tools []Tool) []provider.Tool {
 				Name:        t.Name,
 				Description: t.Description,
 				Strict:      t.Strict,
+				Deferred:    t.DeferLoading,
 				Parameters:  tool.NormalizeSchema(t.Parameters),
 			})
 
@@ -384,6 +417,7 @@ func toTools(tools []Tool) []provider.Tool {
 				Name:        t.Name,
 				Description: t.Description,
 				Kind:        kind,
+				Deferred:    t.DeferLoading,
 			}
 			if kind == provider.ToolKindCustom && t.Format != nil {
 				tool.Format = &provider.ToolFormat{
@@ -405,6 +439,14 @@ func toTools(tools []Tool) []provider.Tool {
 				},
 			})
 
+		case ToolTypeToolSearch:
+			result = append(result, provider.Tool{
+				Kind:        provider.ToolKindToolSearch,
+				Description: t.Description,
+				Execution:   t.Execution,
+				Parameters:  tool.NormalizeSchema(t.Parameters),
+			})
+
 		case ToolTypeNamespace:
 			if t.Name == "" {
 				continue
@@ -416,21 +458,25 @@ func toTools(tools []Tool) []provider.Tool {
 						continue
 					}
 					result = append(result, provider.Tool{
-						Name:        inner.Name,
-						Description: inner.Description,
-						Namespace:   t.Name,
-						Strict:      inner.Strict,
-						Parameters:  tool.NormalizeSchema(inner.Parameters),
+						Name:                 inner.Name,
+						Description:          inner.Description,
+						Namespace:            t.Name,
+						NamespaceDescription: t.Description,
+						Strict:               inner.Strict,
+						Deferred:             inner.DeferLoading,
+						Parameters:           tool.NormalizeSchema(inner.Parameters),
 					})
 				case ToolTypeCustom:
 					if inner.Name == "" {
 						continue
 					}
 					custom := provider.Tool{
-						Name:        inner.Name,
-						Description: inner.Description,
-						Kind:        provider.ToolKindCustom,
-						Namespace:   t.Name,
+						Name:                 inner.Name,
+						Description:          inner.Description,
+						Kind:                 provider.ToolKindCustom,
+						Namespace:            t.Name,
+						NamespaceDescription: t.Description,
+						Deferred:             inner.DeferLoading,
 					}
 					if inner.Format != nil {
 						custom.Format = &provider.ToolFormat{
@@ -469,6 +515,10 @@ func outputKind(name string, tools []Tool) provider.ToolKind {
 		case ToolTypeComputer:
 			if name == "computer" {
 				return provider.ToolKindComputer
+			}
+		case ToolTypeToolSearch:
+			if name == "tool_search" {
+				return provider.ToolKindToolSearch
 			}
 		case ToolTypeFunction:
 			if t.Name == name {
@@ -586,6 +636,20 @@ func toolCallToComputerCall(call provider.ToolCall, status string) *ComputerCall
 		item.Actions = actions
 	}
 
+	return item
+}
+
+func toolCallToToolSearchCall(call provider.ToolCall, status string) *ToolSearchCallItem {
+	item := &ToolSearchCallItem{
+		ID:        "tsc_" + call.ID,
+		Type:      "tool_search_call",
+		CallID:    call.ID,
+		Status:    status,
+		Execution: call.Execution,
+	}
+	if call.Arguments != "" {
+		item.Arguments = json.RawMessage(call.Arguments)
+	}
 	return item
 }
 

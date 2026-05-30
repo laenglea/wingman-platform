@@ -201,6 +201,18 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 						return
 					}
 
+				case responses.ResponseToolSearchCall:
+					args, _ := json.Marshal(item.Arguments)
+					if !emit(provider.ToolCallContent(provider.ToolCall{
+						ID:        item.CallID,
+						Kind:      provider.ToolKindToolSearch,
+						Name:      "tool_search",
+						Execution: string(item.Execution),
+						Arguments: string(args),
+					}), "") {
+						return
+					}
+
 				case responses.ResponseReasoningItem:
 					// Capture encrypted_content for conversation continuity
 					if item.EncryptedContent != "" {
@@ -476,14 +488,36 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 				}
 
 				if c.ToolResult != nil {
-					if c.ToolResult.Kind == provider.ToolKindCustom {
+					switch c.ToolResult.Kind {
+					case provider.ToolKindCustom:
 						result = append(result, responses.ResponseInputItemUnionParam{
 							OfCustomToolCallOutput: &responses.ResponseCustomToolCallOutputParam{
 								CallID: c.ToolResult.ID,
 								Output: customToolResultOutputUnion(c.ToolResult),
 							},
 						})
-					} else {
+
+					case provider.ToolKindToolSearch:
+						tso := &responses.ResponseToolSearchOutputItemParam{
+							Status: responses.ResponseToolSearchOutputItemParamStatusCompleted,
+						}
+						if c.ToolResult.ID != "" {
+							tso.CallID = openai.String(c.ToolResult.ID)
+						}
+						if c.ToolResult.Execution != "" {
+							tso.Execution = responses.ResponseToolSearchOutputItemParamExecution(c.ToolResult.Execution)
+						}
+						if len(c.ToolResult.Payload) > 0 {
+							var raw []responses.ToolUnionParam
+							if err := json.Unmarshal(c.ToolResult.Payload, &raw); err == nil {
+								tso.Tools = raw
+							}
+						}
+						result = append(result, responses.ResponseInputItemUnionParam{
+							OfToolSearchOutput: tso,
+						})
+
+					default:
 						result = append(result, responses.ResponseInputItemUnionParam{
 							OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
 								CallID: c.ToolResult.ID,
@@ -564,7 +598,8 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 				}
 
 				if c.ToolCall != nil {
-					if c.ToolCall.Kind == provider.ToolKindCustom {
+					switch c.ToolCall.Kind {
+					case provider.ToolKindCustom:
 						calls = append(calls, responses.ResponseInputItemUnionParam{
 							OfCustomToolCall: &responses.ResponseCustomToolCallParam{
 								CallID: c.ToolCall.ID,
@@ -572,7 +607,30 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 								Input:  c.ToolCall.Arguments,
 							},
 						})
-					} else {
+
+					case provider.ToolKindToolSearch:
+						ts := &responses.ResponseInputItemToolSearchCallParam{
+							Status: "completed",
+						}
+						if c.ToolCall.ID != "" {
+							ts.CallID = openai.String(c.ToolCall.ID)
+						}
+						if c.ToolCall.Execution != "" {
+							ts.Execution = c.ToolCall.Execution
+						}
+						if c.ToolCall.Arguments != "" {
+							var args any
+							if err := json.Unmarshal([]byte(c.ToolCall.Arguments), &args); err == nil {
+								ts.Arguments = args
+							} else {
+								ts.Arguments = c.ToolCall.Arguments
+							}
+						}
+						calls = append(calls, responses.ResponseInputItemUnionParam{
+							OfToolSearchCall: ts,
+						})
+
+					default:
 						fc := &responses.ResponseFunctionToolCallParam{
 							CallID:    c.ToolCall.ID,
 							Name:      c.ToolCall.Name,
@@ -740,6 +798,23 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 			continue
 		}
 
+		if t.Kind == provider.ToolKindToolSearch {
+			search := &responses.ToolSearchToolParam{}
+			if t.Description != "" {
+				search.Description = openai.String(t.Description)
+			}
+			if t.Execution != "" {
+				search.Execution = responses.ToolSearchToolExecution(t.Execution)
+			}
+			if len(t.Parameters) > 0 {
+				search.Parameters = t.Parameters
+			}
+			result = append(result, responses.ToolUnionParam{
+				OfToolSearch: search,
+			})
+			continue
+		}
+
 		if t.Name == "" {
 			continue
 		}
@@ -755,16 +830,24 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 			if t.Strict != nil {
 				inner.Strict = openai.Bool(*t.Strict)
 			}
+			if t.Deferred != nil && *t.Deferred {
+				inner.DeferLoading = openai.Bool(true)
+			}
 
 			if idx, ok := namespaceIndex[t.Namespace]; ok {
-				result[idx].OfNamespace.Tools = append(result[idx].OfNamespace.Tools, responses.NamespaceToolToolUnionParam{
+				existing := result[idx].OfNamespace
+				existing.Tools = append(existing.Tools, responses.NamespaceToolToolUnionParam{
 					OfFunction: &inner,
 				})
+				if existing.Description == "" && t.NamespaceDescription != "" {
+					existing.Description = t.NamespaceDescription
+				}
 				continue
 			}
 
 			ns := &responses.NamespaceToolParam{
-				Name: t.Namespace,
+				Name:        t.Namespace,
+				Description: t.NamespaceDescription,
 				Tools: []responses.NamespaceToolToolUnionParam{
 					{OfFunction: &inner},
 				},
@@ -789,6 +872,10 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 				custom.Format = shared.CustomToolInputFormatParamOfGrammar(t.Format.Definition, t.Format.Syntax)
 			}
 
+			if t.Deferred != nil && *t.Deferred {
+				custom.DeferLoading = openai.Bool(true)
+			}
+
 			result = append(result, responses.ToolUnionParam{
 				OfCustom: custom,
 			})
@@ -807,6 +894,10 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 
 		if t.Strict != nil {
 			function.Strict = openai.Bool(*t.Strict)
+		}
+
+		if t.Deferred != nil && *t.Deferred {
+			function.DeferLoading = openai.Bool(true)
 		}
 
 		result = append(result, responses.ToolUnionParam{
