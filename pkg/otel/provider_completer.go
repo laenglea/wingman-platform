@@ -8,7 +8,9 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/semconv/v1.40.0/genaiconv"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
+	"go.opentelemetry.io/otel/semconv/v1.41.0/genaiconv"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Completer interface {
@@ -22,8 +24,10 @@ type observableCompleter struct {
 
 	completer provider.Completer
 
-	tokenUsageMetric        genaiconv.ClientTokenUsage
-	operationDurationMetric genaiconv.ClientOperationDuration
+	tokenUsageMetric           genaiconv.ClientTokenUsage
+	operationDurationMetric    genaiconv.ClientOperationDuration
+	timeToFirstChunkMetric     genaiconv.ClientOperationTimeToFirstChunk
+	timePerOutputChunkMetric   genaiconv.ClientOperationTimePerOutputChunk
 }
 
 func NewCompleter(provider, model string, p provider.Completer) Completer {
@@ -31,6 +35,8 @@ func NewCompleter(provider, model string, p provider.Completer) Completer {
 
 	tokenUsageMetric, _ := genaiconv.NewClientTokenUsage(meter)
 	operationDurationMetric, _ := genaiconv.NewClientOperationDuration(meter)
+	timeToFirstChunkMetric, _ := genaiconv.NewClientOperationTimeToFirstChunk(meter)
+	timePerOutputChunkMetric, _ := genaiconv.NewClientOperationTimePerOutputChunk(meter)
 
 	return &observableCompleter{
 		completer: p,
@@ -38,8 +44,10 @@ func NewCompleter(provider, model string, p provider.Completer) Completer {
 		model:    model,
 		provider: provider,
 
-		tokenUsageMetric:        tokenUsageMetric,
-		operationDurationMetric: operationDurationMetric,
+		tokenUsageMetric:         tokenUsageMetric,
+		operationDurationMetric:  operationDurationMetric,
+		timeToFirstChunkMetric:   timeToFirstChunkMetric,
+		timePerOutputChunkMetric: timePerOutputChunkMetric,
 	}
 }
 
@@ -48,93 +56,131 @@ func (p *observableCompleter) otelSetup() {
 
 func (p *observableCompleter) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	return func(yield func(*provider.Completion, error) bool) {
-		ctx, span := otel.Tracer(instrumentationName).Start(ctx, "chat "+p.model)
+		ctx, span := otel.Tracer(instrumentationName).Start(ctx, GenAISpanName(genaiconv.OperationNameChat, p.model), trace.WithSpanKind(trace.SpanKindClient))
 		defer span.End()
 
+		var tools []provider.Tool
+		if options != nil {
+			tools = options.Tools
+		}
+
+		if span.IsRecording() {
+			span.SetAttributes(KeyValues(
+				RequestAttrs(semconv.GenAIOperationNameChat, p.provider, p.model),
+				[]KeyValue{semconv.GenAIRequestStream(true)},
+				RequestOptionAttrs(options),
+				EndUserAttrs(ctx),
+				SystemInstructionsAttrs(messages),
+				PromptAttrs(messages),
+				ToolDefinitionsAttrs(tools),
+			)...)
+		}
+
 		timestamp := time.Now()
+		providerName := genaiconv.ProviderNameAttr(p.provider)
+
+		var firstChunkAt time.Time
+		var prevChunkAt time.Time
 
 		var lastResult *provider.Completion
+		var lastErr error
+
+		// Defer metric recording so consumer cancellation (yield returning
+		// false) still records duration + token usage instead of silently
+		// dropping the observation.
+		defer func() {
+			duration := time.Since(timestamp).Seconds()
+			providerModel := p.model
+
+			if lastResult != nil {
+				if lastResult.Model != "" {
+					providerModel = lastResult.Model
+				}
+
+				if span.IsRecording() {
+					responseAttrs := []KeyValue{
+						semconv.GenAIResponseModel(providerModel),
+						semconv.GenAIResponseFinishReasons(finishReason(lastResult)),
+					}
+					if lastResult.ID != "" {
+						responseAttrs = append(responseAttrs, semconv.GenAIResponseID(lastResult.ID))
+					}
+
+					span.SetAttributes(KeyValues(
+						responseAttrs,
+						UsageAttrs(lastResult.Usage),
+						CompletionAttrs(lastResult),
+					)...)
+				}
+			}
+
+			// Metrics: model attrs only — keep end-user attrs out to avoid
+			// histogram cardinality explosions (spec puts user info on
+			// spans/logs, not metrics).
+			modelAttrs := []KeyValue{
+				semconv.GenAIRequestModel(p.model),
+				semconv.GenAIResponseModel(providerModel),
+			}
+
+			durationAttrs := modelAttrs
+			if lastErr != nil {
+				durationAttrs = append(durationAttrs, p.operationDurationMetric.AttrErrorType(ErrorTypeAttr(lastErr)))
+			}
+
+			p.operationDurationMetric.Record(ctx, duration,
+				genaiconv.OperationNameChat, providerName, durationAttrs...)
+
+			if !firstChunkAt.IsZero() {
+				ttfc := firstChunkAt.Sub(timestamp).Seconds()
+				if span.IsRecording() {
+					span.SetAttributes(semconv.GenAIResponseTimeToFirstChunk(ttfc))
+				}
+				p.timeToFirstChunkMetric.Record(ctx, ttfc,
+					genaiconv.OperationNameChat, providerName, modelAttrs...)
+			}
+
+			if lastResult == nil || lastResult.Usage == nil {
+				return
+			}
+
+			tokenAttrs := modelAttrs
+
+			if lastResult.Usage.InputTokens > 0 {
+				p.tokenUsageMetric.Record(ctx, int64(lastResult.Usage.InputTokens),
+					genaiconv.OperationNameChat, providerName, genaiconv.TokenTypeInput, tokenAttrs...)
+			}
+			if lastResult.Usage.OutputTokens > 0 {
+				p.tokenUsageMetric.Record(ctx, int64(lastResult.Usage.OutputTokens),
+					genaiconv.OperationNameChat, providerName, genaiconv.TokenTypeOutput, tokenAttrs...)
+			}
+		}()
+
+		modelAttrs := []KeyValue{
+			semconv.GenAIRequestModel(p.model),
+			semconv.GenAIResponseModel(p.model),
+		}
 
 		for completion, err := range p.completer.Complete(ctx, messages, options) {
 			if err != nil {
+				lastErr = err
+				RecordError(span, err)
 				yield(nil, err)
 				return
 			}
+
+			now := time.Now()
+			if firstChunkAt.IsZero() {
+				firstChunkAt = now
+			} else {
+				p.timePerOutputChunkMetric.Record(ctx, now.Sub(prevChunkAt).Seconds(),
+					genaiconv.OperationNameChat, providerName, modelAttrs...)
+			}
+			prevChunkAt = now
 
 			lastResult = completion
 
 			if !yield(completion, nil) {
 				return
-			}
-		}
-
-		if lastResult != nil {
-			duration := time.Since(timestamp).Seconds()
-
-			providerName := genaiconv.ProviderNameAttr(p.provider)
-			providerModel := p.model
-
-			if lastResult.Model != "" {
-				providerModel = lastResult.Model
-			}
-
-			p.operationDurationMetric.Record(ctx, duration,
-				genaiconv.OperationNameChat,
-				providerName,
-				KeyValues([]KeyValue{
-					p.operationDurationMetric.AttrRequestModel(p.model),
-					p.operationDurationMetric.AttrResponseModel(providerModel),
-				}, EndUserAttrs(ctx))...,
-			)
-
-			if lastResult.Usage != nil {
-				if lastResult.Usage.InputTokens > 0 {
-					p.tokenUsageMetric.Record(ctx, int64(lastResult.Usage.InputTokens),
-						genaiconv.OperationNameChat,
-						providerName,
-						genaiconv.TokenTypeInput,
-						KeyValues([]KeyValue{
-							p.tokenUsageMetric.AttrRequestModel(p.model),
-							p.tokenUsageMetric.AttrResponseModel(providerModel),
-						}, EndUserAttrs(ctx))...,
-					)
-				}
-
-				if lastResult.Usage.OutputTokens > 0 {
-					p.tokenUsageMetric.Record(ctx, int64(lastResult.Usage.OutputTokens),
-						genaiconv.OperationNameChat,
-						providerName,
-						genaiconv.TokenTypeOutput,
-						KeyValues([]KeyValue{
-							p.tokenUsageMetric.AttrRequestModel(p.model),
-							p.tokenUsageMetric.AttrResponseModel(providerModel),
-						}, EndUserAttrs(ctx))...,
-					)
-				}
-
-				if lastResult.Usage.CacheCreationInputTokens > 0 {
-					p.tokenUsageMetric.Record(ctx, int64(lastResult.Usage.CacheCreationInputTokens),
-						genaiconv.OperationNameChat,
-						providerName,
-						TokenTypeCacheCreation,
-						KeyValues([]KeyValue{
-							p.tokenUsageMetric.AttrRequestModel(p.model),
-							p.tokenUsageMetric.AttrResponseModel(providerModel),
-						}, EndUserAttrs(ctx))...,
-					)
-				}
-
-				if lastResult.Usage.CacheReadInputTokens > 0 {
-					p.tokenUsageMetric.Record(ctx, int64(lastResult.Usage.CacheReadInputTokens),
-						genaiconv.OperationNameChat,
-						providerName,
-						TokenTypeCacheRead,
-						KeyValues([]KeyValue{
-							p.tokenUsageMetric.AttrRequestModel(p.model),
-							p.tokenUsageMetric.AttrResponseModel(providerModel),
-						}, EndUserAttrs(ctx))...,
-					)
-				}
 			}
 		}
 	}

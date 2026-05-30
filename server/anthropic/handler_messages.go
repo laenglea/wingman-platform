@@ -50,9 +50,6 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 	options := &provider.CompleteOptions{
 		Tools: tools,
 
-		TextEditorTool:  toTextEditorToolOptions(req.Tools),
-		ComputerUseTool: toComputerUseToolOptions(req.Tools),
-
 		Stop:        req.StopSequences,
 		Temperature: req.Temperature,
 	}
@@ -96,9 +93,9 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 
 		options.Schema = &provider.Schema{
-			Name:   name,
-			Schema: req.OutputFormat.Schema,
-			Strict: req.OutputFormat.Strict,
+			Name:       name,
+			Strict:     req.OutputFormat.Strict,
+			Properties: req.OutputFormat.Schema,
 		}
 	}
 

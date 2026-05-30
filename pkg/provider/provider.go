@@ -15,13 +15,43 @@ type Tool struct {
 	Name        string
 	Description string
 
-	Strict *bool
+	Kind ToolKind
 
+	Strict     *bool
 	Parameters map[string]any
+
+	Display *Display
+	Format  *ToolFormat
+}
+
+type ToolFormat struct {
+	Type       string
+	Syntax     string
+	Definition string
+}
+
+type ToolKind string
+
+const (
+	ToolKindFunction   ToolKind = ""
+	ToolKindCustom     ToolKind = "custom"
+	ToolKindTextEditor ToolKind = "text_editor"
+	ToolKindComputer   ToolKind = "computer"
+)
+
+type Display struct {
+	Width  int
+	Height int
+
+	// Environment is "browser" / "ubuntu" / "windows" / "mac" for the OpenAI
+	// Responses computer tool. Anthropic's computer tool ignores it.
+	Environment string
 }
 
 type ToolResult struct {
 	ID string
+
+	Kind ToolKind
 
 	Parts []Part
 }
@@ -40,7 +70,7 @@ type Schema struct {
 
 	Strict *bool
 
-	Schema map[string]any // TODO: Rename to Properties
+	Properties map[string]any
 }
 
 type Usage struct {
