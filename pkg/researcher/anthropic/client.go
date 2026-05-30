@@ -38,7 +38,7 @@ func (c *Client) Research(ctx context.Context, instructions string, options *res
 	model := c.model
 
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		model = "claude-sonnet-4-6"
 	}
 
 	body := anthropic.MessageNewParams{

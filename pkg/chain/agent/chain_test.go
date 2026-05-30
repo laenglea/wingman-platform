@@ -998,3 +998,298 @@ func TestComplete_Reasoning(t *testing.T) {
 		require.Equal(t, "abc123signature", completions[0].Message.Content[0].Reasoning.Signature)
 	})
 }
+
+// =============================================================================
+// TestComplete_StreamingToolFilter - Argument-delta chunks for agent tools
+// must be filtered even when they arrive without ID or Name (e.g. Bedrock,
+// OpenAI ChatCompletions streaming).
+// =============================================================================
+
+func TestComplete_StreamingToolFilter(t *testing.T) {
+	t.Run("args-delta chunks with ID-only are filtered", func(t *testing.T) {
+		// Mirrors OpenAI Responses / Anthropic streaming: first chunk has ID+Name,
+		// subsequent chunks have ID + Arguments delta only.
+		completer := &mockCompleter{
+			responses: [][]provider.Completion{
+				{
+					{Message: &provider.Message{
+						Role: provider.MessageRoleAssistant,
+						Content: []provider.Content{
+							{ToolCall: &provider.ToolCall{ID: "call-1", Name: "agent_tool"}},
+						},
+					}},
+					{Message: &provider.Message{
+						Role: provider.MessageRoleAssistant,
+						Content: []provider.Content{
+							{ToolCall: &provider.ToolCall{ID: "call-1", Arguments: `{"x":`}},
+						},
+					}},
+					{Message: &provider.Message{
+						Role: provider.MessageRoleAssistant,
+						Content: []provider.Content{
+							{ToolCall: &provider.ToolCall{ID: "call-1", Arguments: `1}`}},
+						},
+					}},
+				},
+				{
+					{Message: &provider.Message{
+						Role:    provider.MessageRoleAssistant,
+						Content: []provider.Content{{Text: "done"}},
+					}},
+				},
+			},
+		}
+
+		toolProvider := &mockToolProvider{
+			tools: []provider.Tool{{Name: "agent_tool", Description: "Agent"}},
+		}
+
+		chain, err := New("test-model",
+			WithCompleter(completer),
+			WithTools(toolProvider),
+		)
+		require.NoError(t, err)
+
+		completions, err := collectCompletions(chain.Complete(context.Background(), nil, nil))
+		require.NoError(t, err)
+
+		// None of the streamed chunks should carry a ToolCall — all belong to an agent tool.
+		for i, c := range completions {
+			if c.Message == nil {
+				continue
+			}
+			for _, cnt := range c.Message.Content {
+				require.Nil(t, cnt.ToolCall, "chunk %d leaked an agent tool-call content", i)
+			}
+		}
+	})
+
+	t.Run("args-delta chunks with no ID and no Name are filtered", func(t *testing.T) {
+		// Mirrors Bedrock / OpenAI ChatCompletions streaming: first chunk has
+		// ID+Name, subsequent chunks have only Arguments — no ID, no Name.
+		completer := &mockCompleter{
+			responses: [][]provider.Completion{
+				{
+					{Message: &provider.Message{
+						Role: provider.MessageRoleAssistant,
+						Content: []provider.Content{
+							{ToolCall: &provider.ToolCall{ID: "call-1", Name: "agent_tool"}},
+						},
+					}},
+					{Message: &provider.Message{
+						Role: provider.MessageRoleAssistant,
+						Content: []provider.Content{
+							{ToolCall: &provider.ToolCall{Arguments: `{"x":`}},
+						},
+					}},
+					{Message: &provider.Message{
+						Role: provider.MessageRoleAssistant,
+						Content: []provider.Content{
+							{ToolCall: &provider.ToolCall{Arguments: `1}`}},
+						},
+					}},
+				},
+				{
+					{Message: &provider.Message{
+						Role:    provider.MessageRoleAssistant,
+						Content: []provider.Content{{Text: "done"}},
+					}},
+				},
+			},
+		}
+
+		toolProvider := &mockToolProvider{
+			tools: []provider.Tool{{Name: "agent_tool", Description: "Agent"}},
+		}
+
+		chain, err := New("test-model",
+			WithCompleter(completer),
+			WithTools(toolProvider),
+		)
+		require.NoError(t, err)
+
+		completions, err := collectCompletions(chain.Complete(context.Background(), nil, nil))
+		require.NoError(t, err)
+
+		for i, c := range completions {
+			if c.Message == nil {
+				continue
+			}
+			for _, cnt := range c.Message.Content {
+				require.Nil(t, cnt.ToolCall, "chunk %d leaked an agent tool-call content (no-ID delta)", i)
+			}
+		}
+	})
+}
+
+// =============================================================================
+// TestComplete_MixedToolTurn - Agent + caller tool calls in one assistant
+// message must not silently deadlock the loop.
+// =============================================================================
+
+func TestComplete_MixedToolTurn(t *testing.T) {
+	t.Run("mixed agent and caller tool calls error out", func(t *testing.T) {
+		completer := &mockCompleter{
+			responses: [][]provider.Completion{
+				{
+					{Message: &provider.Message{
+						Role: provider.MessageRoleAssistant,
+						Content: []provider.Content{
+							{ToolCall: &provider.ToolCall{ID: "a", Name: "agent_tool", Arguments: `{}`}},
+							{ToolCall: &provider.ToolCall{ID: "u", Name: "caller_tool", Arguments: `{}`}},
+						},
+					}},
+				},
+			},
+		}
+
+		toolProvider := &mockToolProvider{
+			tools: []provider.Tool{{Name: "agent_tool", Description: "Agent"}},
+		}
+
+		chain, err := New("test-model",
+			WithCompleter(completer),
+			WithTools(toolProvider),
+		)
+		require.NoError(t, err)
+
+		opts := &provider.CompleteOptions{
+			Tools: []provider.Tool{{Name: "caller_tool", Description: "Caller"}},
+		}
+
+		_, err = collectCompletions(chain.Complete(context.Background(), nil, opts))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "tool calls in one turn")
+
+		// Chain must not have looped or executed the agent tool.
+		require.Equal(t, 1, completer.callCount)
+		require.Empty(t, toolProvider.executeCalls)
+	})
+
+	t.Run("caller-only tool call yields without looping", func(t *testing.T) {
+		completer := &mockCompleter{
+			responses: [][]provider.Completion{
+				{
+					{Message: &provider.Message{
+						Role: provider.MessageRoleAssistant,
+						Content: []provider.Content{
+							{ToolCall: &provider.ToolCall{ID: "u", Name: "caller_tool", Arguments: `{}`}},
+						},
+					}},
+				},
+			},
+		}
+
+		// Register an agent tool so agentTools is non-empty; the model just
+		// happens to call a caller-owned tool this turn.
+		toolProvider := &mockToolProvider{
+			tools: []provider.Tool{{Name: "agent_tool", Description: "Agent"}},
+		}
+
+		chain, err := New("test-model",
+			WithCompleter(completer),
+			WithTools(toolProvider),
+		)
+		require.NoError(t, err)
+
+		opts := &provider.CompleteOptions{
+			Tools: []provider.Tool{{Name: "caller_tool", Description: "Caller"}},
+		}
+
+		completions, err := collectCompletions(chain.Complete(context.Background(), nil, opts))
+		require.NoError(t, err)
+
+		// Caller tool call must reach the stream.
+		require.Len(t, completions, 1)
+		require.NotNil(t, completions[0].Message.Content[0].ToolCall)
+		require.Equal(t, "caller_tool", completions[0].Message.Content[0].ToolCall.Name)
+
+		// Chain must yield control, not loop.
+		require.Equal(t, 1, completer.callCount)
+		require.Empty(t, toolProvider.executeCalls)
+	})
+
+	t.Run("disables parallel tool calls when agent tools are registered", func(t *testing.T) {
+		completer := &mockCompleter{
+			responses: [][]provider.Completion{
+				{{Message: &provider.Message{Role: provider.MessageRoleAssistant}}},
+			},
+		}
+
+		toolProvider := &mockToolProvider{
+			tools: []provider.Tool{{Name: "agent_tool", Description: "Agent"}},
+		}
+
+		chain, err := New("test-model",
+			WithCompleter(completer),
+			WithTools(toolProvider),
+		)
+		require.NoError(t, err)
+
+		_, err = collectCompletions(chain.Complete(context.Background(), nil, nil))
+		require.NoError(t, err)
+
+		require.NotNil(t, completer.capturedOptions[0].ToolOptions)
+		require.True(t, completer.capturedOptions[0].ToolOptions.DisableParallelToolCalls)
+	})
+
+	t.Run("caller's CompleteOptions struct is not mutated", func(t *testing.T) {
+		completer := &mockCompleter{
+			responses: [][]provider.Completion{
+				{{Message: &provider.Message{Role: provider.MessageRoleAssistant}}},
+			},
+		}
+
+		chain, err := New("test-model",
+			WithCompleter(completer),
+			WithEffort(provider.EffortHigh),
+			WithVerbosity(provider.VerbosityMedium),
+			WithTemperature(0.7),
+		)
+		require.NoError(t, err)
+
+		// Caller passes a zero-valued options struct; chain defaults must NOT be
+		// written back into it.
+		opts := &provider.CompleteOptions{}
+
+		_, err = collectCompletions(chain.Complete(context.Background(), nil, opts))
+		require.NoError(t, err)
+
+		require.Nil(t, opts.OutputOptions, "chain mutated caller's OutputOptions")
+		require.Nil(t, opts.ReasoningOptions, "chain mutated caller's ReasoningOptions")
+		require.Nil(t, opts.Temperature, "chain mutated caller's Temperature")
+
+		// But the downstream completer must still see the chain's defaults.
+		downstream := completer.capturedOptions[0]
+		require.NotNil(t, downstream.OutputOptions)
+		require.Equal(t, provider.VerbosityMedium, downstream.OutputOptions.Verbosity)
+		require.NotNil(t, downstream.ReasoningOptions)
+		require.Equal(t, provider.EffortHigh, downstream.ReasoningOptions.Effort)
+		require.NotNil(t, downstream.Temperature)
+		require.Equal(t, float32(0.7), *downstream.Temperature)
+	})
+
+	t.Run("no agent tools: caller's ToolOptions pass through unchanged", func(t *testing.T) {
+		completer := &mockCompleter{
+			responses: [][]provider.Completion{
+				{{Message: &provider.Message{Role: provider.MessageRoleAssistant}}},
+			},
+		}
+
+		chain, err := New("test-model", WithCompleter(completer))
+		require.NoError(t, err)
+
+		opts := &provider.CompleteOptions{
+			ToolOptions: &provider.ToolOptions{
+				Choice:                   provider.ToolChoiceAuto,
+				DisableParallelToolCalls: false,
+			},
+		}
+
+		_, err = collectCompletions(chain.Complete(context.Background(), nil, opts))
+		require.NoError(t, err)
+
+		require.NotNil(t, completer.capturedOptions[0].ToolOptions)
+		require.False(t, completer.capturedOptions[0].ToolOptions.DisableParallelToolCalls)
+	})
+}

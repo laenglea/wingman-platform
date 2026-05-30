@@ -7,7 +7,9 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/semconv/v1.40.0/genaiconv"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
+	"go.opentelemetry.io/otel/semconv/v1.41.0/genaiconv"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Embedder interface {
@@ -46,42 +48,56 @@ func (p *observableEmbedder) otelSetup() {
 }
 
 func (p *observableEmbedder) Embed(ctx context.Context, texts []string, options *provider.EmbedOptions) (*provider.Embedding, error) {
-	ctx, span := otel.Tracer(instrumentationName).Start(ctx, "embeddings "+p.model)
+	ctx, span := otel.Tracer(instrumentationName).Start(ctx, GenAISpanName(genaiconv.OperationNameEmbeddings, p.model), trace.WithSpanKind(trace.SpanKindClient))
 	defer span.End()
+
+	if span.IsRecording() {
+		attrs := KeyValues(
+			RequestAttrs(semconv.GenAIOperationNameEmbeddings, p.provider, p.model),
+			EndUserAttrs(ctx),
+		)
+		if options != nil && options.Dimensions != nil {
+			attrs = append(attrs, semconv.GenAIEmbeddingsDimensionCount(*options.Dimensions))
+		}
+		span.SetAttributes(attrs...)
+	}
 
 	timestamp := time.Now()
 
 	result, err := p.embedder.Embed(ctx, texts, options)
 
+	if err != nil {
+		RecordError(span, err)
+	}
+
+	duration := time.Since(timestamp).Seconds()
+	providerName := genaiconv.ProviderNameAttr(p.provider)
+	providerModel := p.model
+
 	if result != nil {
-		duration := time.Since(timestamp).Seconds()
-
-		providerName := genaiconv.ProviderNameAttr(p.provider)
-		providerModel := p.model
-
 		if result.Model != "" {
 			providerModel = result.Model
 		}
 
-		p.operationDurationMetric.Record(ctx, duration,
-			genaiconv.OperationNameEmbeddings,
-			providerName,
-			KeyValues([]KeyValue{
-				p.operationDurationMetric.AttrRequestModel(p.model),
-				p.operationDurationMetric.AttrResponseModel(providerModel),
-			}, EndUserAttrs(ctx))...,
-		)
+		if span.IsRecording() {
+			span.SetAttributes(KeyValues(
+				[]KeyValue{semconv.GenAIResponseModel(providerModel)},
+				UsageAttrs(result.Usage),
+			)...)
+		}
 
 		if result.Usage != nil {
+			tokenAttrs := []KeyValue{
+				semconv.GenAIRequestModel(p.model),
+				semconv.GenAIResponseModel(providerModel),
+			}
+
 			if result.Usage.InputTokens > 0 {
 				p.tokenUsageMetric.Record(ctx, int64(result.Usage.InputTokens),
 					genaiconv.OperationNameEmbeddings,
 					providerName,
 					genaiconv.TokenTypeInput,
-					KeyValues([]KeyValue{
-						p.tokenUsageMetric.AttrRequestModel(p.model),
-						p.tokenUsageMetric.AttrResponseModel(providerModel),
-					}, EndUserAttrs(ctx))...,
+					tokenAttrs...,
 				)
 			}
 
@@ -90,14 +106,26 @@ func (p *observableEmbedder) Embed(ctx context.Context, texts []string, options 
 					genaiconv.OperationNameEmbeddings,
 					providerName,
 					genaiconv.TokenTypeOutput,
-					KeyValues([]KeyValue{
-						p.tokenUsageMetric.AttrRequestModel(p.model),
-						p.tokenUsageMetric.AttrResponseModel(providerModel),
-					}, EndUserAttrs(ctx))...,
+					tokenAttrs...,
 				)
 			}
 		}
 	}
+
+	durationAttrs := []KeyValue{
+		semconv.GenAIRequestModel(p.model),
+		semconv.GenAIResponseModel(providerModel),
+	}
+
+	if err != nil {
+		durationAttrs = append(durationAttrs, p.operationDurationMetric.AttrErrorType(ErrorTypeAttr(err)))
+	}
+
+	p.operationDurationMetric.Record(ctx, duration,
+		genaiconv.OperationNameEmbeddings,
+		providerName,
+		durationAttrs...,
+	)
 
 	return result, err
 }

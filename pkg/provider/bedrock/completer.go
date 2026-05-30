@@ -111,19 +111,14 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			InferenceConfig: config,
 		}
 
-		if options.Schema != nil {
-			outputConfig, err := c.convertOutputConfig(options.Schema)
-
-			if err != nil {
-				yield(nil, convertError(err))
-				return
-			}
-
-			params.OutputConfig = outputConfig
-		}
-
-		if isAdaptiveThinkingModel(c.model) && options.ReasoningOptions != nil {
+		if !isLegacyModel(c.model) && options.ReasoningOptions != nil {
 			effort, enable := adaptiveEffort(options.ReasoningOptions.Effort)
+
+			// Schema mode forces a specific tool call, which is incompatible
+			// with extended thinking on Anthropic models.
+			if options.Schema != nil {
+				enable = false
+			}
 
 			if options.ToolOptions != nil && options.ToolOptions.Choice == provider.ToolChoiceAny {
 				enable = false
@@ -174,6 +169,12 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			case *types.ConverseStreamOutputMemberContentBlockStart:
 				switch b := v.Value.Start.(type) {
 				case *types.ContentBlockStartMemberToolUse:
+					// Schema mode surfaces the forced tool call as text via the
+					// argument deltas, so there is nothing to emit at block start.
+					if options.Schema != nil {
+						continue
+					}
+
 					delta := &provider.Completion{
 						ID:    id,
 						Model: c.model,
@@ -271,10 +272,17 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 							Content: []provider.Content{
 								provider.ToolCallContent(provider.ToolCall{
-									Arguments: *b.Value.Input,
+									Arguments: aws.ToString(b.Value.Input),
 								}),
 							},
 						},
+					}
+
+					// Schema mode: stream the tool arguments as text content.
+					if options.Schema != nil {
+						delta.Message.Content = []provider.Content{
+							provider.TextContent(aws.ToString(b.Value.Input)),
+						}
 					}
 
 					if !yield(delta, nil) {
@@ -449,36 +457,6 @@ func convertError(err error) error {
 	return err
 }
 
-func (c *Completer) convertOutputConfig(schema *provider.Schema) (*types.OutputConfig, error) {
-	s := schema.Schema
-	if s == nil {
-		s = map[string]any{"type": "object"}
-	}
-
-	schemaJSON, err := json.Marshal(s)
-	if err != nil {
-		return nil, err
-	}
-
-	schemaDef := types.JsonSchemaDefinition{
-		Name:   aws.String(schema.Name),
-		Schema: aws.String(string(schemaJSON)),
-	}
-
-	if schema.Description != "" {
-		schemaDef.Description = aws.String(schema.Description)
-	}
-
-	return &types.OutputConfig{
-		TextFormat: &types.OutputFormat{
-			Type: types.OutputFormatTypeJsonSchema,
-			Structure: &types.OutputFormatStructureMemberJsonSchema{
-				Value: schemaDef,
-			},
-		},
-	}, nil
-}
-
 func (c *Completer) convertConverseInput(input []provider.Message, options *provider.CompleteOptions) (*bedrockruntime.ConverseInput, error) {
 	messages, err := c.convertMessages(input)
 
@@ -495,6 +473,39 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 	}
 
 	config := c.convertToolConfig(options.Tools, toolOptions)
+
+	// Schema mode: expose the schema as a tool and force its use. Anthropic
+	// models reject native Converse structured output (output_config.format),
+	// so a forced tool call is the reliable way to get structured JSON.
+	if options.Schema != nil {
+		if config == nil {
+			config = &types.ToolConfiguration{}
+		}
+
+		tool := types.ToolSpecification{
+			Name: aws.String(options.Schema.Name),
+		}
+
+		if options.Schema.Description != "" {
+			tool.Description = aws.String(options.Schema.Description)
+		}
+
+		properties := options.Schema.Properties
+		if properties == nil {
+			properties = map[string]any{"type": "object"}
+		}
+
+		tool.InputSchema = &types.ToolInputSchemaMemberJson{
+			Value: document.NewLazyDocument(properties),
+		}
+
+		config.Tools = append(config.Tools, &types.ToolMemberToolSpec{Value: tool})
+		config.ToolChoice = &types.ToolChoiceMemberTool{
+			Value: types.SpecificToolChoice{
+				Name: aws.String(options.Schema.Name),
+			},
+		}
+	}
 
 	return &bedrockruntime.ConverseInput{
 		ModelId: aws.String(c.model),
@@ -717,6 +728,10 @@ func (c *Completer) convertToolConfig(tools []provider.Tool, options *provider.T
 	result := &types.ToolConfiguration{}
 
 	for _, t := range tools {
+		if t.Kind != provider.ToolKindFunction {
+			continue
+		}
+
 		tool := types.ToolSpecification{
 			Name: aws.String(t.Name),
 		}

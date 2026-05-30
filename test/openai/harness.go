@@ -74,7 +74,7 @@ func knownCapabilities(name string) ModelCapabilities {
 	switch name {
 	case "gpt-5.4-mini", "gpt-5.4":
 		return ModelCapabilities{Reasoning: true, Compaction: true, TextEditor: true}
-	case "claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-7":
+	case "claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8":
 		return ModelCapabilities{Reasoning: true}
 	}
 	return ModelCapabilities{Reasoning: true}

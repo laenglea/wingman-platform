@@ -93,7 +93,8 @@ func (a *CompletionAccumulator) Add(c Completion) {
 					}
 					if !found {
 						a.toolCalls = append(a.toolCalls, ToolCall{
-							ID: c.ToolCall.ID,
+							ID:   c.ToolCall.ID,
+							Kind: c.ToolCall.Kind,
 						})
 						a.contentOrder = append(a.contentOrder, accumulatedContentRef{kind: accumulatedContentToolCall, index: len(a.toolCalls) - 1})
 					}
@@ -122,8 +123,20 @@ func (a *CompletionAccumulator) Add(c Completion) {
 					continue
 				}
 
+				if c.ToolCall.Kind != "" {
+					a.toolCalls[toolCallIndex].Kind = c.ToolCall.Kind
+				}
+
 				if c.ToolCall.Name != "" {
 					a.toolCalls[toolCallIndex].Name = c.ToolCall.Name
+				}
+
+				if c.ToolCall.Namespace != "" {
+					a.toolCalls[toolCallIndex].Namespace = c.ToolCall.Namespace
+				}
+
+				if c.ToolCall.Execution != "" {
+					a.toolCalls[toolCallIndex].Execution = c.ToolCall.Execution
 				}
 
 				a.toolCalls[toolCallIndex].Arguments += c.ToolCall.Arguments
@@ -142,6 +155,9 @@ func (a *CompletionAccumulator) Add(c Completion) {
 		}
 		if c.Usage.OutputTokens > a.usage.OutputTokens {
 			a.usage.OutputTokens = c.Usage.OutputTokens
+		}
+		if c.Usage.ReasoningTokens > a.usage.ReasoningTokens {
+			a.usage.ReasoningTokens = c.Usage.ReasoningTokens
 		}
 		if c.Usage.CacheReadInputTokens > a.usage.CacheReadInputTokens {
 			a.usage.CacheReadInputTokens = c.Usage.CacheReadInputTokens

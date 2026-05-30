@@ -179,16 +179,14 @@ const (
 type ToolCall struct {
 	ID string
 
+	Kind ToolKind
+
 	Name      string
+	Namespace string
+
+	Execution string
+
 	Arguments string
-}
-
-type TextEditorOptions struct{}
-
-type ComputerOptions struct {
-	DisplayWidth  int
-	DisplayHeight int
-	Environment   string // e.g. "browser", "desktop"
 }
 
 type ToolChoice string
@@ -231,9 +229,6 @@ type CompleteOptions struct {
 	ReasoningOptions  *ReasoningOptions
 	CompactionOptions *CompactionOptions
 
-	TextEditorTool  *TextEditorOptions
-	ComputerUseTool *ComputerOptions
-
 	Schema *Schema
 }
 
@@ -252,8 +247,9 @@ type Completion struct {
 	Model  string
 	Status CompletionStatus
 
-	Usage   *Usage
 	Message *Message
+
+	Usage *Usage
 }
 
 type Effort string

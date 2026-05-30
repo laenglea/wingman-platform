@@ -94,8 +94,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				Description: options.Schema.Description,
 			}
 
-			if len(options.Schema.Schema) > 0 {
-				data, _ := json.Marshal(options.Schema.Schema)
+			if len(options.Schema.Properties) > 0 {
+				data, _ := json.Marshal(options.Schema.Properties)
 				req.Schema.Properties = string(data)
 			} else {
 				req.Schema.Properties = "{}"
@@ -140,6 +140,10 @@ func wireTools(tools []provider.Tool) []*Tool {
 	var result []*Tool
 
 	for _, tool := range tools {
+		if tool.Kind != provider.ToolKindFunction {
+			continue
+		}
+
 		result = append(result, wireTool(tool))
 	}
 

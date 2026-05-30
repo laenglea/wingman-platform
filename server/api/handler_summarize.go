@@ -30,7 +30,7 @@ func (h *Handler) handleSummarize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	options := &summarizer.SummarizerOptions{}
+	options := &summarizer.SummarizeOptions{}
 
 	summary, err := p.Summarize(r.Context(), text, options)
 

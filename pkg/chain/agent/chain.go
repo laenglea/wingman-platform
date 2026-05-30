@@ -88,24 +88,26 @@ func WithTemperature(temperature float32) Option {
 
 func (c *Chain) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	return func(yield func(*provider.Completion, error) bool) {
-		if options == nil {
-			options = new(provider.CompleteOptions)
+		// Work on a local copy so the caller's CompleteOptions is never mutated.
+		var opts provider.CompleteOptions
+		if options != nil {
+			opts = *options
 		}
 
-		if options.OutputOptions == nil && c.verbosity != "" {
-			options.OutputOptions = &provider.OutputOptions{
+		if opts.OutputOptions == nil && c.verbosity != "" {
+			opts.OutputOptions = &provider.OutputOptions{
 				Verbosity: c.verbosity,
 			}
 		}
 
-		if options.ReasoningOptions == nil && c.effort != "" {
-			options.ReasoningOptions = &provider.ReasoningOptions{
+		if opts.ReasoningOptions == nil && c.effort != "" {
+			opts.ReasoningOptions = &provider.ReasoningOptions{
 				Effort: c.effort,
 			}
 		}
 
-		if options.Temperature == nil {
-			options.Temperature = c.temperature
+		if opts.Temperature == nil {
+			opts.Temperature = c.temperature
 		}
 
 		if len(c.messages) > 0 {
@@ -117,24 +119,6 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 			}
 
 			messages = slices.Concat(values, messages)
-		}
-
-		var contextFiles []provider.File
-
-		for _, m := range messages {
-			var files []provider.File
-
-			for _, c := range m.Content {
-				if c.File != nil {
-					files = append(files, *c.File)
-				}
-			}
-
-			contextFiles = files
-		}
-
-		if len(contextFiles) > 0 {
-			ctx = tool.WithFiles(ctx, contextFiles)
 		}
 
 		input := slices.Clone(messages)
@@ -156,29 +140,30 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 			}
 		}
 
-		for _, t := range options.Tools {
+		for _, t := range opts.Tools {
 			inputTools[t.Name] = t
 		}
 
-		inputToolOptions := mergeToolOptions(options.ToolOptions, slices.Collect(maps.Keys(agentTools)))
+		inputToolOptions := mergeToolOptions(opts.ToolOptions, slices.Collect(maps.Keys(agentTools)))
 
 		inputOptions := &provider.CompleteOptions{
-			Stop:        options.Stop,
+			Stop:        opts.Stop,
 			Tools:       slices.Collect(maps.Values(inputTools)),
 			ToolOptions: inputToolOptions,
 
-			OutputOptions:    options.OutputOptions,
-			ReasoningOptions: options.ReasoningOptions,
+			OutputOptions:    opts.OutputOptions,
+			ReasoningOptions: opts.ReasoningOptions,
 
-			MaxTokens:   options.MaxTokens,
-			Temperature: options.Temperature,
+			MaxTokens:   opts.MaxTokens,
+			Temperature: opts.Temperature,
 
-			Schema: options.Schema,
+			Schema: opts.Schema,
 		}
 
 		accID := uuid.New().String()
 
 		toolNamesByID := map[string]string{}
+		var lastToolCallID string
 
 		for {
 			acc := provider.CompletionAccumulator{}
@@ -208,13 +193,22 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 							id := cnt.ToolCall.ID
 							name := cnt.ToolCall.Name
 
-							if id != "" && name != "" {
-								toolNamesByID[id] = name
-							} else if id != "" && name == "" {
+							// Streaming providers vary in what they put on argument-delta
+							// chunks: some include the ID, some include nothing. Track the
+							// last seen ID so deltas can be attributed to the right call.
+							if id != "" {
+								lastToolCallID = id
+								if name != "" {
+									toolNamesByID[id] = name
+								}
+							} else if name == "" {
+								id = lastToolCallID
+							}
+
+							if name == "" {
 								name = toolNamesByID[id]
 							}
 
-							// Skip content for agent-handled tools
 							if _, found := agentTools[name]; found {
 								continue
 							}
@@ -240,7 +234,32 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 				return
 			}
 
-			var loop bool
+			var hasAgentCall, hasCallerCall bool
+
+			for _, cnt := range completion.Message.Content {
+				if cnt.ToolCall == nil {
+					continue
+				}
+
+				if _, isAgent := agentTools[cnt.ToolCall.Name]; isAgent {
+					hasAgentCall = true
+				} else {
+					hasCallerCall = true
+				}
+			}
+
+			// Agent tools are executed in-loop; caller tools are surfaced through
+			// the stream for the caller to handle. A single assistant turn cannot
+			// span both — the chain would either loop without the caller's result
+			// (provider 400) or yield without the agent result (lost work).
+			if hasAgentCall && hasCallerCall {
+				yield(nil, errors.New("agent: model returned both agent-handled and caller-handled tool calls in one turn"))
+				return
+			}
+
+			if !hasAgentCall {
+				return
+			}
 
 			input = append(input, *completion.Message)
 
@@ -249,11 +268,7 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 					continue
 				}
 
-				t, found := agentTools[cnt.ToolCall.Name]
-
-				if !found {
-					continue
-				}
+				t := agentTools[cnt.ToolCall.Name]
 
 				var params map[string]any
 
@@ -286,12 +301,6 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 						}),
 					},
 				})
-
-				loop = true
-			}
-
-			if !loop {
-				return
 			}
 		}
 	}
@@ -303,23 +312,26 @@ func (c *Chain) Complete(ctx context.Context, messages []provider.Message, optio
 // never surfaced in the streamed output. Therefore:
 //
 //   - If no agent tools are registered, the user's options pass through unchanged.
+//   - DisableParallelToolCalls is forced on. Agent and caller tools cannot share a
+//     single assistant turn (see chain loop); serializing tool calls prevents the
+//     model from producing a turn the chain can't reconcile.
 //   - If the user specified ToolChoiceNone, we switch to Auto so agent tools can still
 //     fire, but restrict Allowed to only agent tool names so user tools remain uncallable.
 //   - If the user restricted the allowed list, we union it with agent tool names so the
 //     model can still invoke agent tools while respecting the user's restrictions.
-//   - DisableParallelToolCalls is always forwarded as-is.
 func mergeToolOptions(opts *provider.ToolOptions, agentToolNames []string) *provider.ToolOptions {
 	if len(agentToolNames) == 0 {
 		return opts
 	}
 
-	if opts == nil {
-		return nil
+	var merged provider.ToolOptions
+	if opts != nil {
+		merged = *opts
 	}
 
-	merged := *opts // copy
+	merged.DisableParallelToolCalls = true
 
-	switch opts.Choice {
+	switch merged.Choice {
 	case provider.ToolChoiceNone:
 		// User wants no user-visible tool calls. Allow agent tools only.
 		merged.Choice = provider.ToolChoiceAuto
@@ -327,8 +339,8 @@ func mergeToolOptions(opts *provider.ToolOptions, agentToolNames []string) *prov
 
 	default:
 		// If the user restricted to specific tools, also allow all agent tools.
-		if len(opts.Allowed) > 0 {
-			combined := slices.Clone(opts.Allowed)
+		if len(merged.Allowed) > 0 {
+			combined := slices.Clone(merged.Allowed)
 			for _, name := range agentToolNames {
 				if !slices.Contains(combined, name) {
 					combined = append(combined, name)

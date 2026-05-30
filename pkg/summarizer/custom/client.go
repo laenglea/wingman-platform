@@ -47,9 +47,9 @@ func New(url string, options ...Option) (*Client, error) {
 	return c, nil
 }
 
-func (c *Client) Summarize(ctx context.Context, text string, options *summarizer.SummarizerOptions) (*summarizer.Summary, error) {
+func (c *Client) Summarize(ctx context.Context, text string, options *summarizer.SummarizeOptions) (*summarizer.Summary, error) {
 	if options == nil {
-		options = new(summarizer.SummarizerOptions)
+		options = new(summarizer.SummarizeOptions)
 	}
 
 	resp, err := c.client.Summarize(ctx, &SummarizeRequest{

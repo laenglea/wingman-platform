@@ -90,6 +90,12 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				return
 			}
 
+			// SDK's Accumulate copies OutputTokens from message_delta but drops
+			// OutputTokensDetails.ThinkingTokens. Patch it in manually.
+			if delta, ok := event.AsAny().(anthropic.BetaRawMessageDeltaEvent); ok {
+				message.Usage.OutputTokensDetails.ThinkingTokens = delta.Usage.OutputTokensDetails.ThinkingTokens
+			}
+
 			switch event := event.AsAny().(type) {
 			case anthropic.BetaRawMessageStartEvent:
 				break
@@ -349,7 +355,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
 	}
 
-	if isAdaptiveThinkingModel(c.model) {
+	if !isLegacyModel(c.model) {
 		req.MaxTokens = 128000
 
 		if options.ReasoningOptions != nil {
@@ -527,6 +533,35 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	}
 
 	for _, t := range options.Tools {
+		if t.Kind == provider.ToolKindTextEditor {
+			tools = append(tools, anthropic.BetaToolUnionParam{
+				OfTextEditor20250728: &anthropic.BetaToolTextEditor20250728Param{},
+			})
+			continue
+		}
+
+		if t.Kind == provider.ToolKindComputer {
+			req.Betas = append(req.Betas, "computer-use-2025-11-24")
+
+			w, h := int64(1024), int64(768)
+			if t.Display != nil {
+				if t.Display.Width > 0 {
+					w = int64(t.Display.Width)
+				}
+				if t.Display.Height > 0 {
+					h = int64(t.Display.Height)
+				}
+			}
+
+			tools = append(tools, anthropic.BetaToolUnionParam{
+				OfComputerUseTool20251124: &anthropic.BetaToolComputerUse20251124Param{
+					DisplayWidthPx:  w,
+					DisplayHeightPx: h,
+				},
+			})
+			continue
+		}
+
 		if t.Name == "" {
 			continue
 		}
@@ -553,16 +588,16 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	}
 
 	if options.Schema != nil {
-		schema := options.Schema.Schema
-		if schema == nil {
+		properties := options.Schema.Properties
+		if properties == nil {
 			// json_object mode: Anthropic requires a non-empty schema, and rejects
 			// `type: object` unless additionalProperties is explicitly false.
-			schema = map[string]any{"type": "object", "additionalProperties": false}
+			properties = map[string]any{"type": "object", "additionalProperties": false}
 		}
-		req.OutputConfig.Format = anthropic.BetaJSONOutputFormatParam{Schema: schema}
+		req.OutputConfig.Format = anthropic.BetaJSONOutputFormatParam{Schema: properties}
 	}
 
-	if options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 && isCompactionSupportedModel(c.model) {
+	if options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 && !isLegacyModel(c.model) {
 		req.Betas = append(req.Betas, "compact-2026-01-12")
 
 		req.ContextManagement = anthropic.BetaContextManagementConfigParam{
@@ -580,31 +615,6 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 	if len(system) > 0 {
 		req.System = system
-	}
-
-	if options.TextEditorTool != nil {
-		req.Tools = append(req.Tools, anthropic.BetaToolUnionParam{
-			OfTextEditor20250728: &anthropic.BetaToolTextEditor20250728Param{},
-		})
-	}
-
-	if options.ComputerUseTool != nil {
-		req.Betas = append(req.Betas, "computer-use-2025-11-24")
-
-		w, h := int64(options.ComputerUseTool.DisplayWidth), int64(options.ComputerUseTool.DisplayHeight)
-		if w == 0 {
-			w = 1024
-		}
-		if h == 0 {
-			h = 768
-		}
-
-		req.Tools = append(req.Tools, anthropic.BetaToolUnionParam{
-			OfComputerUseTool20251124: &anthropic.BetaToolComputerUse20251124Param{
-				DisplayWidthPx:  w,
-				DisplayHeightPx: h,
-			},
-		})
 	}
 
 	if len(tools) > 0 {
@@ -673,6 +683,8 @@ func toUsage(usage anthropic.BetaUsage) *provider.Usage {
 	return &provider.Usage{
 		InputTokens:  int(usage.InputTokens),
 		OutputTokens: int(usage.OutputTokens),
+
+		ReasoningTokens: int(usage.OutputTokensDetails.ThinkingTokens),
 
 		CacheReadInputTokens:     int(usage.CacheReadInputTokens),
 		CacheCreationInputTokens: int(usage.CacheCreationInputTokens),

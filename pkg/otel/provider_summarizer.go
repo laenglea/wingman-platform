@@ -32,11 +32,15 @@ func NewSummarizer(provider, model string, p summarizer.Provider) Summarizer {
 func (p *observableSummarizer) otelSetup() {
 }
 
-func (p *observableSummarizer) Summarize(ctx context.Context, text string, options *summarizer.SummarizerOptions) (*summarizer.Summary, error) {
+func (p *observableSummarizer) Summarize(ctx context.Context, text string, options *summarizer.SummarizeOptions) (*summarizer.Summary, error) {
 	ctx, span := otel.Tracer(instrumentationName).Start(ctx, "summarize "+p.model)
 	defer span.End()
 
 	result, err := p.summarizer.Summarize(ctx, text, options)
+
+	if err != nil {
+		RecordError(span, err)
+	}
 
 	return result, err
 }
