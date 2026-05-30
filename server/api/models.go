@@ -29,7 +29,7 @@ type Page struct {
 type BlockState string
 
 const (
-	BlockTypeNone       BlockState = ""
+	BlockStateNone      BlockState = ""
 	BlockStateChecked   BlockState = "checked"
 	BlockStateUnchecked BlockState = "unchecked"
 )

@@ -3,10 +3,10 @@ package summarizer
 import "context"
 
 type Provider interface {
-	Summarize(ctx context.Context, text string, options *SummarizerOptions) (*Summary, error)
+	Summarize(ctx context.Context, text string, options *SummarizeOptions) (*Summary, error)
 }
 
-type SummarizerOptions struct {
+type SummarizeOptions struct {
 }
 
 type Summary struct {

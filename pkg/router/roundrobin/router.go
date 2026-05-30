@@ -60,6 +60,9 @@ func NewCompleter(completers []provider.Completer, options ...Option) (provider.
 
 // Complete routes the request to a randomly selected healthy provider
 func (c *Completer) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
+	messages = router.ScrubMessages(messages)
+	options = router.ScrubOptions(options)
+
 	return func(yield func(*provider.Completion, error) bool) {
 		index := c.selectProvider()
 

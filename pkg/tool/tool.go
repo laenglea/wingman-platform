@@ -20,25 +20,6 @@ type Provider interface {
 	Execute(ctx context.Context, name string, parameters map[string]any) (any, error)
 }
 
-var (
-	KeyToolFiles = "tool_files"
-)
-
-func WithFiles(ctx context.Context, files []File) context.Context {
-	return context.WithValue(ctx, KeyToolFiles, files)
-}
-
-func FilesFromContext(ctx context.Context) ([]File, bool) {
-	val := ctx.Value(KeyToolFiles)
-
-	if val == nil {
-		return nil, false
-	}
-
-	files, ok := val.([]File)
-	return files, ok
-}
-
 func NormalizeSchema(schema map[string]any) map[string]any {
 	// Handle empty schema
 	if len(schema) == 0 {
