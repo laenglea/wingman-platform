@@ -96,6 +96,8 @@ type Usage struct {
 	InputTokens  int
 	OutputTokens int
 
+	ReasoningTokens int
+
 	CacheReadInputTokens     int
 	CacheCreationInputTokens int
 }

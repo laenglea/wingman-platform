@@ -191,8 +191,10 @@ func responseUsage(usage *provider.Usage) *Usage {
 			CachedTokens: usage.CacheReadInputTokens,
 		},
 
-		OutputTokens:        usage.OutputTokens,
-		OutputTokensDetails: &OutputTokensDetails{},
+		OutputTokens: usage.OutputTokens,
+		OutputTokensDetails: &OutputTokensDetails{
+			ReasoningTokens: usage.ReasoningTokens,
+		},
 
 		TotalTokens: usage.InputTokens + usage.OutputTokens,
 	}
@@ -271,10 +273,13 @@ func responseDefaults(resp *Response, req ResponsesRequest) {
 	}
 
 	if req.ToolChoice != nil {
-		// Echo tool_choice as a string when it's a simple mode (matching OpenAI behavior)
-		if len(req.ToolChoice.AllowedTools) == 0 && req.ToolChoice.Mode != "" {
+		switch {
+		case req.ToolChoice.Hosted != nil:
+			resp.ToolChoice = req.ToolChoice.Hosted
+		case len(req.ToolChoice.AllowedTools) == 0 && req.ToolChoice.Mode != "":
+			// Echo tool_choice as a string when it's a simple mode (matching OpenAI behavior)
 			resp.ToolChoice = string(req.ToolChoice.Mode)
-		} else {
+		default:
 			resp.ToolChoice = req.ToolChoice
 		}
 	} else {

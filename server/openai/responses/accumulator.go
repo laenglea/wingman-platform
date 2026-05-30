@@ -201,6 +201,9 @@ func mergeUsage(dst **provider.Usage, src *provider.Usage) {
 	if src.OutputTokens > (*dst).OutputTokens {
 		(*dst).OutputTokens = src.OutputTokens
 	}
+	if src.ReasoningTokens > (*dst).ReasoningTokens {
+		(*dst).ReasoningTokens = src.ReasoningTokens
+	}
 	if src.CacheReadInputTokens > (*dst).CacheReadInputTokens {
 		(*dst).CacheReadInputTokens = src.CacheReadInputTokens
 	}

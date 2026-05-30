@@ -967,6 +967,8 @@ func toResponseUsage(usage responses.ResponseUsage) *provider.Usage {
 		InputTokens:  int(usage.InputTokens),
 		OutputTokens: int(usage.OutputTokens),
 
+		ReasoningTokens: int(usage.OutputTokensDetails.ReasoningTokens),
+
 		CacheReadInputTokens: int(usage.InputTokensDetails.CachedTokens),
 	}
 }

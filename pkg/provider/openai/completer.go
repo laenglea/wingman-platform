@@ -448,6 +448,8 @@ func toUsage(metadata openai.CompletionUsage) *provider.Usage {
 		InputTokens:  int(metadata.PromptTokens),
 		OutputTokens: int(metadata.CompletionTokens),
 
+		ReasoningTokens: int(metadata.CompletionTokensDetails.ReasoningTokens),
+
 		CacheReadInputTokens: int(metadata.PromptTokensDetails.CachedTokens),
 	}
 }

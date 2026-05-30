@@ -156,6 +156,9 @@ func (a *CompletionAccumulator) Add(c Completion) {
 		if c.Usage.OutputTokens > a.usage.OutputTokens {
 			a.usage.OutputTokens = c.Usage.OutputTokens
 		}
+		if c.Usage.ReasoningTokens > a.usage.ReasoningTokens {
+			a.usage.ReasoningTokens = c.Usage.ReasoningTokens
+		}
 		if c.Usage.CacheReadInputTokens > a.usage.CacheReadInputTokens {
 			a.usage.CacheReadInputTokens = c.Usage.CacheReadInputTokens
 		}

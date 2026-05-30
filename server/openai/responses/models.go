@@ -132,6 +132,11 @@ type ToolChoice struct {
 	Mode ToolChoiceMode `json:"mode,omitempty"`
 
 	AllowedTools []ToolChoiceAllowedTool `json:"allowed_tools,omitempty"`
+
+	// Hosted captures typed tool_choice objects for hosted tools, e.g.
+	// {"type":"file_search"} or {"type":"mcp","server_label":"x","name":"y"}.
+	// When set, Mode is also Auto so dispatch falls back to the auto path.
+	Hosted *HostedToolChoice `json:"-"`
 }
 
 type ToolChoiceMode string
@@ -145,6 +150,25 @@ const (
 type ToolChoiceAllowedTool struct {
 	Type string `json:"type"`
 	Name string `json:"name,omitempty"`
+}
+
+// HostedToolChoice is the wire shape for typed hosted-tool choices like
+// {"type":"file_search"} or {"type":"mcp","server_label":"x","name":"y"}.
+type HostedToolChoice struct {
+	Type        string `json:"type"`
+	ServerLabel string `json:"server_label,omitempty"`
+	Name        string `json:"name,omitempty"`
+}
+
+var hostedToolChoiceTypes = map[string]struct{}{
+	"file_search":         {},
+	"web_search":          {},
+	"web_search_preview":  {},
+	"computer":            {},
+	"computer_use_preview": {},
+	"image_generation":    {},
+	"code_interpreter":    {},
+	"mcp":                 {},
 }
 
 func (t *ToolChoice) UnmarshalJSON(data []byte) error {
@@ -181,6 +205,17 @@ func (t *ToolChoice) UnmarshalJSON(data []byte) error {
 		t.Mode = allowedTools.Mode
 		t.AllowedTools = allowedTools.Tools
 		return nil
+	}
+
+	// Handle typed hosted-tool choices: {"type":"file_search"|"web_search"|...|"mcp"[,"server_label"][,"name"]}.
+	var hosted HostedToolChoice
+
+	if err := json.Unmarshal(data, &hosted); err == nil {
+		if _, ok := hostedToolChoiceTypes[hosted.Type]; ok {
+			t.Mode = ToolChoiceModeAuto
+			t.Hosted = &hosted
+			return nil
+		}
 	}
 
 	type alias ToolChoice

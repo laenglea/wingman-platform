@@ -90,6 +90,12 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				return
 			}
 
+			// SDK's Accumulate copies OutputTokens from message_delta but drops
+			// OutputTokensDetails.ThinkingTokens. Patch it in manually.
+			if delta, ok := event.AsAny().(anthropic.BetaRawMessageDeltaEvent); ok {
+				message.Usage.OutputTokensDetails.ThinkingTokens = delta.Usage.OutputTokensDetails.ThinkingTokens
+			}
+
 			switch event := event.AsAny().(type) {
 			case anthropic.BetaRawMessageStartEvent:
 				break
@@ -677,6 +683,8 @@ func toUsage(usage anthropic.BetaUsage) *provider.Usage {
 	return &provider.Usage{
 		InputTokens:  int(usage.InputTokens),
 		OutputTokens: int(usage.OutputTokens),
+
+		ReasoningTokens: int(usage.OutputTokensDetails.ThinkingTokens),
 
 		CacheReadInputTokens:     int(usage.CacheReadInputTokens),
 		CacheCreationInputTokens: int(usage.CacheCreationInputTokens),

@@ -77,6 +77,9 @@ func TestReasoningHTTP(t *testing.T) {
 					}
 
 					rules := openai.DefaultResponsesResponseRules()
+					if tt.requireReasoning {
+						rules["usage.output_tokens_details.reasoning_tokens"] = harness.FieldNonEmpty
+					}
 					harness.CompareStructure(t, "response", openaiResp.Body, wingmanResp.Body, harness.CompareOption{Rules: rules})
 				})
 			}
@@ -103,6 +106,9 @@ func TestReasoningSSE(t *testing.T) {
 					}
 
 					rules := openai.DefaultResponsesSSERules()
+					if tt.requireReasoning {
+						rules["response.usage.output_tokens_details.reasoning_tokens"] = harness.FieldNonEmpty
+					}
 					harness.CompareSSEStructureByType(t, openaiEvents, wingmanEvents, rules)
 				})
 			}
