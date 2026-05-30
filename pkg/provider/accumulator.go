@@ -131,6 +131,10 @@ func (a *CompletionAccumulator) Add(c Completion) {
 					a.toolCalls[toolCallIndex].Name = c.ToolCall.Name
 				}
 
+				if c.ToolCall.Namespace != "" {
+					a.toolCalls[toolCallIndex].Namespace = c.ToolCall.Namespace
+				}
+
 				a.toolCalls[toolCallIndex].Arguments += c.ToolCall.Arguments
 			}
 

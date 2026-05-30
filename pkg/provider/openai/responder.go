@@ -115,7 +115,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 				switch item := event.Item.AsAny().(type) {
 				case responses.ResponseFunctionToolCall:
 					itemToCallID[item.ID] = item.CallID
-					if !emit(provider.ToolCallContent(provider.ToolCall{ID: item.CallID, Name: item.Name}), "") {
+					if !emit(provider.ToolCallContent(provider.ToolCall{ID: item.CallID, Name: item.Name, Namespace: item.Namespace}), "") {
 						return
 					}
 
@@ -573,12 +573,16 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 							},
 						})
 					} else {
+						fc := &responses.ResponseFunctionToolCallParam{
+							CallID:    c.ToolCall.ID,
+							Name:      c.ToolCall.Name,
+							Arguments: c.ToolCall.Arguments,
+						}
+						if c.ToolCall.Namespace != "" {
+							fc.Namespace = openai.String(c.ToolCall.Namespace)
+						}
 						calls = append(calls, responses.ResponseInputItemUnionParam{
-							OfFunctionCall: &responses.ResponseFunctionToolCallParam{
-								CallID:    c.ToolCall.ID,
-								Name:      c.ToolCall.Name,
-								Arguments: c.ToolCall.Arguments,
-							},
+							OfFunctionCall: fc,
 						})
 					}
 				}
@@ -719,6 +723,8 @@ func customToolResultOutputUnion(r *provider.ToolResult) responses.ResponseCusto
 func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.ToolUnionParam, error) {
 	var result []responses.ToolUnionParam
 
+	namespaceIndex := map[string]int{}
+
 	for _, t := range tools {
 		if t.Kind == provider.ToolKindTextEditor {
 			result = append(result, responses.ToolUnionParam{
@@ -735,6 +741,38 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 		}
 
 		if t.Name == "" {
+			continue
+		}
+
+		if t.Namespace != "" && t.Kind != provider.ToolKindCustom {
+			inner := responses.NamespaceToolToolFunctionParam{
+				Name:       t.Name,
+				Parameters: t.Parameters,
+			}
+			if t.Description != "" {
+				inner.Description = openai.String(t.Description)
+			}
+			if t.Strict != nil {
+				inner.Strict = openai.Bool(*t.Strict)
+			}
+
+			if idx, ok := namespaceIndex[t.Namespace]; ok {
+				result[idx].OfNamespace.Tools = append(result[idx].OfNamespace.Tools, responses.NamespaceToolToolUnionParam{
+					OfFunction: &inner,
+				})
+				continue
+			}
+
+			ns := &responses.NamespaceToolParam{
+				Name: t.Namespace,
+				Tools: []responses.NamespaceToolToolUnionParam{
+					{OfFunction: &inner},
+				},
+			}
+			namespaceIndex[t.Namespace] = len(result)
+			result = append(result, responses.ToolUnionParam{
+				OfNamespace: ns,
+			})
 			continue
 		}
 

@@ -12,16 +12,18 @@ type File struct {
 }
 
 type Tool struct {
-	Name        string
-	Description string
-
 	Kind ToolKind
+
+	Name      string
+	Namespace string
+
+	Description string
 
 	Strict     *bool
 	Parameters map[string]any
 
-	Display *Display
 	Format  *ToolFormat
+	Display *Display
 }
 
 type ToolFormat struct {

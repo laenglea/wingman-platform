@@ -468,6 +468,7 @@ func responseOutputs(message *provider.Message, messageID, status string, opts r
 						Type:      "function_call",
 						Status:    status,
 						Name:      call.Name,
+						Namespace: call.Namespace,
 						CallID:    call.ID,
 						Arguments: call.Arguments,
 					},
@@ -720,6 +721,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 						Status:    "in_progress",
 						CallID:    event.ToolCallID,
 						Name:      event.ToolCallName,
+						Namespace: event.ToolCallNamespace,
 						Arguments: "",
 					},
 				})
@@ -788,6 +790,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			call := provider.ToolCall{
 				ID:        event.ToolCallID,
 				Name:      event.ToolCallName,
+				Namespace: event.ToolCallNamespace,
 				Arguments: event.Arguments,
 			}
 
@@ -827,6 +830,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 						Status:    "completed",
 						CallID:    event.ToolCallID,
 						Name:      event.ToolCallName,
+						Namespace: event.ToolCallNamespace,
 						Arguments: event.Arguments,
 					},
 				})

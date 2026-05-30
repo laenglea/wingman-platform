@@ -182,6 +182,8 @@ type ToolCall struct {
 	Kind ToolKind
 
 	Name      string
+	Namespace string
+
 	Arguments string
 }
 

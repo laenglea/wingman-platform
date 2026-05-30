@@ -71,10 +71,11 @@ type StreamEvent struct {
 	RefusalText string
 
 	// For function call events
-	ToolCallID   string
-	ToolCallName string
-	Arguments    string
-	OutputIndex  int
+	ToolCallID        string
+	ToolCallName      string
+	ToolCallNamespace string
+	Arguments         string
+	OutputIndex       int
 
 	// For reasoning events
 	ReasoningID        string
@@ -103,6 +104,7 @@ type accumulatedToolCall struct {
 	ID string // call ID (e.g. call_xxx)
 
 	Name        string
+	Namespace   string
 	Arguments   string
 	OutputIndex int
 	Started     bool
@@ -307,11 +309,16 @@ func (s *StreamingAccumulator) ensureToolCallStarted(callID string, toolCall pro
 		tc.Name = toolCall.Name
 	}
 
+	if toolCall.Namespace != "" {
+		tc.Namespace = toolCall.Namespace
+	}
+
 	return s.emitEvent(StreamEvent{
-		Type:         StreamEventFunctionCallAdded,
-		ToolCallID:   callID,
-		ToolCallName: tc.Name,
-		OutputIndex:  outputIndex,
+		Type:              StreamEventFunctionCallAdded,
+		ToolCallID:        callID,
+		ToolCallName:      tc.Name,
+		ToolCallNamespace: tc.Namespace,
+		OutputIndex:       outputIndex,
 	})
 }
 
@@ -330,21 +337,23 @@ func (s *StreamingAccumulator) closeToolCall(callID string) error {
 	tc.Closed = true
 
 	if err := s.emitEvent(StreamEvent{
-		Type:         StreamEventFunctionCallArgumentsDone,
-		ToolCallID:   tc.ID,
-		ToolCallName: tc.Name,
-		Arguments:    tc.Arguments,
-		OutputIndex:  tc.OutputIndex,
+		Type:              StreamEventFunctionCallArgumentsDone,
+		ToolCallID:        tc.ID,
+		ToolCallName:      tc.Name,
+		ToolCallNamespace: tc.Namespace,
+		Arguments:         tc.Arguments,
+		OutputIndex:       tc.OutputIndex,
 	}); err != nil {
 		return err
 	}
 
 	return s.emitEvent(StreamEvent{
-		Type:         StreamEventFunctionCallDone,
-		ToolCallID:   tc.ID,
-		ToolCallName: tc.Name,
-		Arguments:    tc.Arguments,
-		OutputIndex:  tc.OutputIndex,
+		Type:              StreamEventFunctionCallDone,
+		ToolCallID:        tc.ID,
+		ToolCallName:      tc.Name,
+		ToolCallNamespace: tc.Namespace,
+		Arguments:         tc.Arguments,
+		OutputIndex:       tc.OutputIndex,
 	})
 }
 
@@ -806,15 +815,20 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 				entry.Name = tc.Name
 			}
 
+			if tc.Namespace != "" {
+				entry.Namespace = tc.Namespace
+			}
+
 			if tc.Arguments != "" {
 				entry.Arguments += tc.Arguments
 
 				if err := s.emitEvent(StreamEvent{
-					Type:         StreamEventFunctionCallArgumentsDelta,
-					ToolCallID:   currentID,
-					ToolCallName: entry.Name,
-					Delta:        tc.Arguments,
-					OutputIndex:  outputIndex,
+					Type:              StreamEventFunctionCallArgumentsDelta,
+					ToolCallID:        currentID,
+					ToolCallName:      entry.Name,
+					ToolCallNamespace: entry.Namespace,
+					Delta:             tc.Arguments,
+					OutputIndex:       outputIndex,
 				}); err != nil {
 					return err
 				}

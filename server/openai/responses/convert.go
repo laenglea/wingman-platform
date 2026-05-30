@@ -183,6 +183,7 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 			pendingCalls = append(pendingCalls, provider.ToolCallContent(provider.ToolCall{
 				ID:        call.CallID,
 				Name:      call.Name,
+				Namespace: call.Namespace,
 				Arguments: call.Arguments,
 			}))
 
@@ -403,6 +404,44 @@ func toTools(tools []Tool) []provider.Tool {
 					Environment: t.Environment,
 				},
 			})
+
+		case ToolTypeNamespace:
+			if t.Name == "" {
+				continue
+			}
+			for _, inner := range t.Tools {
+				switch inner.Type {
+				case ToolTypeFunction, "":
+					if inner.Name == "" {
+						continue
+					}
+					result = append(result, provider.Tool{
+						Name:        inner.Name,
+						Description: inner.Description,
+						Namespace:   t.Name,
+						Strict:      inner.Strict,
+						Parameters:  tool.NormalizeSchema(inner.Parameters),
+					})
+				case ToolTypeCustom:
+					if inner.Name == "" {
+						continue
+					}
+					custom := provider.Tool{
+						Name:        inner.Name,
+						Description: inner.Description,
+						Kind:        provider.ToolKindCustom,
+						Namespace:   t.Name,
+					}
+					if inner.Format != nil {
+						custom.Format = &provider.ToolFormat{
+							Type:       inner.Format.Type,
+							Syntax:     inner.Format.Syntax,
+							Definition: inner.Format.Definition,
+						}
+					}
+					result = append(result, custom)
+				}
+			}
 		}
 	}
 
@@ -433,6 +472,16 @@ func outputKind(name string, tools []Tool) provider.ToolKind {
 			}
 		case ToolTypeFunction:
 			if t.Name == name {
+				return provider.ToolKindFunction
+			}
+		case ToolTypeNamespace:
+			for _, inner := range t.Tools {
+				if inner.Name != name {
+					continue
+				}
+				if inner.Type == ToolTypeCustom {
+					return provider.ToolKindCustom
+				}
 				return provider.ToolKindFunction
 			}
 		}

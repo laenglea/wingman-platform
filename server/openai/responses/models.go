@@ -94,6 +94,7 @@ const (
 	ToolTypeCustom     ToolType = "custom"
 	ToolTypeApplyPatch ToolType = "apply_patch"
 	ToolTypeComputer   ToolType = "computer"
+	ToolTypeNamespace  ToolType = "namespace"
 )
 
 // Tool represents a tool in the request
@@ -101,10 +102,14 @@ type Tool struct {
 	Type ToolType `json:"type"`
 
 	// For function tools
-	Name        string         `json:"name,omitempty"`
-	Description string         `json:"description,omitempty"`
-	Strict      *bool          `json:"strict,omitempty"`
-	Parameters  map[string]any `json:"parameters,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+
+	Strict     *bool          `json:"strict,omitempty"`
+	Parameters map[string]any `json:"parameters,omitempty"`
+
+	// For namespace tools (groups of function/custom tools).
+	Tools []Tool `json:"tools,omitempty"`
 
 	// For custom tools (like apply_patch)
 	Format *CustomToolFormat `json:"format,omitempty"`
@@ -363,6 +368,7 @@ type InputFunctionCall struct {
 	ID        string `json:"id,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	Status    string `json:"status,omitempty"` // "in_progress", "completed"
 }
@@ -777,6 +783,7 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 				ID        string             `json:"id"`
 				Status    string             `json:"status"`
 				Name      string             `json:"name"`
+				Namespace string             `json:"namespace,omitempty"`
 				CallID    string             `json:"call_id"`
 				Arguments string             `json:"arguments"`
 			}{
@@ -784,6 +791,7 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 				ID:        r.FunctionCallOutputItem.ID,
 				Status:    r.FunctionCallOutputItem.Status,
 				Name:      r.FunctionCallOutputItem.Name,
+				Namespace: r.FunctionCallOutputItem.Namespace,
 				CallID:    r.FunctionCallOutputItem.CallID,
 				Arguments: r.FunctionCallOutputItem.Arguments,
 			})
@@ -1080,6 +1088,7 @@ type FunctionCallOutputItem struct {
 	Type      string `json:"type"` // function_call
 	Status    string `json:"status"`
 	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
 	CallID    string `json:"call_id"`
 	Arguments string `json:"arguments"`
 }
