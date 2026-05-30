@@ -37,3 +37,9 @@ tasks:
   lgtm:
     cmds:
       - docker run -it --rm -p 3000:3000 -p 4317:4317 -p 4318:4318 grafana/otel-lgtm
+
+  docs:render:
+    desc: Render docs/architecture.html → docs/architecture.png (needs Node + playwright)
+    cmds:
+      - npx --yes -p playwright@latest playwright install chromium
+      - npx --yes -p playwright@latest node docs/render.mjs

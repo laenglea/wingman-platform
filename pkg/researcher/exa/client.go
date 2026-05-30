@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/adrianliechti/wingman/pkg/researcher"
 )
@@ -45,56 +45,21 @@ func (c *Client) Research(ctx context.Context, instructions string, options *res
 		options = new(researcher.ResearchOptions)
 	}
 
-	model := ResearchModelStandard
+	request := &SearchRequest{
+		Query: instructions,
+		Type:  "deep-reasoning",
 
-	task, err := c.CreateTask(ctx, CreateTaskRequest{
-		Instructions: instructions,
-		Model:        model,
-	})
-
-	if err != nil {
-		return nil, err
+		OutputSchema: &OutputSchema{
+			Type:        "text",
+			Description: "A comprehensive, well-structured research report that answers the question.",
+		},
 	}
 
-	for {
-		time.Sleep(5 * time.Second)
+	body, _ := json.Marshal(request)
 
-		result, err := c.Task(ctx, task.ResearchID)
+	url := strings.TrimRight(c.url, "/") + "/search"
 
-		if err != nil {
-			return nil, err
-		}
-
-		if result.Status == ResearchStatusPending {
-			continue
-		}
-
-		if result.Status == ResearchStatusRunning {
-			continue
-		}
-
-		if result.Status == ResearchStatusFailed {
-			return nil, errors.New("research task failed")
-		}
-
-		if result.Status == ResearchStatusCanceled {
-			return nil, errors.New("research task canceled")
-		}
-
-		if result.Status == ResearchStatusCompleted {
-			return &researcher.Result{
-				Content: result.Output.Content,
-			}, nil
-		}
-	}
-}
-
-func (c *Client) CreateTask(ctx context.Context, body CreateTaskRequest) (*TaskResponse, error) {
-	url := strings.TrimRight(c.url, "/") + "/research/v1"
-
-	data, _ := json.Marshal(body)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 
 	if err != nil {
 		return nil, err
@@ -111,47 +76,96 @@ func (c *Client) CreateTask(ctx context.Context, body CreateTaskRequest) (*TaskR
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("exa: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var result TaskResponse
+	var data SearchResponse
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
 
-	return &result, nil
+	if data.Output == nil {
+		return nil, errors.New("exa: no research output returned")
+	}
+
+	content := strings.TrimSpace(decodeContent(data.Output.Content))
+	content = appendSources(content, collectSources(data.Output.Grounding))
+
+	return &researcher.Result{
+		Content: content,
+	}, nil
 }
 
-func (c *Client) Task(ctx context.Context, researchID string) (*TaskResponse, error) {
-	url := strings.TrimRight(c.url, "/") + "/research/v1/" + researchID
+type source struct {
+	title string
+	url   string
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-
-	if err != nil {
-		return nil, err
+// decodeContent returns the synthesized text. With a "text" outputSchema the
+// content is a JSON string; fall back to the raw bytes for any other shape.
+func decodeContent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
 	}
 
-	req.Header.Set("x-api-key", c.token)
+	var text string
 
-	resp, err := c.client.Do(req)
-
-	if err != nil {
-		return nil, err
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
 	}
 
-	defer resp.Body.Close()
+	return string(raw)
+}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+func collectSources(grounding []Grounding) []source {
+	var sources []source
+	seen := map[string]struct{}{}
+
+	for _, g := range grounding {
+		for _, c := range g.Citations {
+			if c.URL == "" {
+				continue
+			}
+
+			if _, ok := seen[c.URL]; ok {
+				continue
+			}
+
+			seen[c.URL] = struct{}{}
+			sources = append(sources, source{title: c.Title, url: c.URL})
+		}
 	}
 
-	var result TaskResponse
+	return sources
+}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+func appendSources(content string, sources []source) string {
+	if len(sources) == 0 {
+		return content
 	}
 
-	return &result, nil
+	var b strings.Builder
+
+	if content != "" {
+		b.WriteString(content)
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("Sources:")
+
+	for _, source := range sources {
+		b.WriteString("\n- ")
+
+		if source.title != "" {
+			b.WriteString(source.title)
+			b.WriteString(": ")
+		}
+
+		b.WriteString(source.url)
+	}
+
+	return b.String()
 }

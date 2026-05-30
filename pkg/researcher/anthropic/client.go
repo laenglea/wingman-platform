@@ -10,9 +10,13 @@ import (
 
 var _ researcher.Provider = &Client{}
 
+// webToolsBeta enables dynamic filtering: Claude post-processes web search
+// results with the code execution tool before they enter the context window.
+const webToolsBeta anthropic.AnthropicBeta = "code-execution-web-tools-2026-02-09"
+
 type Client struct {
 	*Config
-	messages anthropic.MessageService
+	messages anthropic.BetaMessageService
 }
 
 func New(token string, options ...Option) (*Client, error) {
@@ -26,7 +30,7 @@ func New(token string, options ...Option) (*Client, error) {
 
 	return &Client{
 		Config:   cfg,
-		messages: anthropic.NewMessageService(cfg.Options()...),
+		messages: anthropic.NewBetaMessageService(cfg.Options()...),
 	}, nil
 }
 
@@ -41,23 +45,28 @@ func (c *Client) Research(ctx context.Context, instructions string, options *res
 		model = "claude-sonnet-4-6"
 	}
 
-	body := anthropic.MessageNewParams{
+	body := anthropic.BetaMessageNewParams{
 		Model:     anthropic.Model(model),
 		MaxTokens: 8192,
 
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(instructions)),
+		Betas: []anthropic.AnthropicBeta{webToolsBeta},
+
+		Messages: []anthropic.BetaMessageParam{
+			anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(instructions)),
 		},
 
-		System: []anthropic.TextBlockParam{
+		System: []anthropic.BetaTextBlockParam{
 			{Text: "Use web search to gather current, source-backed information. Include citations in the final answer."},
 		},
 
-		Tools: []anthropic.ToolUnionParam{
+		Tools: []anthropic.BetaToolUnionParam{
 			{
-				OfWebSearchTool20250305: &anthropic.WebSearchTool20250305Param{
+				OfWebSearchTool20260209: &anthropic.BetaWebSearchTool20260209Param{
 					MaxUses: anthropic.Int(5),
 				},
+			},
+			{
+				OfCodeExecutionTool20260120: &anthropic.BetaCodeExecutionTool20260120Param{},
 			},
 		},
 	}

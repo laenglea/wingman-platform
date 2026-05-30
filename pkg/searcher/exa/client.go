@@ -76,10 +76,6 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 		request.Type = c.mode
 	}
 
-	if len(request.ExcludeDomains) > 0 && len(request.IncludeDomains) > 0 {
-		request.ExcludeDomains = nil
-	}
-
 	body, _ := json.Marshal(request)
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.exa.ai/search", bytes.NewReader(body))
@@ -124,6 +120,7 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 const (
 	CategoryCompany         = "company"
 	CategoryPeople          = "people"
+	CategoryNews            = "news"
 	CategoryResearchPaper   = "research paper"
 	CategoryPersonalSite    = "personal site"
 	CategoryFinancialReport = "financial report"
@@ -133,6 +130,7 @@ func (c *Client) Categories() []searcher.Category {
 	return []searcher.Category{
 		{Name: CategoryCompany, Description: "Specific companies or organizations (e.g. SaaS vendors, public companies). Note: domain exclusions and date filters are not supported in this category."},
 		{Name: CategoryPeople, Description: "Specific people or profile pages (e.g. LinkedIn-style biographies). Note: domain exclusions and date filters are not supported in this category."},
+		{Name: CategoryNews, Description: "News articles and current-events coverage from media outlets."},
 		{Name: CategoryResearchPaper, Description: "Academic papers and peer-reviewed research publications."},
 		{Name: CategoryPersonalSite, Description: "Personal websites, blogs, and homepages."},
 		{Name: CategoryFinancialReport, Description: "Earnings releases, 10-K/10-Q filings, and other financial reports."},

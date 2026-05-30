@@ -46,7 +46,8 @@ func (c *Client) Scrape(ctx context.Context, url string, options *scraper.Scrape
 
 		Text: true,
 
-		LiveCrawl: LiveCrawlPreferred,
+		// 0 forces a fresh fetch (replaces the deprecated livecrawl: preferred).
+		MaxAgeHours: 0,
 	})
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.exa.ai/contents", bytes.NewBuffer(body))

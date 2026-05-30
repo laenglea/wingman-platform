@@ -39,13 +39,13 @@ func (c *Client) Scrape(ctx context.Context, url string, options *scraper.Scrape
 	}
 
 	body := map[string]any{
-		"api_key":       c.token,
 		"urls":          url,
 		"extract_depth": "advanced",
 	}
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.tavily.com/extract", jsonReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
 
 	resp, err := c.client.Do(req)
 

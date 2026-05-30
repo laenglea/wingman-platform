@@ -1,9 +1,11 @@
 
-# LLM Platform
+# Wingman
 
 <img src="docs/icon.png" width="150"/>
 
-The LLM Platform or Inference Hub is an open-source product designed to simplify the development and deployment of large language model (LLM) applications at scale. It provides a unified framework that allows developers to integrate and manage multiple LLM vendors, models, and related services through a standardized but highly flexible approach.
+**A unified LLM platform — one API, many providers, zero lock-in.**
+
+Wingman is an open-source inference hub that simplifies building and deploying large language model (LLM) applications at scale. It fronts every major model vendor and local runtime behind a single OpenAI-, Anthropic- and Gemini-compatible API — with RAG, agents, tools, MCP, routing, rate limiting and OpenTelemetry wired in by configuration alone.
 
 ## Key Features
 
@@ -64,11 +66,11 @@ The platform integrates with a wide range of LLM providers:
 - Tool integration and function calling
 
 **Tools & Function Calling:**
-- Built-in tools: search, extract, retrieve, render, synthesize, translate
+- Built-in tools: search, scraper, research, translator
 - **Model Context Protocol (MCP) support**: Full server and client implementation
   - Connect to external MCP servers as tool providers
   - Built-in MCP server exposing platform capabilities
-  - Multiple transport methods (HTTP streaming, SSE, command execution)
+  - Multiple transport methods (HTTP streaming, SSE)
 - Custom tools via gRPC plugins
 
 **Additional Capabilities:**
@@ -113,6 +115,8 @@ Developers can define providers, models, credentials, document processing pipeli
 
 ![Architecture](docs/architecture.png)
 
+> Source: [`docs/architecture.html`](docs/architecture.html) · Regenerate with `task docs:render`.
+
 The architecture is designed to be modular and extensible, allowing developers to plug in different providers and services as needed. It consists of key components:
 
 **Core Providers:**
@@ -149,6 +153,99 @@ The architecture is designed to be modular and extensible, allowing developers t
 - **Scalable LLM Deployment**: High-volume applications with load balancing and failover
 - **Multi-Modal AI**: Combining text, image, and audio processing capabilities
 - **Custom AI Pipelines**: Flexible workflows using custom tools and chains
+
+
+## Quick Start
+
+Everything is driven by a single `config.yaml`. Define providers, then layer on tools, agents and pipelines as needed.
+
+```yaml
+# config.yaml — a complete, working example
+
+providers:
+  # A hosted vendor — list the models you want to expose
+  - type: openai
+    token: ${OPENAI_API_KEY}
+    models:
+      - gpt-5.4
+      - gpt-5.4-mini
+      - text-embedding-3-large
+
+  # Another vendor, aliased to friendly names
+  - type: anthropic
+    token: ${ANTHROPIC_API_KEY}
+    models:
+      - claude-sonnet-4-6
+      - claude-haiku-4-5
+
+  # A local runtime via the OpenAI-compatible API
+  - type: ollama
+    url: http://localhost:11434
+    models:
+      local-devstral:
+        id: devstral-small-2:24b
+
+# Web access for RAG / agents
+searchers:
+  web:
+    type: exa
+    token: ${EXA_API_KEY}
+
+scrapers:
+  web:
+    type: exa
+    token: ${EXA_API_KEY}
+
+# Wrap them as callable tools
+tools:
+  web_search:
+    type: search
+    searcher: web
+  web_fetch:
+    type: scraper
+    scraper: web
+
+# A ready-to-call assistant with tools and a system prompt
+agents:
+  wingman:
+    type: assistant
+    model: claude-sonnet-4-6
+    effort: medium
+    tools:
+      - web_search
+      - web_fetch
+    messages:
+      - role: system
+        content: |
+          You are Wingman, a helpful assistant.
+          Current date: {{ now | date "2006-01-02" }}
+```
+
+Run the server (reads `.env` for the referenced secrets):
+
+```shell
+task server        # or: go run cmd/server/main.go
+```
+
+Call it with any OpenAI-compatible client — agents appear as regular models:
+
+```shell
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{ "model": "wingman", "messages": [{ "role": "user", "content": "What changed in the news today?" }] }'
+```
+
+### API Surface
+
+A single ingress speaks four dialects, so existing SDKs work unchanged:
+
+| Family | Mount | Endpoints |
+| --- | --- | --- |
+| **OpenAI** (compatible) | `/v1` | `chat/completions`, `responses`, `embeddings`, `audio/{speech,transcriptions}`, `images/{generations,edits}`, `models` |
+| **Anthropic** (compatible) | `/v1` | `messages`, `messages/count_tokens` |
+| **Gemini** (compatible) | `/v1beta` | `models/{model}:generateContent`, `:streamGenerateContent`, `:countTokens` |
+| **MCP** (native) | `/v1` | `mcp/{name}` — each configured MCP server, over HTTP-stream or SSE |
+| **Wingman** (native) | `/v1` | `extract`, `segment`, `search`, `retrieve`, `research`, `rerank`, `summarize`, `translate`, `render`, `transcribe` |
 
 
 ## Integrations & Configuration
@@ -376,63 +473,119 @@ providers:
 ```
 
 
+#### xAI
+
+https://x.ai/api
+
+```yaml
+providers:
+  - type: xai
+    token: ${XAI_API_KEY}
+
+    models:
+      - grok-4.20-reasoning
+      - grok-imagine-image  # renderer
+      - grok-tts            # synthesizer
+```
+
+
+#### Jina
+
+https://jina.ai
+
+Embeddings and reranking.
+
+```yaml
+providers:
+  - type: jina
+    token: ${JINA_API_KEY}
+
+    models:
+      - jina-embeddings-v3
+```
+
+
+#### OpenRouter & OpenAI-compatible Endpoints
+
+Any OpenAI-compatible endpoint (OpenRouter, vLLM, LM Studio, NVIDIA NIM, a self-hosted gateway, …) works by pointing `url` at it. Use the `openai` provider for a drop-in endpoint, or `openrouter` / `nim` where a dedicated adapter exists.
+
+```yaml
+providers:
+  - type: openai
+    url: https://openrouter.ai/api/v1
+    token: ${OPENROUTER_API_KEY}
+
+    models:
+      glm-air:
+        id: z-ai/glm-4.6-air
+```
+
+
+> **Provider interfaces.** Each model serves one of six roles, inferred from its `type` or set explicitly per model: **completer** (chat/reason), **embedder** (vectors), **renderer** (text→image), **synthesizer** (text→speech), **transcriber** (speech→text), **reranker** (relevance). See [`docs/architecture.png`](docs/architecture.png) for the full interface × backend matrix.
+
+
 ### Routers
 
-#### Round-robin Load Balancer
+A router exposes several models under one id and distributes requests across them — useful for load balancing and failover across providers. Types: `roundrobin` (even rotation) and `adaptive` (prefers healthy/faster backends).
 
 ```yaml
 routers:
-  llama-lb:
-    type: roundrobin
+  fast-lb:
+    type: roundrobin       # or: adaptive
     models:
-      - llama-3-8b
-      - groq-llama-3-8b
-      - huggingface-llama-3-8b
+      - gpt-5.4-mini
+      - claude-haiku-4-5
+      - local-devstral
 ```
 
 
-### Information Retrieval / Web Search
+### Web Access (Search · Scrape · Research)
 
-#### DuckDuckGo
+Web access comes in three flavours. A **searcher** returns result lists, a **scraper** fetches and cleans a single URL, and a **researcher** runs a full multi-step research loop. Each is referenced by name from `tools` (see [Tools & Function Calling](#tools--function-calling)).
+
+#### Searchers
+
+Return ranked search results. Types: `duckduckgo`, `exa`, `tavily`, `custom`.
 
 ```yaml
-retrievers:
+searchers:
   web:
-    type: duckduckgo
-```
-
-
-#### Exa
-
-https://exa.ai
-
-```yaml
-retrievers:
-  exa:
-    type: exa
+    type: exa            # or: duckduckgo · tavily · custom
     token: ${EXA_API_KEY}
 ```
 
+#### Scrapers
 
-#### Tavily
-
-https://tavily.com
+Fetch and extract clean content from a URL. Types: `fetch` (built-in HTTP), `exa`, `jina`, `tavily`, `custom`.
 
 ```yaml
-retrievers:
-  tavily:
-    type: tavily
-    token: ${TAVILY_API_KEY}
+scrapers:
+  web:
+    type: fetch          # or: exa · jina · tavily · custom
+
+  reader:
+    type: jina
+    token: ${JINA_API_KEY}
 ```
 
+#### Researchers
 
-#### Custom Retriever
+Run an end-to-end research workflow. Types: `exa`, `openai`, `anthropic`, `perplexity`, `custom`, or the built-in `agent` that orchestrates your own model with a searcher + scraper.
 
 ```yaml
-retrievers:
-  custom:
-    type: custom
-    url: http://localhost:8080
+researchers:
+  # Hosted deep-research endpoints
+  web:
+    type: exa
+    token: ${EXA_API_KEY}
+
+  # Build your own from any completer + web access
+  agent:
+    type: agent
+    model: gpt-5.4-mini
+    searcher: web
+    scraper: web
+    effort: medium
 ```
 
 
@@ -588,22 +741,41 @@ segmenters:
 ```
 
 
-### AI Agents & Chains
+### AI Agents
 
-#### Agent/Assistant Chain
+Agents wrap a completer with a system prompt, tools and a control loop, and are then exposed as a regular model id (use the agent's key as the `model` in any request). Two loop types are available:
+
+- **`assistant`** — a tool-calling loop that runs tools until the model produces a final answer.
+- **`react`** — an explicit reason → act → observe loop.
 
 ```yaml
-chains:
+agents:
   assistant:
-    type: agent
-    model: gpt-4o
+    type: assistant
+    model: gpt-5.4          # any configured completer (or router / another agent)
+
+    effort: medium          # reasoning effort: minimal · low · medium · high
+    verbosity: medium       # output verbosity: low · medium · high
+    # temperature: 0.7
+
     tools:
-      - search
-      - extract
+      - web_search
+      - web_fetch
+
     messages:
       - role: system
-        content: "You are a helpful AI assistant."
+        content: |
+          You are a helpful AI assistant.
+          Current date: {{ now | date "2006-01-02" }}
+
+  researcher:
+    type: react
+    model: claude-sonnet-4-6
+    tools:
+      - web_research
 ```
+
+System prompts are Go templates — helpers like `{{ now | date "2006-01-02" }}` are evaluated per request.
 
 
 ### Tools & Function Calling
@@ -622,60 +794,57 @@ The platform provides comprehensive support for the Model Context Protocol (MCP)
 - Support for various MCP transport methods
 - Automatic tool registration and execution
 
-**MCP Tool Configuration:**
+**Consume an external MCP server as tools** — point a `mcp` tool at any HTTP-streaming or SSE MCP endpoint; its tools are discovered and registered automatically:
 
 ```yaml
 tools:
-  # MCP server via HTTP streaming
-  mcp-streamable:
+  # HTTP streaming (/mcp) or SSE (/sse) — transport is auto-detected
+  github:
     type: mcp
-    url: http://localhost:8080/mcp
-
-  # MCP server via Server-Sent Events
-  mcp-sse:
-    type: mcp
-    url: http://localhost:8080/sse
+    url: https://api.example.com/mcp
     vars:
-      api-key: ${API_KEY}
-
-  # MCP server via command execution
-  mcp-command:
-    type: mcp
-    command: /path/to/mcp-server
-    args:
-      - --config
-      - /path/to/config.json
-    vars:
-      ENV_VAR: value
+      api-key: ${API_KEY}   # forwarded as a header to the server
 ```
 
-**Built-in MCP Server:**
+**Expose your own tools as an MCP server** — group tools under `mcps`; each is served at `/v1/mcp/{name}` for any MCP client (IDEs, agents) to consume:
 
-The platform automatically exposes its tools via MCP protocol at `/mcp` endpoint, allowing other MCP clients to discover and use platform capabilities.
+```yaml
+mcps:
+  web:
+    type: server          # built-in server exposing the listed tools
+    name: web
+    tools:
+      - web_search
+      - web_fetch
+      - web_research
+
+  # Or reverse-proxy an upstream MCP server
+  upstream:
+    type: proxy
+    url: https://api.example.com/mcp
+```
 
 #### Built-in Tools
 
+Built-in tools wrap the providers you configured elsewhere. Valid types: `search`, `scraper` (alias `crawler`), `research`, `translator`, `mcp`, `custom`.
+
 ```yaml
 tools:
-  search:
+  web_search:
     type: search
-    retriever: web
+    searcher: web         # references a searchers: entry
 
-  extract:
-    type: extract
-    extractor: tika
+  web_fetch:
+    type: scraper
+    scraper: web          # references a scrapers: entry
 
-  translate:
-    type: translate
-    translator: default
+  web_research:
+    type: research
+    researcher: agent     # references a researchers: entry
 
-  render:
-    type: render
-    renderer: dalle-3
-
-  synthesize:
-    type: synthesize
-    synthesizer: tts-1
+  to_english:
+    type: translator
+    translator: deepl     # references a translators: entry
 ```
 
 
@@ -691,7 +860,9 @@ tools:
 
 ### Authentication
 
-#### Static Authentication
+Authorizers run as middleware on every request. With none configured, access is open. Types: `anonymous`, `header`, `static`, `oidc`.
+
+#### Static Tokens
 
 ```yaml
 authorizers:
@@ -700,8 +871,16 @@ authorizers:
       - "your-secret-token"
 ```
 
+#### Header
 
-#### OIDC Authentication
+Trust an upstream proxy that injects an identity header.
+
+```yaml
+authorizers:
+  - type: header
+```
+
+#### OIDC
 
 ```yaml
 authorizers:
@@ -711,33 +890,18 @@ authorizers:
 ```
 
 
-### Routing & Load Balancing
-
-#### Round-robin Load Balancer
-
-```yaml
-routers:
-  llama-lb:
-    type: roundrobin
-    models:
-      - llama-3-8b
-      - groq-llama-3-8b
-      - huggingface-llama-3-8b
-```
-
-
 ### Rate Limiting
 
-Add rate limiting to any provider:
+Add rate limiting to any provider, with optional per-model overrides:
 
 ```yaml
 providers:
   - type: openai
-    token: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    token: ${OPENAI_API_KEY}
     limit: 10  # requests per second
 
     models:
-      gpt-4o:
+      gpt-5.4:
         limit: 5  # override for specific model
 ```
 
@@ -756,9 +920,17 @@ Summarization is automatically available for any chat model:
 
 #### Translation
 
+Translators back the `/v1/translate` endpoint and the `translator` tool. Types: `deepl`, `azure`, `llm` (use any completer), `custom`.
+
 ```yaml
 translators:
-  default:
-    type: default
-    # Uses configured chat models for translation
+  # Dedicated translation API
+  deepl:
+    type: deepl
+    token: ${DEEPL_API_KEY}
+
+  # Or translate with any configured chat model
+  llm:
+    type: llm
+    model: gpt-5.4-mini
 ```

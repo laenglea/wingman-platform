@@ -5,19 +5,10 @@ type ContentsRequest struct {
 
 	Text bool `json:"text"`
 
-	SubPages int `json:"subpages,omitempty"`
-
-	LiveCrawl LiveCrawl `json:"livecrawl,omitempty"`
+	// MaxAgeHours controls content freshness (replaces the deprecated livecrawl).
+	// 0 forces a fresh fetch.
+	MaxAgeHours int `json:"maxAgeHours"`
 }
-
-type LiveCrawl string
-
-const (
-	LiveCrawlNever     LiveCrawl = "never"
-	LiveCrawlAlways    LiveCrawl = "always"
-	LiveCrawlFallback  LiveCrawl = "fallback"
-	LiveCrawlPreferred LiveCrawl = "preferred"
-)
 
 type ContentsResponse struct {
 	Results  []ContentsResult `json:"results"`
@@ -36,11 +27,10 @@ type ContentsResult struct {
 type ContentsStatus struct {
 	ID     string             `json:"id"`
 	Status string             `json:"status"`
-	Source string             `json:"source,omitempty"`
 	Error  *ContentsStatusErr `json:"error,omitempty"`
 }
 
 type ContentsStatusErr struct {
-	Tag         string `json:"tag,omitempty"`
-	HTTPStatus  int    `json:"httpStatusCode,omitempty"`
+	Tag        string `json:"tag,omitempty"`
+	HTTPStatus int    `json:"httpStatusCode,omitempty"`
 }

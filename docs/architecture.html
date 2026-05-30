@@ -1,0 +1,771 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Wingman — Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0a0a0a;
+    --paper: #f4f1ea;
+    --rule: #0a0a0a;
+    --accent: #d40000;
+    --mute: #6b6b6b;
+    --soft: #e8e3d6;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: #888;
+    font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-feature-settings: 'ss01', 'cv11', 'tnum';
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---- Poster canvas: A2 landscape @ ~150dpi ---- */
+  .poster {
+    width: 2000px;
+    height: 1414px;
+    margin: 24px auto;
+    background: var(--paper);
+    color: var(--ink);
+    position: relative;
+    padding: 60px 72px 50px 72px;
+    display: grid;
+    grid-template-columns: 460px 1fr;
+    grid-template-rows: auto 1fr auto;
+    column-gap: 56px;
+    row-gap: 28px;
+    overflow: hidden;
+  }
+
+  /* ---- Top meta strip ---- */
+  .meta {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--mute);
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--ink);
+  }
+  .meta .lot { display: flex; gap: 36px; }
+  .meta .lot span b { color: var(--ink); font-weight: 600; }
+  .meta .stamp {
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: 0.2em;
+  }
+
+  /* ---- Left rail: identity ---- */
+  .rail {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding-right: 36px;
+    border-right: 1px solid var(--ink);
+  }
+
+  .wordmark {
+    font-weight: 900;
+    font-size: 132px;
+    line-height: 0.86;
+    letter-spacing: -0.045em;
+    margin-top: 4px;
+  }
+  .wordmark .dot { color: var(--accent); }
+
+  .sub {
+    margin-top: 22px;
+    font-size: 22px;
+    line-height: 1.18;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    max-width: 360px;
+  }
+  .sub b { font-weight: 800; }
+
+  .lede {
+    margin-top: 24px;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: #1a1a1a;
+    max-width: 360px;
+    font-weight: 400;
+  }
+
+  .verticals {
+    margin-top: 24px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .verticals .v {
+    border-top: 1px solid var(--ink);
+    padding-top: 8px;
+  }
+  .verticals .v .vh {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .verticals .v .vt {
+    font-weight: 700;
+    font-size: 13.5px;
+    margin-top: 4px;
+    letter-spacing: -0.005em;
+  }
+  .verticals .v .vd {
+    font-size: 11px;
+    color: var(--mute);
+    margin-top: 2px;
+    line-height: 1.4;
+  }
+
+  .colophon {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--mute);
+    border-top: 1px solid var(--ink);
+    padding-top: 12px;
+  }
+  .colophon b { color: var(--ink); font-weight: 700; }
+
+  /* ---- Stage ---- */
+  .stage {
+    display: grid;
+    grid-template-rows: auto auto auto 1fr;
+    row-gap: 22px;
+    position: relative;
+  }
+
+  .strip {
+    display: grid;
+    grid-template-columns: 72px 1fr;
+    column-gap: 24px;
+    align-items: start;
+  }
+  .strip .num {
+    font-weight: 800;
+    font-size: 52px;
+    line-height: 1;
+    color: var(--accent);
+    letter-spacing: -0.04em;
+    font-feature-settings: 'tnum';
+  }
+  .strip .label {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--mute);
+    margin-bottom: 10px;
+  }
+  .strip .label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--ink);
+  }
+  .strip .label .tag {
+    color: var(--ink);
+    font-weight: 700;
+  }
+
+  /* ---- 01 CONSUMERS ---- */
+  .consumers {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    column-gap: 14px;
+  }
+  .chip {
+    border: 1px solid var(--ink);
+    padding: 12px 14px;
+    background: transparent;
+    min-height: 76px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .chip .t {
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+  }
+  .chip .d {
+    font-size: 11px;
+    color: var(--mute);
+    margin-top: 3px;
+    line-height: 1.4;
+  }
+  .chip .corner {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    align-self: flex-end;
+    margin-top: 6px;
+  }
+
+  /* ---- 02 API surface (two rows) ---- */
+  .apis {
+    display: grid;
+    grid-template-columns: 1.7fr 1.2fr 1fr 1.1fr;
+    column-gap: 12px;
+  }
+  .api {
+    border: 1px solid var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+    padding: 12px 14px;
+    min-height: 124px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .api .h {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .api .h .t {
+    font-weight: 800;
+    font-size: 16px;
+    letter-spacing: -0.01em;
+  }
+  .api .h .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--accent);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  .api ul {
+    list-style: none;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    line-height: 1.55;
+    color: #cfc6b3;
+  }
+  .api ul li b { color: var(--paper); font-weight: 500; }
+
+  /* ---- 03 Pipeline ---- */
+  .pipe {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    column-gap: 10px;
+  }
+  .step {
+    border: 1px solid var(--ink);
+    padding: 10px 12px;
+    background: var(--paper);
+    position: relative;
+  }
+  .step .n {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+  }
+  .step .t {
+    font-weight: 700;
+    font-size: 14px;
+    margin-top: 4px;
+    letter-spacing: -0.01em;
+  }
+  .step .d {
+    font-size: 10.5px;
+    color: var(--mute);
+    margin-top: 3px;
+    line-height: 1.35;
+  }
+
+  /* ---- 04 Building blocks ---- */
+  .blocks {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    column-gap: 12px;
+  }
+  .block {
+    border: 1px solid var(--ink);
+    padding: 14px;
+    background: var(--soft);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 156px;
+  }
+  .block .h {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .block .t {
+    font-weight: 800;
+    font-size: 17px;
+    letter-spacing: -0.015em;
+  }
+  .block ul {
+    list-style: none;
+    margin-top: 2px;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: #1a1a1a;
+  }
+  .block ul li::before {
+    content: "·";
+    color: var(--accent);
+    margin-right: 6px;
+    font-weight: 700;
+  }
+  .block code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    background: var(--paper);
+    padding: 1px 5px;
+    border: 1px solid var(--ink);
+  }
+
+  /* ---- 05 Matrix ---- */
+  .matrix {
+    display: grid;
+    grid-template-columns: 170px 1fr 184px;
+    border-top: 1px solid var(--ink);
+    border-left: 1px solid var(--ink);
+  }
+  .matrix .iface,
+  .matrix .backs,
+  .matrix .meta-c {
+    border-right: 1px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+    padding: 9px 14px;
+  }
+  .matrix .iface {
+    background: var(--ink);
+    color: var(--paper);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .matrix .iface .role {
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: -0.01em;
+  }
+  .matrix .iface .kind {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #cfc6b3;
+    margin-top: 2px;
+  }
+  .matrix .backs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 7px;
+    align-items: center;
+  }
+  .matrix .backs .b {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    padding: 2px 7px;
+    border: 1px solid var(--ink);
+    background: var(--paper);
+    letter-spacing: 0.02em;
+  }
+  .matrix .backs .b.star {
+    background: var(--accent);
+    color: var(--paper);
+    border-color: var(--accent);
+  }
+  .matrix .meta-c {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .matrix .meta-c .cnt {
+    font-weight: 800;
+    font-size: 22px;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    font-feature-settings: 'tnum';
+  }
+  .matrix .meta-c .key {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    line-height: 1.4;
+    color: var(--mute);
+    text-align: right;
+    letter-spacing: 0.02em;
+  }
+  .matrix .meta-c .key b { color: var(--accent); font-weight: 700; }
+
+  /* ---- Footer ---- */
+  .footer {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--ink);
+    padding-top: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--mute);
+  }
+  .footer .big {
+    font-family: 'Inter', sans-serif;
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: -0.005em;
+    text-transform: none;
+    color: var(--ink);
+  }
+  .footer .acc { color: var(--accent); font-weight: 700; }
+</style>
+</head>
+<body>
+
+<section class="poster">
+
+  <!-- TOP META STRIP -->
+  <div class="meta">
+    <div class="lot">
+      <span><b>DOC</b> · ARCHITECTURE</span>
+      <span><b>REV</b> · 2026.05</span>
+      <span><b>FMT</b> · A2 LANDSCAPE</span>
+      <span><b>FIG</b> · 1 / 1</span>
+    </div>
+    <div class="stamp">★ OPEN SOURCE · MIT</div>
+  </div>
+
+  <!-- LEFT RAIL -->
+  <aside class="rail">
+    <div>
+      <div class="wordmark">Wing<br/>man<span class="dot">.</span></div>
+      <div class="sub">
+        <b>A unified LLM platform.</b><br/>
+        One API. Many providers.<br/>
+        Zero lock-in.
+      </div>
+      <p class="lede">
+        Wingman fronts every major model vendor and local runtime
+        behind a single OpenAI-, Anthropic- and Gemini-compatible
+        surface — with RAG, agents, tools, MCP, routing, rate
+        limits and OpenTelemetry wired in by configuration alone.
+      </p>
+
+      <div class="verticals">
+        <div class="v">
+          <div class="vh">P 01</div>
+          <div class="vt">Compatibility first</div>
+          <div class="vd">Drop-in for OpenAI, Anthropic, Gemini SDKs.</div>
+        </div>
+        <div class="v">
+          <div class="vh">P 02</div>
+          <div class="vt">Config &gt; code</div>
+          <div class="vd">One YAML composes the whole platform.</div>
+        </div>
+        <div class="v">
+          <div class="vh">P 03</div>
+          <div class="vt">Typed interfaces</div>
+          <div class="vd">Backends swap behind stable contracts.</div>
+        </div>
+        <div class="v">
+          <div class="vh">P 04</div>
+          <div class="vt">Native MCP</div>
+          <div class="vd">Server and client, multi-transport.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="colophon">
+      <b>github.com/adrianliechti/wingman</b><br/>
+      Edition · 01 / 26 — Set in Inter &amp; JetBrains&nbsp;Mono
+    </div>
+  </aside>
+
+  <!-- STAGE -->
+  <main class="stage">
+
+    <!-- 01 CONSUMERS -->
+    <div class="strip">
+      <div class="num">01</div>
+      <div>
+        <div class="label"><span class="tag">Consumers</span> · anything that speaks HTTP</div>
+        <div class="consumers">
+          <div class="chip">
+            <div><div class="t">Chat &amp; Copilots</div><div class="d">Enterprise UIs, internal assistants</div></div>
+            <div class="corner">openai-sdk · anthropic-sdk</div>
+          </div>
+          <div class="chip">
+            <div><div class="t">Apps &amp; Services</div><div class="d">Backends, batch jobs, pipelines</div></div>
+            <div class="corner">openai-sdk · gemini-sdk</div>
+          </div>
+          <div class="chip">
+            <div><div class="t">Agents &amp; IDEs</div><div class="d">MCP clients, coding assistants</div></div>
+            <div class="corner">mcp · http-stream / sse</div>
+          </div>
+          <div class="chip">
+            <div><div class="t">Experiments</div><div class="d">Notebooks, evals, research</div></div>
+            <div class="corner">curl · python · go</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 02 API SURFACE -->
+    <div class="strip">
+      <div class="num">02</div>
+      <div>
+        <div class="label"><span class="tag">API Surface</span> · one ingress, four dialects</div>
+        <div class="apis">
+          <div class="api">
+            <div class="h"><div class="t">OpenAI</div><div class="tag">/v1 · compat</div></div>
+            <ul>
+              <li><b>POST</b> /chat/completions</li>
+              <li><b>POST</b> /responses</li>
+              <li><b>POST</b> /embeddings</li>
+              <li><b>POST</b> /audio/{speech,transcriptions}</li>
+              <li><b>POST</b> /images/{generations,edits}</li>
+              <li><b>GET</b>&nbsp; /models</li>
+            </ul>
+          </div>
+          <div class="api">
+            <div class="h"><div class="t">Anthropic</div><div class="tag">/v1 · compat</div></div>
+            <ul>
+              <li><b>POST</b> /messages</li>
+              <li><b>POST</b> /messages/count_tokens</li>
+            </ul>
+            <div class="h" style="margin-top:8px"><div class="t" style="font-size:14px">Gemini</div><div class="tag">/v1beta · compat</div></div>
+            <ul>
+              <li><b>POST</b> /models/{m}:generateContent</li>
+              <li><b>POST</b> /models/{m}:countTokens</li>
+            </ul>
+          </div>
+          <div class="api">
+            <div class="h"><div class="t">MCP</div><div class="tag">/v1/mcp · native</div></div>
+            <ul>
+              <li><b>ANY</b>&nbsp;&nbsp;/mcp/{name}</li>
+              <li><b>ANY</b>&nbsp;&nbsp;/mcp/{name}/*</li>
+              <li>Per-config MCP servers</li>
+              <li>HTTP-stream · SSE</li>
+            </ul>
+          </div>
+          <div class="api">
+            <div class="h"><div class="t">Wingman</div><div class="tag">/v1 · native</div></div>
+            <ul>
+              <li><b>POST</b> /extract · /segment</li>
+              <li><b>POST</b> /search · /retrieve</li>
+              <li><b>POST</b> /research · /rerank</li>
+              <li><b>POST</b> /summarize · /translate</li>
+              <li><b>POST</b> /render · /transcribe</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 03 PIPELINE -->
+    <div class="strip">
+      <div class="num">03</div>
+      <div>
+        <div class="label"><span class="tag">Request Pipeline</span> · cross-cutting middlewares</div>
+        <div class="pipe">
+          <div class="step"><div class="n">↳ 01</div><div class="t">CORS · Recover · Log</div><div class="d">go-chi base middleware</div></div>
+          <div class="step"><div class="n">↳ 02</div><div class="t">OpenTelemetry</div><div class="d">otelhttp · traces, metrics, logs</div></div>
+          <div class="step"><div class="n">↳ 03</div><div class="t">Authorize</div><div class="d">anonymous · header · static · oidc</div></div>
+          <div class="step"><div class="n">↳ 04</div><div class="t">Policy</div><div class="d">resource-level access checks</div></div>
+          <div class="step"><div class="n">↳ 05</div><div class="t">Route &amp; Rate-limit</div><div class="d">roundrobin · adaptive · per-model</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 04 BUILDING BLOCKS -->
+    <div class="strip">
+      <div class="num">04</div>
+      <div>
+        <div class="label"><span class="tag">Building Blocks</span> · composed from typed providers</div>
+        <div class="blocks">
+          <div class="block">
+            <div class="h">04 · A — agents</div>
+            <div class="t">Agents &amp; Chains</div>
+            <ul>
+              <li><code>assistant</code> — tool-loop</li>
+              <li><code>react</code> — reasoning loop</li>
+              <li>Compaction · effort budgets</li>
+              <li>Templated system prompts</li>
+            </ul>
+          </div>
+          <div class="block">
+            <div class="h">04 · B — tools</div>
+            <div class="t">Tools &amp; MCP</div>
+            <ul>
+              <li><code>search</code> · <code>research</code></li>
+              <li><code>translator</code> · <code>mcp</code></li>
+              <li><code>custom</code> via gRPC</li>
+              <li>MCP <code>server</code> · <code>proxy</code></li>
+            </ul>
+          </div>
+          <div class="block">
+            <div class="h">04 · C — documents</div>
+            <div class="t">RAG Pipeline</div>
+            <ul>
+              <li>Extract → Segment</li>
+              <li>Search / Scrape</li>
+              <li>Rerank → Summarize</li>
+              <li>Researcher (agentic)</li>
+            </ul>
+          </div>
+          <div class="block">
+            <div class="h">04 · D — media</div>
+            <div class="t">Multi-modal</div>
+            <ul>
+              <li>Render — text → image</li>
+              <li>Synthesize — text → speech</li>
+              <li>Transcribe — speech → text</li>
+              <li>Translate — text → text</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 05 MATRIX -->
+    <div class="strip">
+      <div class="num">05</div>
+      <div>
+        <div class="label"><span class="tag">Provider Interfaces × Backends</span> · typed contracts, swappable implementations</div>
+        <div class="matrix">
+
+          <div class="iface"><div class="role">Completer</div><div class="kind">chat · reason</div></div>
+          <div class="backs">
+            <span class="b">openai</span><span class="b">anthropic</span><span class="b">gemini</span>
+            <span class="b">bedrock</span><span class="b">mistral</span><span class="b">xai</span>
+            <span class="b">ollama</span><span class="b">llama</span><span class="b">huggingface</span>
+            <span class="b">openrouter</span><span class="b">nvidia/nim</span><span class="b">openai-compatible</span>
+            <span class="b star">custom · gRPC</span>
+          </div>
+          <div class="meta-c"><span class="cnt">13</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
+
+          <div class="iface"><div class="role">Embedder</div><div class="kind">vectors</div></div>
+          <div class="backs">
+            <span class="b">openai</span><span class="b">gemini</span><span class="b">mistral</span>
+            <span class="b">jina</span><span class="b">ollama</span><span class="b">llama</span>
+            <span class="b">huggingface</span><span class="b">openai-compatible</span>
+            <span class="b star">custom · gRPC</span>
+          </div>
+          <div class="meta-c"><span class="cnt">9</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
+
+          <div class="iface"><div class="role">Renderer</div><div class="kind">text → image</div></div>
+          <div class="backs">
+            <span class="b">openai</span><span class="b">gemini</span><span class="b">xai</span>
+            <span class="b">replicate</span><span class="b">openrouter</span>
+          </div>
+          <div class="meta-c"><span class="cnt">5</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
+
+          <div class="iface"><div class="role">Synthesizer</div><div class="kind">text → speech</div></div>
+          <div class="backs">
+            <span class="b">openai</span><span class="b">xai</span><span class="b">azurespeech</span>
+            <span class="b">openrouter</span>
+          </div>
+          <div class="meta-c"><span class="cnt">4</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
+
+          <div class="iface"><div class="role">Transcriber</div><div class="kind">speech → text</div></div>
+          <div class="backs">
+            <span class="b">openai</span><span class="b">mistral</span><span class="b">azurespeech</span>
+            <span class="b">openrouter</span>
+          </div>
+          <div class="meta-c"><span class="cnt">4</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
+
+          <div class="iface"><div class="role">Reranker</div><div class="kind">relevance</div></div>
+          <div class="backs">
+            <span class="b">jina</span><span class="b">huggingface</span><span class="b">llama</span>
+            <span class="b">wingman-reranker</span>
+          </div>
+          <div class="meta-c"><span class="cnt">4</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
+
+          <div class="iface"><div class="role">Extractor</div><div class="kind">doc → text</div></div>
+          <div class="backs">
+            <span class="b">tika</span><span class="b">unstructured</span><span class="b">docling</span>
+            <span class="b">kreuzberg</span><span class="b">azure</span><span class="b">mistral</span>
+            <span class="b">llm</span><span class="b">text</span>
+          </div>
+          <div class="meta-c"><span class="cnt">8</span><span class="key"><b>extractors</b>:<br/>{}.type</span></div>
+
+          <div class="iface"><div class="role">Segmenter</div><div class="kind">chunk</div></div>
+          <div class="backs">
+            <span class="b">jina</span><span class="b">kreuzberg</span><span class="b">unstructured</span>
+            <span class="b">text</span>
+          </div>
+          <div class="meta-c"><span class="cnt">4</span><span class="key"><b>segmenters</b>:<br/>{}.type</span></div>
+
+          <div class="iface"><div class="role">Searcher / Scraper</div><div class="kind">web</div></div>
+          <div class="backs">
+            <span class="b">duckduckgo</span><span class="b">exa</span><span class="b">tavily</span>
+            <span class="b">jina</span><span class="b">fetch</span>
+          </div>
+          <div class="meta-c"><span class="cnt">5</span><span class="key"><b>searchers</b> /<br/><b>scrapers</b>:{}.type</span></div>
+
+          <div class="iface"><div class="role">Researcher</div><div class="kind">deep research</div></div>
+          <div class="backs">
+            <span class="b">openai</span><span class="b">anthropic</span><span class="b">perplexity</span>
+            <span class="b">exa</span><span class="b star">agent (built-in)</span>
+          </div>
+          <div class="meta-c"><span class="cnt">5</span><span class="key"><b>researchers</b>:<br/>{}.type</span></div>
+
+          <div class="iface"><div class="role">Translator</div><div class="kind">text → text</div></div>
+          <div class="backs">
+            <span class="b">deepl</span><span class="b">azure</span><span class="b">llm</span>
+            <span class="b star">custom · gRPC</span>
+          </div>
+          <div class="meta-c"><span class="cnt">4</span><span class="key"><b>translators</b>:<br/>{}.type</span></div>
+
+          <div class="iface"><div class="role">Authorizer</div><div class="kind">auth</div></div>
+          <div class="backs">
+            <span class="b">anonymous</span><span class="b">header</span><span class="b">static</span>
+            <span class="b">oidc</span>
+          </div>
+          <div class="meta-c"><span class="cnt">4</span><span class="key"><b>authorizers</b>:<br/>[].type</span></div>
+
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <div>★ One config file. Compose the platform.</div>
+    <div class="big">
+      providers <span class="acc">·</span> routers <span class="acc">·</span> tools <span class="acc">·</span>
+      agents <span class="acc">·</span> mcps <span class="acc">·</span> extractors <span class="acc">·</span>
+      segmenters <span class="acc">·</span> searchers <span class="acc">·</span> scrapers <span class="acc">·</span>
+      researchers <span class="acc">·</span> translators <span class="acc">·</span> authorizers
+    </div>
+    <div>FIG. 1 · v.2026.05</div>
+  </div>
+
+</section>
+
+</body>
+</html>

@@ -42,7 +42,6 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 	u, _ := url.Parse("https://api.tavily.com/search")
 
 	body := map[string]any{
-		"api_key":      c.token,
 		"query":        query,
 		"search_depth": "advanced",
 	}
@@ -57,6 +56,7 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", u.String(), jsonReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
 
 	resp, err := c.client.Do(req)
 

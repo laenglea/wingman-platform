@@ -2,7 +2,6 @@ package research
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 
@@ -77,14 +76,9 @@ func (c *Client) Execute(ctx context.Context, name string, parameters map[string
 	return data.Content, nil
 }
 
+// Result implements tool.Resulter so the agent chain sees the research report
+// as plain markdown text instead of a JSON-quoted blob.
 func (c *Client) Result(name string, value any) provider.ToolResult {
-	switch v := value.(type) {
-	case string:
-		return provider.ToolResult{Parts: []provider.Part{{Text: v}}}
-	case Result:
-		return provider.ToolResult{Parts: []provider.Part{{Text: v.Content}}}
-	default:
-		data, _ := json.Marshal(value)
-		return provider.ToolResult{Parts: []provider.Part{{Text: string(data)}}}
-	}
+	text, _ := value.(string)
+	return provider.ToolResult{Parts: []provider.Part{{Text: text}}}
 }

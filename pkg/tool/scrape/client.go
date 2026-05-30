@@ -96,10 +96,7 @@ func (c *Client) Execute(ctx context.Context, name string, parameters map[string
 		return nil, err
 	}
 
-	text := doc.Text
-	if c.maxChars > 0 && len(text) > c.maxChars {
-		text = text[:c.maxChars]
-	}
+	text := truncate(doc.Text, c.maxChars)
 
 	return formatDocument(raw, text), nil
 }
@@ -111,6 +108,19 @@ func (c *Client) Result(name string, value any) provider.ToolResult {
 	return provider.ToolResult{
 		Parts: []provider.Part{{Text: text}},
 	}
+}
+
+// truncate limits text to at most max characters (runes), so multi-byte
+// characters are never split mid-rune. A non-positive max means no limit.
+func truncate(text string, max int) string {
+	if max <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= max {
+		return text
+	}
+	return string(runes[:max])
 }
 
 func formatDocument(source, text string) string {
