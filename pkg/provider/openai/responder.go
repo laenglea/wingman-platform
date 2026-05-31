@@ -339,7 +339,7 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		case provider.EffortLow:
 			req.Reasoning.Effort = responses.ReasoningEffortLow
 
-		case provider.EffortMedium:
+		case provider.EffortMedium, provider.EffortAdaptive:
 			req.Reasoning.Effort = responses.ReasoningEffortMedium
 
 		case provider.EffortHigh:

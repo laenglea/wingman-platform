@@ -266,6 +266,30 @@ const (
 	EffortAdaptive Effort = "adaptive"
 )
 
+// EffortFromBudget maps a numeric thinking-token budget to the coarser Effort
+// scale, for providers that express reasoning as a token allowance rather than
+// a level. A nil or negative budget means "let the model decide" (medium); 0
+// disables thinking.
+func EffortFromBudget(budget *int) Effort {
+	if budget == nil {
+		return EffortMedium
+	}
+	switch {
+	case *budget < 0:
+		return EffortMedium
+	case *budget == 0:
+		return EffortNone
+	case *budget <= 1024:
+		return EffortMinimal
+	case *budget <= 4096:
+		return EffortLow
+	case *budget <= 16384:
+		return EffortMedium
+	default:
+		return EffortHigh
+	}
+}
+
 type Verbosity string
 
 const (

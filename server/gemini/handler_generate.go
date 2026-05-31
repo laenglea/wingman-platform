@@ -245,35 +245,12 @@ func (h *Handler) parseGenerateRequest(r *http.Request) (provider.Completer, []p
 			case "high":
 				options.ReasoningOptions.Effort = provider.EffortHigh
 			default:
-				options.ReasoningOptions.Effort = effortFromBudget(tc.ThinkingBudget)
+				options.ReasoningOptions.Effort = provider.EffortFromBudget(tc.ThinkingBudget)
 			}
 		}
 	}
 
 	return completer, messages, options, nil
-}
-
-// effortFromBudget maps Gemini's numeric thinkingBudget (token allowance) to
-// the provider's coarser Effort scale. -1 is the documented "let the model
-// decide" sentinel; 0 disables thinking.
-func effortFromBudget(budget *int) provider.Effort {
-	if budget == nil {
-		return provider.EffortMedium
-	}
-	switch {
-	case *budget < 0:
-		return provider.EffortMedium
-	case *budget == 0:
-		return provider.EffortNone
-	case *budget <= 1024:
-		return provider.EffortMinimal
-	case *budget <= 4096:
-		return provider.EffortLow
-	case *budget <= 16384:
-		return provider.EffortMedium
-	default:
-		return provider.EffortHigh
-	}
 }
 
 func writeStreamChunk(w http.ResponseWriter, response GenerateContentResponse, useSSE, firstChunk bool) error {

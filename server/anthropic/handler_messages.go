@@ -120,6 +120,10 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 			case "max":
 				effort = provider.EffortMax
 			}
+		} else if req.Thinking.Type == "enabled" && req.Thinking.BudgetTokens > 0 {
+			// Legacy fixed-budget thinking carries no effort level; derive one
+			// from the token budget so it round-trips to non-Anthropic backends.
+			effort = provider.EffortFromBudget(&req.Thinking.BudgetTokens)
 		}
 		options.ReasoningOptions = &provider.ReasoningOptions{
 			Effort:           effort,
