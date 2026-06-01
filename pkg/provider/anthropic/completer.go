@@ -396,11 +396,32 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	for _, m := range input {
 		switch m.Role {
 		case provider.MessageRoleSystem:
+			var texts []anthropic.BetaTextBlockParam
+
 			for _, c := range m.Content {
 				if c.Text != "" {
-					system = append(system, anthropic.BetaTextBlockParam{Text: c.Text})
+					texts = append(texts, anthropic.BetaTextBlockParam{Text: c.Text})
 				}
 			}
+
+			if len(texts) == 0 {
+				break
+			}
+
+			if len(messages) == 0 || isLegacyModel(c.model) {
+				system = append(system, texts...)
+				break
+			}
+
+			blocks := make([]anthropic.BetaContentBlockParamUnion, len(texts))
+			for i := range texts {
+				blocks[i] = anthropic.BetaContentBlockParamUnion{OfText: &texts[i]}
+			}
+
+			messages = append(messages, anthropic.BetaMessageParam{
+				Role:    anthropic.BetaMessageParamRoleSystem,
+				Content: blocks,
+			})
 
 		case provider.MessageRoleUser:
 			var blocks []anthropic.BetaContentBlockParamUnion

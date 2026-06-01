@@ -42,6 +42,9 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 	var role provider.MessageRole
 
 	switch m.Role {
+	case MessageRoleSystem:
+		role = provider.MessageRoleSystem
+
 	case MessageRoleUser:
 		role = provider.MessageRoleUser
 
@@ -50,7 +53,7 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 
 	default:
 		return nil, fmt.Errorf(
-			"messages.%d: Unexpected role %q. Allowed roles are \"user\" or \"assistant\"",
+			"messages.%d: Unexpected role %q. Allowed roles are \"system\", \"user\" or \"assistant\"",
 			index, m.Role,
 		)
 	}

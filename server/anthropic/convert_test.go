@@ -115,6 +115,55 @@ func TestToMessage_DocumentBlocks(t *testing.T) {
 	}
 }
 
+// TestToMessage_SystemRole verifies that a "system"-role input message (now
+// allowed mid-conversation by newer Claude models) maps to a provider system
+// message instead of being rejected as an unknown role.
+func TestToMessage_SystemRole(t *testing.T) {
+	msg, err := toMessage(0, MessageParam{Role: MessageRoleSystem, Content: "be terse"})
+	if err != nil {
+		t.Fatalf("toMessage: %v", err)
+	}
+
+	if msg.Role != provider.MessageRoleSystem {
+		t.Errorf("role: got %q, want %q", msg.Role, provider.MessageRoleSystem)
+	}
+
+	if len(msg.Content) != 1 || msg.Content[0].Text != "be terse" {
+		t.Errorf("content: got %+v, want single text %q", msg.Content, "be terse")
+	}
+}
+
+// TestToMessages_SystemRoleAfterTopLevel verifies ordering: the top-level
+// system prompt is prepended, and a mid-conversation system message keeps its
+// position in the resulting message list.
+func TestToMessages_SystemRoleAfterTopLevel(t *testing.T) {
+	messages, err := toMessages("top-level system", []MessageParam{
+		{Role: MessageRoleUser, Content: "hi"},
+		{Role: MessageRoleSystem, Content: "now switch to formal tone"},
+		{Role: MessageRoleAssistant, Content: "Understood."},
+	})
+	if err != nil {
+		t.Fatalf("toMessages: %v", err)
+	}
+
+	wantRoles := []provider.MessageRole{
+		provider.MessageRoleSystem,
+		provider.MessageRoleUser,
+		provider.MessageRoleSystem,
+		provider.MessageRoleAssistant,
+	}
+
+	if len(messages) != len(wantRoles) {
+		t.Fatalf("expected %d messages, got %d", len(wantRoles), len(messages))
+	}
+
+	for i, want := range wantRoles {
+		if messages[i].Role != want {
+			t.Errorf("messages[%d].Role: got %q, want %q", i, messages[i].Role, want)
+		}
+	}
+}
+
 func blocksToAny(blocks []ContentBlockParam) any {
 	out := make([]any, len(blocks))
 	for i, b := range blocks {
