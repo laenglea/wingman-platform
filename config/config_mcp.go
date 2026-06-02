@@ -4,6 +4,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/mcp"
@@ -18,6 +19,18 @@ func (cfg *Config) RegisterMCP(id string, p mcp.Provider) {
 	}
 
 	cfg.mcps[id] = p
+}
+
+func (cfg *Config) MCPs() []string {
+	var result []string
+
+	for id := range cfg.mcps {
+		result = append(result, id)
+	}
+
+	sort.Strings(result)
+
+	return result
 }
 
 func (cfg *Config) MCP(id string) (mcp.Provider, error) {

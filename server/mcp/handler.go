@@ -6,6 +6,7 @@ import (
 
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/pkg/policy"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -23,9 +24,31 @@ func New(cfg *config.Config) *Handler {
 }
 
 func (h *Handler) Attach(r chi.Router) {
-	r.HandleFunc("/mcp/{id}/icon", h.handleIcon)
+	r.Get("/mcp", h.handleMCPs)
+
+	r.Get("/mcp/{id}/icon", h.handleIcon)
 	r.HandleFunc("/mcp/{id}", h.handleMCP)
 	r.HandleFunc("/mcp/{id}/*", h.handleMCP)
+}
+
+func (h *Handler) handleMCPs(w http.ResponseWriter, r *http.Request) {
+	result := &MCPList{
+		Object: "list",
+	}
+
+	for _, id := range h.MCPs() {
+		if h.Policy.Verify(r.Context(), policy.ResourceMCP, id, policy.ActionAccess) != nil {
+			continue
+		}
+
+		result.MCPs = append(result.MCPs, MCP{
+			Object: "mcp",
+
+			ID: id,
+		})
+	}
+
+	shared.WriteJson(w, result)
 }
 
 func (h *Handler) handleIcon(w http.ResponseWriter, r *http.Request) {
