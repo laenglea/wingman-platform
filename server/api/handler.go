@@ -22,6 +22,8 @@ func New(cfg *config.Config) *Handler {
 }
 
 func (h *Handler) Attach(r chi.Router) {
+	r.Get("/token", h.handleToken)
+
 	r.Post("/extract", h.handleExtract)
 	r.Post("/render", h.handleRender)
 

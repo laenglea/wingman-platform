@@ -39,14 +39,20 @@ func New(path string, opts ...Option) (*Provider, error) {
 func (p *Provider) Verify(ctx context.Context, resource policy.Resource, id string, action policy.Action) error {
 	user, _ := ctx.Value(auth.UserContextKey).(string)
 	email, _ := ctx.Value(auth.EmailContextKey).(string)
+	groups, _ := ctx.Value(auth.GroupsContextKey).([]string)
+
+	if groups == nil {
+		groups = []string{}
+	}
 
 	evalInput := map[string]any{
 		"resource": resource,
 		"id":       id,
 		"action":   action,
 
-		"user":  user,
-		"email": email,
+		"user":   user,
+		"email":  email,
+		"groups": groups,
 	}
 
 	results, err := p.query.Eval(ctx, rego.EvalInput(evalInput))

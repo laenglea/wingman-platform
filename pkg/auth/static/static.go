@@ -60,5 +60,17 @@ func (p *Provider) Authenticate(ctx context.Context, r *http.Request) (context.C
 		ctx = context.WithValue(ctx, auth.NameContextKey, name)
 	}
 
+	var groups []string
+
+	for _, g := range strings.Split(r.Header.Get("X-Forwarded-Groups"), ",") {
+		if g = strings.TrimSpace(g); g != "" {
+			groups = append(groups, g)
+		}
+	}
+
+	if len(groups) > 0 {
+		ctx = context.WithValue(ctx, auth.GroupsContextKey, groups)
+	}
+
 	return ctx, nil
 }

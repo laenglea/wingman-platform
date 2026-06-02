@@ -10,8 +10,9 @@ import (
 )
 
 type Provider struct {
-	userHeader  string
-	emailHeader string
+	userHeader   string
+	emailHeader  string
+	groupsHeader string
 }
 
 type Option func(*Provider)
@@ -29,6 +30,10 @@ func New(opts ...Option) (*Provider, error) {
 
 	if p.emailHeader == "" {
 		p.emailHeader = "X-Forwarded-Email"
+	}
+
+	if p.groupsHeader == "" {
+		p.groupsHeader = "X-Forwarded-Groups"
 	}
 
 	return p, nil
@@ -54,5 +59,21 @@ func (p *Provider) Authenticate(ctx context.Context, r *http.Request) (context.C
 		ctx = context.WithValue(ctx, auth.EmailContextKey, email)
 	}
 
+	if groups := parseGroups(r.Header.Get(p.groupsHeader)); len(groups) > 0 {
+		ctx = context.WithValue(ctx, auth.GroupsContextKey, groups)
+	}
+
 	return ctx, nil
+}
+
+func parseGroups(value string) []string {
+	var groups []string
+
+	for _, g := range strings.Split(value, ",") {
+		if g = strings.TrimSpace(g); g != "" {
+			groups = append(groups, g)
+		}
+	}
+
+	return groups
 }
