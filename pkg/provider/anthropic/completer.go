@@ -50,6 +50,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			return
 		}
 
+		toolAliases := provider.ToolAliases(options.Tools)
+
 		message := anthropic.BetaMessage{}
 		stream := c.messages.NewStreaming(ctx, *req)
 
@@ -174,6 +176,11 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					}
 
 				case anthropic.BetaToolUseBlock:
+					call := provider.UnflattenToolCall(toolAliases, provider.ToolCall{
+						ID:   event.ID,
+						Name: event.Name,
+					})
+
 					delta := &provider.Completion{
 						ID:    message.ID,
 						Model: c.model,
@@ -182,10 +189,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 							Role: provider.MessageRoleAssistant,
 
 							Content: []provider.Content{
-								provider.ToolCallContent(provider.ToolCall{
-									ID:   event.ID,
-									Name: event.Name,
-								}),
+								provider.ToolCallContent(call),
 							},
 						},
 
@@ -573,7 +577,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 					blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
 						OfToolUse: &anthropic.BetaToolUseBlockParam{
 							ID:    c.ToolCall.ID,
-							Name:  c.ToolCall.Name,
+							Name:  provider.FlattenToolName(*c.ToolCall),
 							Input: input,
 						},
 					})
@@ -649,9 +653,9 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		if properties == nil {
 			// json_object mode: Anthropic requires a non-empty schema, and rejects
 			// `type: object` unless additionalProperties is explicitly false.
-			properties = map[string]any{"type": "object", "additionalProperties": false}
+			properties = map[string]any{"type": "object"}
 		}
-		req.OutputConfig.Format = anthropic.BetaJSONOutputFormatParam{Schema: properties}
+		req.OutputConfig.Format = anthropic.BetaJSONOutputFormatParam{Schema: ensureAdditionalPropertiesFalse(properties)}
 	}
 
 	if options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 && !isLegacyModel(c.model) {

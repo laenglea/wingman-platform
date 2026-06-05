@@ -131,6 +131,7 @@ func TestStreamingAccumulatorSplitsThinkingBlocks(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
+	acc.ThinkingEnabled = true
 
 	add := func(content provider.Content) {
 		t.Helper()

@@ -251,7 +251,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			}
 		}
 
-		if content.Reasoning != nil && (content.Reasoning.Text != "" || content.Reasoning.Signature != "") {
+		if s.ThinkingEnabled && content.Reasoning != nil && (content.Reasoning.Text != "" || content.Reasoning.Signature != "") {
 			reasoning := content.Reasoning
 
 			// A signature ends a thinking block; a new ID starts the next item

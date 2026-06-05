@@ -68,9 +68,11 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 		}
 	}
 
-	// Emit the response
-	if err := s.handler(response); err != nil {
-		return err
+	// Gemini always includes candidates; skip chunks without content
+	if len(response.Candidates) > 0 {
+		if err := s.handler(response); err != nil {
+			return err
+		}
 	}
 
 	// Add to underlying accumulator

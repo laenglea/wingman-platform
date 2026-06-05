@@ -42,20 +42,42 @@ func New(t *testing.T) *Harness {
 	}
 }
 
-type ModelCapabilities struct {
-	Thinking    bool
-	TextEditor  bool
-	Compaction  bool
-	ComputerUse bool
-}
-
 type Model struct {
 	Name         string
-	Capabilities ModelCapabilities
+	Capabilities harness.Capabilities
+}
+
+func ModelCapabilities(name string) harness.Capabilities {
+	n := strings.ToLower(name)
+
+	switch {
+	case strings.Contains(n, "bedrock"):
+		return harness.Capabilities{Thinking: true, StructuredOutput: true}
+
+	case strings.Contains(n, "claude"):
+		switch {
+		case strings.Contains(n, "claude-3"):
+			return harness.Capabilities{Thinking: true, StructuredOutput: true, Cache: true}
+		case strings.Contains(n, "haiku-4-5"):
+			return harness.Capabilities{StructuredOutput: true, Cache: true}
+		case strings.Contains(n, "-4-0"), strings.Contains(n, "opus-4-1"), strings.Contains(n, "-4-5"):
+			return harness.Capabilities{Thinking: true, StructuredOutput: true, Cache: true, TextEditor: true, ComputerUse: true}
+		default:
+			return harness.Capabilities{Thinking: true, StructuredOutput: true, Cache: true, TextEditor: true, ComputerUse: true, Compaction: true}
+		}
+
+	case strings.Contains(n, "gemini"):
+		return harness.Capabilities{StructuredOutput: true, Audio: true}
+
+	case strings.HasPrefix(n, "gpt"), strings.HasPrefix(n, "o3"), strings.HasPrefix(n, "o4"):
+		return harness.Capabilities{StructuredOutput: true, Cache: true}
+	}
+
+	return harness.Capabilities{StructuredOutput: true}
 }
 
 func DefaultModels() []Model {
-	names := []string{"claude-sonnet-4-6"}
+	names := []string{"claude-sonnet-4-6", "bedrock-sonnet-4-6", "gpt-5.4", "gemini-3.5-flash"}
 	if v := os.Getenv("TEST_ANTHROPIC_MODELS"); v != "" {
 		names = names[:0]
 		for s := range strings.SplitSeq(v, ",") {
@@ -67,24 +89,9 @@ func DefaultModels() []Model {
 
 	models := make([]Model, len(names))
 	for i, name := range names {
-		models[i] = Model{Name: name, Capabilities: knownCapabilities(name)}
+		models[i] = Model{Name: name, Capabilities: ModelCapabilities(name)}
 	}
 	return models
-}
-
-func knownCapabilities(name string) ModelCapabilities {
-	name = strings.ToLower(name)
-
-	switch {
-	case strings.Contains(name, "claude-3"):
-		return ModelCapabilities{Thinking: true}
-	case strings.Contains(name, "haiku-4-5"):
-		return ModelCapabilities{}
-	case strings.Contains(name, "-4-0"), strings.Contains(name, "opus-4-1"), strings.Contains(name, "-4-5"):
-		return ModelCapabilities{Thinking: true, TextEditor: true, ComputerUse: true}
-	default:
-		return ModelCapabilities{Thinking: true, TextEditor: true, Compaction: true, ComputerUse: true}
-	}
 }
 
 func env(key, fallback string) string {

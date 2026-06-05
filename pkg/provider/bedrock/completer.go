@@ -150,6 +150,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 		id := uuid.NewString()
 
+		toolAliases := provider.ToolAliases(options.Tools)
 		toolCallIDs := map[int32]string{}
 
 		for event := range resp.GetStream().Events() {
@@ -179,6 +180,11 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 						continue
 					}
 
+					call := provider.UnflattenToolCall(toolAliases, provider.ToolCall{
+						ID:   aws.ToString(b.Value.ToolUseId),
+						Name: aws.ToString(b.Value.Name),
+					})
+
 					delta := &provider.Completion{
 						ID:    id,
 						Model: c.model,
@@ -187,10 +193,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 							Role: provider.MessageRoleAssistant,
 
 							Content: []provider.Content{
-								provider.ToolCallContent(provider.ToolCall{
-									ID:   aws.ToString(b.Value.ToolUseId),
-									Name: aws.ToString(b.Value.Name),
-								}),
+								provider.ToolCallContent(call),
 							},
 						},
 					}
@@ -718,7 +721,7 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 				Value: types.ToolUseBlock{
 					ToolUseId: aws.String(c.ToolCall.ID),
 
-					Name:  aws.String(c.ToolCall.Name),
+					Name:  aws.String(provider.FlattenToolName(*c.ToolCall)),
 					Input: document.NewLazyDocument(data),
 				},
 			})

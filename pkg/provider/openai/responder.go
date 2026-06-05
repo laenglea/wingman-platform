@@ -215,7 +215,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 
 				case responses.ResponseReasoningItem:
 					// Capture encrypted_content for conversation continuity
-					if item.EncryptedContent != "" {
+					if item.ID != "" || item.EncryptedContent != "" {
 						if !emit(provider.ReasoningContent(provider.Reasoning{ID: item.ID, Signature: item.EncryptedContent}), "") {
 							return
 						}

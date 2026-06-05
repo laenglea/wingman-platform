@@ -55,6 +55,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 		config := convertGenerateConfig(convertInstruction(messages), options)
 
+		toolAliases := provider.ToolAliases(options.Tools)
+
 		iter := client.Models.GenerateContentStream(ctx, c.model, contents, config)
 
 		for resp, err := range iter {
@@ -76,7 +78,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			if len(resp.Candidates) > 0 {
 				candidate := resp.Candidates[0]
 
-				delta.Message.Content = toContent(candidate.Content)
+				delta.Message.Content = toContent(candidate.Content, toolAliases)
 			}
 
 			if !yield(delta, nil) {
@@ -187,7 +189,7 @@ func convertGenerateConfig(instruction *genai.Content, options *provider.Complet
 	return config
 }
 
-func convertContent(message provider.Message, callNames map[string]string) (*genai.Content, error) {
+func convertContent(message provider.Message, toolCallNames map[string]string) (*genai.Content, error) {
 	content := &genai.Content{}
 
 	switch message.Role {
@@ -254,7 +256,7 @@ func convertContent(message provider.Message, callNames map[string]string) (*gen
 				// FunctionResponse requires a non-empty name on the wire.
 				name := encodedName
 				if name == "" {
-					name = callNames[id]
+					name = toolCallNames[id]
 				}
 
 				part := genai.NewPartFromFunctionResponse(name, parameters)
@@ -314,7 +316,7 @@ func convertContent(message provider.Message, callNames map[string]string) (*gen
 
 				// Prefer the explicit Name field (always set on assistant tool
 				// calls); fall back to the encoded suffix for round-tripped IDs.
-				name := c.ToolCall.Name
+				name := provider.FlattenToolName(*c.ToolCall)
 				if name == "" {
 					name = encodedName
 				}
@@ -348,7 +350,7 @@ func convertMessages(messages []provider.Message) ([]*genai.Content, error) {
 	// (which have no Name field) can recover the tool name when the id isn't
 	// in encoded form. The lookup uses both the raw id and the plain id
 	// component of an encoded id, since clients may replay either shape.
-	callNames := map[string]string{}
+	toolCallNames := map[string]string{}
 	for _, m := range messages {
 		if m.Role != provider.MessageRoleAssistant {
 			continue
@@ -357,9 +359,11 @@ func convertMessages(messages []provider.Message) ([]*genai.Content, error) {
 			if c.ToolCall == nil || c.ToolCall.Name == "" {
 				continue
 			}
-			callNames[c.ToolCall.ID] = c.ToolCall.Name
+			name := provider.FlattenToolName(*c.ToolCall)
+
+			toolCallNames[c.ToolCall.ID] = name
 			if plain, _, _ := parseToolID(c.ToolCall.ID); plain != "" && plain != c.ToolCall.ID {
-				callNames[plain] = c.ToolCall.Name
+				toolCallNames[plain] = name
 			}
 		}
 	}
@@ -367,7 +371,7 @@ func convertMessages(messages []provider.Message) ([]*genai.Content, error) {
 	var result []*genai.Content
 	for _, m := range messages {
 		if m.Role == provider.MessageRoleUser || m.Role == provider.MessageRoleAssistant {
-			content, err := convertContent(m, callNames)
+			content, err := convertContent(m, toolCallNames)
 			if err != nil {
 				return nil, err
 			}
@@ -406,7 +410,7 @@ func convertTools(tools []provider.Tool) []*genai.Tool {
 	}
 }
 
-func toContent(content *genai.Content) []provider.Content {
+func toContent(content *genai.Content, toolAliases map[string]provider.Tool) []provider.Content {
 	var parts []provider.Content
 
 	for _, p := range content.Parts {
@@ -455,12 +459,12 @@ func toContent(content *genai.Content) []provider.Content {
 		if p.FunctionCall != nil {
 			data, _ := json.Marshal(p.FunctionCall.Args)
 
-			call := provider.ToolCall{
+			call := provider.UnflattenToolCall(toolAliases, provider.ToolCall{
 				ID: formatToolID(p.FunctionCall.ID, p.FunctionCall.Name, p.ThoughtSignature),
 
 				Name:      p.FunctionCall.Name,
 				Arguments: string(data),
-			}
+			})
 
 			parts = append(parts, provider.ToolCallContent(call))
 		}

@@ -427,6 +427,7 @@ type InputReasoning struct {
 // InputCompaction represents a compaction item in the input
 type InputCompaction struct {
 	ID               string `json:"id,omitempty"`
+	Content          string `json:"content,omitempty"`
 	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
 
@@ -973,10 +974,12 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 			return json.Marshal(struct {
 				Type             ResponseOutputType `json:"type"`
 				ID               string             `json:"id"`
+				Content          string             `json:"content,omitempty"`
 				EncryptedContent string             `json:"encrypted_content,omitempty"`
 			}{
 				Type:             r.Type,
 				ID:               r.CompactionOutputItem.ID,
+				Content:          r.CompactionOutputItem.Content,
 				EncryptedContent: r.CompactionOutputItem.EncryptedContent,
 			})
 		}
@@ -1230,6 +1233,7 @@ type FunctionCallOutputItemDoneEvent struct {
 type CompactionOutputItem struct {
 	ID               string `json:"id"`
 	Type             string `json:"type"` // compaction
+	Content          string `json:"content,omitempty"`
 	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
 

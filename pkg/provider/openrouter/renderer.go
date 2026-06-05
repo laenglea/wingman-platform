@@ -70,7 +70,7 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 				"content": content,
 			},
 		},
-		"modalities": []string{"image", "text"},
+		"modalities": []string{"image"},
 		"stream":     false,
 	}
 

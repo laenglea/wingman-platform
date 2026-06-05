@@ -10,7 +10,7 @@ func DefaultResponsesResponseRules() map[string]harness.FieldRule {
 		"completed_at":               harness.FieldPresence,
 		"model":                      harness.FieldIgnore,
 		"output.*.id":                harness.FieldPresence,
-		"output.*.content.*.text":    harness.FieldIgnore,
+		"output.*.content":           harness.FieldIgnore,
 		"output.*.encrypted_content": harness.FieldIgnore,
 		"output.*.summary":           harness.FieldPresence,
 		"output.*.summary.*.text":    harness.FieldIgnore,

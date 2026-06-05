@@ -87,8 +87,9 @@ type StreamEvent struct {
 	ContentIndex       int
 
 	// For compaction events
-	CompactionID      string
-	CompactionContent string
+	CompactionID               string
+	CompactionContent          string
+	CompactionEncryptedContent string
 
 	// For error events
 	Error error
@@ -161,6 +162,12 @@ type StreamingAccumulator struct {
 	streamedReasoningSummary strings.Builder
 
 	completedReasonings []provider.Reasoning
+
+	compactionID        string
+	compactionText      string
+	compactionEncrypted string
+	hasCompactionItem   bool
+	compactionIndex     int
 
 	compactions  []provider.Compaction
 	contentOrder []streamContentRef
@@ -235,6 +242,10 @@ func (s *StreamingAccumulator) start() error {
 func (s *StreamingAccumulator) ensureMessageItem() error {
 	if s.hasOutputItem {
 		return nil
+	}
+
+	if err := s.closeCompaction(); err != nil {
+		return err
 	}
 
 	s.hasOutputItem = true
@@ -389,6 +400,10 @@ func (s *StreamingAccumulator) shouldClosePreviousToolCall(nextID string) bool {
 func (s *StreamingAccumulator) ensureReasoningItem() error {
 	if s.hasReasoningItem {
 		return nil
+	}
+
+	if err := s.closeCompaction(); err != nil {
+		return err
 	}
 
 	s.hasReasoningItem = true
@@ -580,15 +595,47 @@ func (s *StreamingAccumulator) closeMessage() error {
 	})
 }
 
-// closePendingItems closes any in-progress reasoning and message items.
-// Must be called before emitting function call events so that the client
-// sees each output item completed before the next one starts.
+// closePendingItems closes any in-progress compaction, reasoning and message
+// items. Must be called before emitting function call events so that the
+// client sees each output item completed before the next one starts.
 func (s *StreamingAccumulator) closePendingItems() error {
+	if err := s.closeCompaction(); err != nil {
+		return err
+	}
+
 	if err := s.closeReasoning(); err != nil {
 		return err
 	}
 
 	return s.closeMessage()
+}
+
+func (s *StreamingAccumulator) closeCompaction() error {
+	if !s.hasCompactionItem {
+		return nil
+	}
+
+	s.compactions = append(s.compactions, provider.Compaction{
+		ID:        s.compactionID,
+		Content:   s.compactionText,
+		Signature: s.compactionEncrypted,
+	})
+	s.contentOrder = append(s.contentOrder, streamContentRef{kind: streamContentCompaction, index: len(s.compactions) - 1})
+
+	err := s.emitEvent(StreamEvent{
+		Type:                       StreamEventCompactionItemDone,
+		CompactionID:               s.compactionID,
+		CompactionContent:          s.compactionText,
+		CompactionEncryptedContent: s.compactionEncrypted,
+		OutputIndex:                s.compactionIndex,
+	})
+
+	s.hasCompactionItem = false
+	s.compactionID = ""
+	s.compactionText = ""
+	s.compactionEncrypted = ""
+
+	return err
 }
 
 // Add processes a completion chunk and emits appropriate events.
@@ -616,44 +663,43 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 	}
 
 	for _, content := range c.Message.Content {
-		// Compaction — atomic item, emitted as added+done.
-		// Must close pending reasoning/message first so each output item
-		// completes before the next one starts.
-		if content.Compaction != nil && content.Compaction.Signature != "" {
-			if err := s.closePendingItems(); err != nil {
-				return err
+		// Compaction may stream in chunks; the item stays in-flight until
+		// other content starts or the stream completes.
+		if content.Compaction != nil && (content.Compaction.Content != "" || content.Compaction.Signature != "") {
+			if s.hasCompactionItem && content.Compaction.ID != "" && s.compactionID != "" && content.Compaction.ID != s.compactionID {
+				if err := s.closeCompaction(); err != nil {
+					return err
+				}
 			}
 
-			compactionID := content.Compaction.ID
-			if compactionID == "" {
-				compactionID = "comp_" + uuid.NewString()
+			if !s.hasCompactionItem {
+				if err := s.closePendingItems(); err != nil {
+					return err
+				}
+
+				s.hasCompactionItem = true
+				s.compactionIndex = s.reserveOutputIndex()
+
+				s.compactionID = content.Compaction.ID
+				if s.compactionID == "" {
+					s.compactionID = "comp_" + uuid.NewString()
+				}
+
+				if err := s.emitEvent(StreamEvent{
+					Type:         StreamEventCompactionItemAdded,
+					CompactionID: s.compactionID,
+					OutputIndex:  s.compactionIndex,
+				}); err != nil {
+					return err
+				}
 			}
 
-			compactionContent := content.Compaction.Signature
-			outputIndex := s.reserveOutputIndex()
-
-			s.compactions = append(s.compactions, provider.Compaction{
-				ID:        compactionID,
-				Signature: compactionContent,
-			})
-			s.contentOrder = append(s.contentOrder, streamContentRef{kind: streamContentCompaction, index: len(s.compactions) - 1})
-
-			if err := s.emitEvent(StreamEvent{
-				Type:              StreamEventCompactionItemAdded,
-				CompactionID:      compactionID,
-				CompactionContent: compactionContent,
-				OutputIndex:       outputIndex,
-			}); err != nil {
-				return err
+			if content.Compaction.Content != "" {
+				s.compactionText = content.Compaction.Content
 			}
 
-			if err := s.emitEvent(StreamEvent{
-				Type:              StreamEventCompactionItemDone,
-				CompactionID:      compactionID,
-				CompactionContent: compactionContent,
-				OutputIndex:       outputIndex,
-			}); err != nil {
-				return err
+			if content.Compaction.Signature != "" {
+				s.compactionEncrypted = content.Compaction.Signature
 			}
 		}
 
@@ -672,6 +718,12 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 
 			if r.ID != "" && s.reasoningID == "" {
 				s.reasoningID = r.ID
+			}
+
+			if r.ID != "" {
+				if err := s.ensureReasoningItem(); err != nil {
+					return err
+				}
 			}
 
 			if r.Signature != "" {
@@ -732,6 +784,10 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 		}
 
 		if content.Refusal != "" {
+			if err := s.closeCompaction(); err != nil {
+				return err
+			}
+
 			if s.streamedRefusal.Len() == 0 {
 				s.contentOrder = append(s.contentOrder, streamContentRef{kind: streamContentRefusal})
 			}
@@ -765,6 +821,10 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 		// opening a message output item after function_call items when
 		// an upstream provider sends text after tool calls.
 		if content.Text != "" {
+			if err := s.closeCompaction(); err != nil {
+				return err
+			}
+
 			if s.streamedText.Len() == 0 {
 				s.contentOrder = append(s.contentOrder, streamContentRef{kind: streamContentText})
 			}
@@ -862,10 +922,14 @@ func (s *StreamingAccumulator) Complete() error {
 		return err
 	}
 
+	// Close items in Responses API order: compaction → reasoning → message → tool calls
+
+	if err := s.closeCompaction(); err != nil {
+		return err
+	}
+
 	result := s.Result()
 	text := s.streamedText.String()
-
-	// Close items in Responses API order: reasoning → message → tool calls
 
 	if err := s.closeReasoning(); err != nil {
 		return err

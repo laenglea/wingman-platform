@@ -491,13 +491,19 @@ func responseOutputs(message *provider.Message, messageID, status string, opts r
 			}
 		}
 
-		if content.Compaction != nil && content.Compaction.Signature != "" {
+		if content.Compaction != nil && (content.Compaction.Content != "" || content.Compaction.Signature != "") {
+			id := content.Compaction.ID
+			if id == "" {
+				id = "comp_" + uuid.NewString()
+			}
+
 			output = append(output, ResponseOutput{
 				Type: ResponseOutputTypeCompaction,
 				CompactionOutputItem: &CompactionOutputItem{
-					ID: content.Compaction.ID,
+					ID: id,
 
 					Type:             "compaction",
+					Content:          content.Compaction.Content,
 					EncryptedContent: content.Compaction.Signature,
 				},
 			})
@@ -879,9 +885,8 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				SequenceNumber: nextSeq(),
 				OutputIndex:    event.OutputIndex,
 				Item: &CompactionOutputItem{
-					ID:               event.CompactionID,
-					Type:             "compaction",
-					EncryptedContent: event.CompactionContent,
+					ID:   event.CompactionID,
+					Type: "compaction",
 				},
 			})
 
@@ -893,7 +898,8 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				Item: &CompactionOutputItem{
 					ID:               event.CompactionID,
 					Type:             "compaction",
-					EncryptedContent: event.CompactionContent,
+					Content:          event.CompactionContent,
+					EncryptedContent: event.CompactionEncryptedContent,
 				},
 			})
 

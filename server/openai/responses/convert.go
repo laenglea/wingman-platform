@@ -168,12 +168,13 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 			flushCalls()
 			flushResults()
 
-			if item.InputCompaction.EncryptedContent != "" {
+			if item.InputCompaction.Content != "" || item.InputCompaction.EncryptedContent != "" {
 				result = append(result, provider.Message{
 					Role: provider.MessageRoleAssistant,
 					Content: []provider.Content{
 						provider.CompactionContent(provider.Compaction{
 							ID:        item.InputCompaction.ID,
+							Content:   item.InputCompaction.Content,
 							Signature: item.InputCompaction.EncryptedContent,
 						}),
 					},

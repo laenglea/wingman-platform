@@ -50,6 +50,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 		stream := c.completions.NewStreaming(ctx, *req)
 
+		toolAliases := provider.ToolAliases(options.Tools)
 		toolCallIDs := map[int64]string{}
 
 		for stream.Next() {
@@ -84,12 +85,12 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 						toolCallIDs[index] = c.ID
 					}
 
-					call := provider.ToolCall{
+					call := provider.UnflattenToolCall(toolAliases, provider.ToolCall{
 						ID: toolCallIDs[index],
 
 						Name:      c.Function.Name,
 						Arguments: c.Function.Arguments,
-					}
+					})
 
 					delta.Message.Content = append(delta.Message.Content, provider.ToolCallContent(call))
 				}
@@ -347,7 +348,7 @@ func (c *Completer) convertMessages(input []provider.Message) ([]openai.ChatComp
 							ID: c.ToolCall.ID,
 
 							Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-								Name:      c.ToolCall.Name,
+								Name:      provider.FlattenToolName(*c.ToolCall),
 								Arguments: c.ToolCall.Arguments,
 							},
 						},

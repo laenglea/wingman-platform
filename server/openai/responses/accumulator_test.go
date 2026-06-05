@@ -164,10 +164,10 @@ func TestStreamingAccumulatorPreservesCompactionOrder(t *testing.T) {
 	if len(compactionEvents) != 2 {
 		t.Fatalf("expected 2 compaction done events, got %d: %+v", len(compactionEvents), compactionEvents)
 	}
-	if compactionEvents[0].CompactionID != "cmp_1" || compactionEvents[0].CompactionContent != "ENC_1" {
+	if compactionEvents[0].CompactionID != "cmp_1" || compactionEvents[0].CompactionEncryptedContent != "ENC_1" {
 		t.Fatalf("event 0: expected cmp_1, got %+v", compactionEvents[0])
 	}
-	if compactionEvents[1].CompactionID != "cmp_2" || compactionEvents[1].CompactionContent != "ENC_2" {
+	if compactionEvents[1].CompactionID != "cmp_2" || compactionEvents[1].CompactionEncryptedContent != "ENC_2" {
 		t.Fatalf("event 1: expected cmp_2, got %+v", compactionEvents[1])
 	}
 

@@ -338,11 +338,11 @@ func toTools(tools []ToolParam) ([]provider.Tool, error) {
 	return result, nil
 }
 
-func toContentBlocks(content []provider.Content) []ContentBlock {
+func toContentBlocks(content []provider.Content, includeThinking bool) []ContentBlock {
 	var result []ContentBlock
 
 	for _, c := range content {
-		if c.Reasoning != nil && (c.Reasoning.Text != "" || c.Reasoning.Summary != "" || c.Reasoning.Signature != "") {
+		if includeThinking && c.Reasoning != nil && (c.Reasoning.Text != "" || c.Reasoning.Summary != "" || c.Reasoning.Signature != "") {
 			thinking := c.Reasoning.Text
 			if thinking == "" {
 				thinking = c.Reasoning.Summary
