@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	neturl "net/url"
@@ -8,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/adrianliechti/wingman/pkg/auth"
+	"github.com/adrianliechti/wingman/pkg/auth/obo"
 	"github.com/adrianliechti/wingman/pkg/mcp"
 )
 
@@ -22,7 +25,7 @@ type Server struct {
 	icon   atomic.Pointer[iconCache]
 }
 
-func New(url string, headers map[string]string) (*Server, error) {
+func New(url string, headers map[string]string, exchanger *obo.Exchanger) (*Server, error) {
 	u, err := neturl.Parse(url)
 
 	if err != nil {
@@ -31,6 +34,7 @@ func New(url string, headers map[string]string) (*Server, error) {
 
 	rt := &rt{
 		headers:   headers,
+		exchanger: exchanger,
 		transport: http.DefaultTransport,
 	}
 
@@ -60,6 +64,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			r.Out.Host = s.url.Host
 		},
+
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			slog.Error("mcp proxy: upstream request failed", "url", r.URL.String(), "error", err)
+			w.WriteHeader(http.StatusBadGateway)
+		},
 	}
 
 	proxy.ServeHTTP(w, r)
@@ -67,10 +76,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 type rt struct {
 	headers   map[string]string
+	exchanger *obo.Exchanger
 	transport http.RoundTripper
 }
 
 func (rt *rt) RoundTrip(req *http.Request) (*http.Response, error) {
+	if rt.exchanger != nil {
+		if token, _ := req.Context().Value(auth.TokenContextKey).(string); token != "" {
+			downstream, err := rt.exchanger.Token(req.Context(), token)
+
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("Authorization", "Bearer "+downstream)
+		}
+	}
+
 	for key, value := range rt.headers {
 		if req.Header.Get(key) != "" {
 			continue // already set
