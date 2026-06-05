@@ -11,6 +11,10 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 
+func thinkingEnabled(options *provider.CompleteOptions) bool {
+	return options.ReasoningOptions != nil && options.ReasoningOptions.Effort != provider.EffortNone
+}
+
 func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 	var req MessageRequest
 
@@ -188,6 +192,12 @@ func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request,
 			CacheReadInputTokens:     completion.Usage.CacheReadInputTokens,
 			CacheCreationInputTokens: completion.Usage.CacheCreationInputTokens,
 		}
+
+		if completion.Usage.ReasoningTokens > 0 || thinkingEnabled(options) {
+			result.Usage.OutputTokensDetails = &OutputTokensDetails{
+				ThinkingTokens: completion.Usage.ReasoningTokens,
+			}
+		}
 	}
 
 	if completion.Message != nil {
@@ -197,6 +207,11 @@ func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request,
 
 		if reason == StopReasonRefusal {
 			result.StopDetails = &StopDetails{Type: "refusal"}
+
+			if completion.StopDetails != nil {
+				result.StopDetails.Category = completion.StopDetails.Category
+				result.StopDetails.Explanation = completion.StopDetails.Explanation
+			}
 		}
 	}
 
@@ -268,6 +283,8 @@ func (h *Handler) handleMessagesStream(w http.ResponseWriter, r *http.Request, r
 
 		return nil
 	})
+
+	accumulator.ThinkingEnabled = thinkingEnabled(options)
 
 	for completion, err := range completer.Complete(r.Context(), messages, options) {
 		if err != nil {

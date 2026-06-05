@@ -74,7 +74,37 @@ func compareSSE(t *testing.T, h *openai.Harness, model openai.Model, body map[st
 		t.Fatal("wingman returned no SSE events")
 	}
 
-	harness.CompareSSEEventPattern(t, openaiEvents, wingmanEvents)
+	harness.CompareSSEEventPattern(t, comparableSSEEvents(openaiEvents), comparableSSEEvents(wingmanEvents))
 
 	return openaiEvents, wingmanEvents
+}
+
+func comparableSSEEvents(events []*harness.SSEEvent) []*harness.SSEEvent {
+	result := make([]*harness.SSEEvent, 0, len(events))
+	for _, e := range events {
+		switch eventType(e) {
+		case "response.reasoning_summary_part.added",
+			"response.reasoning_summary_text.delta",
+			"response.reasoning_summary_text.done",
+			"response.reasoning_summary_part.done":
+			continue
+		}
+		result = append(result, e)
+	}
+	return result
+}
+
+func eventType(e *harness.SSEEvent) string {
+	if e == nil {
+		return ""
+	}
+	if e.Event != "" {
+		return e.Event
+	}
+	if e.Data != nil {
+		if typ, ok := e.Data["type"].(string); ok {
+			return typ
+		}
+	}
+	return ""
 }

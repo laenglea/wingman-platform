@@ -199,6 +199,9 @@ func (s *StreamingAccumulator) Complete(includeUsage bool) error {
 				PromptTokensDetails: &PromptTokensDetails{
 					CachedTokens: result.Usage.CacheReadInputTokens,
 				},
+				CompletionTokensDetails: &CompletionTokensDetails{
+					ReasoningTokens: result.Usage.ReasoningTokens,
+				},
 			},
 		}
 

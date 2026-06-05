@@ -92,6 +92,9 @@ type ContentBlockParam struct {
 
 	// For redacted_thinking blocks
 	Data string `json:"data,omitempty"`
+
+	// For compaction blocks
+	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
 
 // BlockSource is the source object for image and document content blocks.
@@ -175,7 +178,8 @@ type ContentBlock struct {
 	Signature string `json:"signature,omitempty"`
 
 	// For compaction blocks
-	Content string `json:"content,omitempty"`
+	Content          string `json:"content,omitempty"`
+	EncryptedContent string `json:"encrypted_content,omitempty"`
 
 	// For tool_use blocks
 	ID     string       `json:"id,omitempty"`
@@ -199,8 +203,8 @@ const (
 )
 
 type StopDetails struct {
-	Type        string `json:"type"`                  // "refusal"
-	Category    string `json:"category,omitempty"`     // e.g. "cyber"
+	Type        string `json:"type"`               // "refusal"
+	Category    string `json:"category,omitempty"` // e.g. "cyber"
 	Explanation string `json:"explanation,omitempty"`
 }
 
@@ -208,12 +212,18 @@ type Usage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
 
+	OutputTokensDetails *OutputTokensDetails `json:"output_tokens_details,omitempty"`
+
 	CacheReadInputTokens     int            `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens int            `json:"cache_creation_input_tokens"`
 	CacheCreation            *CacheCreation `json:"cache_creation,omitempty"`
 
 	ServiceTier  string `json:"service_tier,omitempty"`
 	InferenceGeo string `json:"inference_geo,omitempty"`
+}
+
+type OutputTokensDetails struct {
+	ThinkingTokens int `json:"thinking_tokens"`
 }
 
 type CacheCreation struct {
@@ -241,11 +251,15 @@ type ContentBlockDeltaEvent struct {
 }
 
 type Delta struct {
-	Type        string `json:"type"` // "text_delta", "input_json_delta", "thinking_delta", or "signature_delta"
+	Type        string `json:"type"` // "text_delta", "input_json_delta", "thinking_delta", "signature_delta", or "compaction_delta"
 	Text        string `json:"text,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
 	Thinking    string `json:"thinking,omitempty"`
 	Signature   string `json:"signature,omitempty"`
+
+	// For compaction_delta
+	Content          string `json:"content,omitempty"`
+	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
 
 type ContentBlockStopEvent struct {
@@ -268,6 +282,8 @@ type MessageDelta struct {
 type DeltaUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
+
+	OutputTokensDetails *OutputTokensDetails `json:"output_tokens_details,omitempty"`
 
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`

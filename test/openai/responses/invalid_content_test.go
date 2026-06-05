@@ -72,8 +72,8 @@ func TestInvalidContentType(t *testing.T) {
 			body: map[string]any{
 				"input": []map[string]any{
 					{
-						"type": "message",
-						"role": "user",
+						"type":    "message",
+						"role":    "user",
 						"content": "What did the recorder return?",
 					},
 					{

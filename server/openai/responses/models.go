@@ -161,14 +161,14 @@ type HostedToolChoice struct {
 }
 
 var hostedToolChoiceTypes = map[string]struct{}{
-	"file_search":         {},
-	"web_search":          {},
-	"web_search_preview":  {},
-	"computer":            {},
+	"file_search":          {},
+	"web_search":           {},
+	"web_search_preview":   {},
+	"computer":             {},
 	"computer_use_preview": {},
-	"image_generation":    {},
-	"code_interpreter":    {},
-	"mcp":                 {},
+	"image_generation":     {},
+	"code_interpreter":     {},
+	"mcp":                  {},
 }
 
 func (t *ToolChoice) UnmarshalJSON(data []byte) error {
@@ -958,7 +958,7 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 				Type             ResponseOutputType           `json:"type"`
 				ID               string                       `json:"id"`
 				Summary          []ReasoningOutputSummary     `json:"summary"`
-				Content          []ReasoningOutputContentPart `json:"content,omitempty"`
+				Content          []ReasoningOutputContentPart `json:"content"`
 				EncryptedContent string                       `json:"encrypted_content,omitempty"`
 			}{
 				Type:             r.Type,

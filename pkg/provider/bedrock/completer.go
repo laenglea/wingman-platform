@@ -150,6 +150,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 		id := uuid.NewString()
 
+		toolCallIDs := map[int32]string{}
+
 		for event := range resp.GetStream().Events() {
 			switch v := event.(type) {
 			case *types.ConverseStreamOutputMemberMessageStart:
@@ -169,6 +171,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			case *types.ConverseStreamOutputMemberContentBlockStart:
 				switch b := v.Value.Start.(type) {
 				case *types.ContentBlockStartMemberToolUse:
+					toolCallIDs[aws.ToInt32(v.Value.ContentBlockIndex)] = aws.ToString(b.Value.ToolUseId)
+
 					// Schema mode surfaces the forced tool call as text via the
 					// argument deltas, so there is nothing to emit at block start.
 					if options.Schema != nil {
@@ -272,6 +276,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 							Content: []provider.Content{
 								provider.ToolCallContent(provider.ToolCall{
+									ID:        toolCallIDs[aws.ToInt32(v.Value.ContentBlockIndex)],
 									Arguments: aws.ToString(b.Value.Input),
 								}),
 							},
@@ -309,8 +314,11 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					},
 				}
 
-				if v.Value.StopReason == types.StopReasonMaxTokens {
+				switch v.Value.StopReason {
+				case types.StopReasonMaxTokens, types.StopReasonModelContextWindowExceeded:
 					delta.Status = provider.CompletionStatusIncomplete
+				case types.StopReasonGuardrailIntervened, types.StopReasonContentFiltered:
+					delta.Status = provider.CompletionStatusRefused
 				}
 
 				if !yield(delta, nil) {

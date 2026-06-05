@@ -363,6 +363,7 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 			pendingCalls = append(pendingCalls, provider.ToolCallContent(provider.ToolCall{
 				ID:        call.CallID,
 				Kind:      provider.ToolKindToolSearch,
+				Name:      "tool_search",
 				Execution: call.Execution,
 				Arguments: string(call.Arguments),
 			}))
