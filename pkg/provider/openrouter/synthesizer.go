@@ -1,10 +1,11 @@
 package openrouter
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
-	"errors"
-	"strings"
+	"encoding/json"
+	"io"
+	"net/http"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/google/uuid"
@@ -27,78 +28,75 @@ func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *p
 		options = new(provider.SynthesizeOptions)
 	}
 
-	voice := "alloy"
-	if options.Voice != "" {
-		voice = options.Voice
-	}
-
-	format := "wav"
-
-	if options.Format != "" {
-		format = options.Format
-	}
-
 	body := map[string]any{
 		"model": s.model,
-		"messages": []map[string]any{
-			{
-				"role":    "user",
-				"content": content,
-			},
-		},
-		"modalities": []string{"text", "audio"},
-		"audio": map[string]any{
-			"voice":  voice,
-			"format": format,
-		},
-		"stream": false,
+		"input": content,
 	}
 
-	var result map[string]any
-
-	if err := doRequest(ctx, s.client, s.url+"/chat/completions", s.token, body, &result); err != nil {
-		return nil, err
+	if options.Voice != "" {
+		body["voice"] = options.Voice
 	}
 
-	message, err := extractMessage(result)
+	if options.Speed != nil {
+		body["speed"] = *options.Speed
+	}
+
+	if options.Format != "" {
+		body["response_format"] = options.Format
+	}
+
+	data, err := json.Marshal(body)
+
 	if err != nil {
 		return nil, err
 	}
 
-	audio, ok := message["audio"].(map[string]any)
-
-	if !ok {
-		return nil, errors.New("no audio data in response")
-	}
-
-	audioData, ok := audio["data"].(string)
-
-	if !ok || audioData == "" {
-		return nil, errors.New("no audio data in response")
-	}
-
-	audioBytes, err := base64.StdEncoding.DecodeString(audioData)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url+"/audio/speech", bytes.NewReader(data))
 
 	if err != nil {
 		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	if s.token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.token)
+	}
+
+	resp, err := s.client.Do(req)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+
+		return nil, &provider.ProviderError{
+			Code:    resp.StatusCode,
+			Message: string(body),
+		}
+	}
+
+	audio, err := io.ReadAll(resp.Body)
+
+	if err != nil {
+		return nil, err
+	}
+
+	contentType := "audio/mpeg"
+
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		contentType = ct
 	}
 
 	return &provider.Synthesis{
 		ID:    uuid.NewString(),
 		Model: s.model,
 
-		Content:     audioBytes,
-		ContentType: "audio/" + mapAudioSubtype(format),
+		Content:     audio,
+		ContentType: contentType,
 	}, nil
-}
-
-func mapAudioSubtype(format string) string {
-	switch strings.ToLower(format) {
-	case "mp3":
-		return "mpeg"
-	case "pcm16":
-		return "pcm"
-	default:
-		return strings.ToLower(format)
-	}
 }

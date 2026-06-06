@@ -61,6 +61,13 @@ func createEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, 
 	case "openai", "openai-compatible":
 		return openaiEmbedder(cfg, model)
 
+	case "openrouter":
+		if cfg.URL == "" {
+			cfg.URL = "https://openrouter.ai/api/v1"
+		}
+
+		return openaiEmbedder(cfg, model)
+
 	case "custom":
 		return customEmbedder(cfg, model)
 

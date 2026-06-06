@@ -140,6 +140,7 @@ func DetectModelType(id string) ModelType {
 
 	synthesizers := []string{
 		"eleven",
+		"mai-voice",
 		"stable-audio",
 		"tts",
 	}

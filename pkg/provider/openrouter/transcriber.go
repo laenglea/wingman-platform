@@ -27,58 +27,32 @@ func (t *Transcriber) Transcribe(ctx context.Context, input provider.File, optio
 		options = new(provider.TranscribeOptions)
 	}
 
-	prompt := "Please transcribe this audio file."
+	body := map[string]any{
+		"model": t.model,
 
-	if options.Instructions != "" {
-		prompt = options.Instructions
+		"input_audio": map[string]any{
+			"data":   base64.StdEncoding.EncodeToString(input.Content),
+			"format": detectAudioFormat(input),
+		},
 	}
 
 	if options.Language != "" {
-		prompt += " Language: " + options.Language + "."
+		body["language"] = options.Language
 	}
 
-	body := map[string]any{
-		"model": t.model,
-		"messages": []map[string]any{
-			{
-				"role": "user",
-				"content": []map[string]any{
-					{
-						"type": "text",
-						"text": prompt,
-					},
-					{
-						"type": "input_audio",
-						"input_audio": map[string]any{
-							"data":   base64.StdEncoding.EncodeToString(input.Content),
-							"format": detectAudioFormat(input),
-						},
-					},
-				},
-			},
-		},
-		"stream": false,
+	var result struct {
+		Text string `json:"text"`
 	}
 
-	var result map[string]any
-
-	if err := doRequest(ctx, t.client, t.url+"/chat/completions", t.token, body, &result); err != nil {
+	if err := doRequest(ctx, t.client, t.url+"/audio/transcriptions", t.token, body, &result); err != nil {
 		return nil, err
 	}
-
-	message, err := extractMessage(result)
-
-	if err != nil {
-		return nil, err
-	}
-
-	text, _ := message["content"].(string)
 
 	return &provider.Transcription{
 		ID:    uuid.NewString(),
 		Model: t.model,
 
-		Text: strings.TrimSpace(text),
+		Text: strings.TrimSpace(result.Text),
 	}, nil
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/azurespeech"
+	"github.com/adrianliechti/wingman/pkg/provider/mistral"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
 	"github.com/adrianliechti/wingman/pkg/provider/openrouter"
 	"github.com/adrianliechti/wingman/pkg/provider/xai"
@@ -37,6 +38,9 @@ func (cfg *Config) Synthesizer(id string) (provider.Synthesizer, error) {
 
 func createSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesizer, error) {
 	switch strings.ToLower(cfg.Type) {
+	case "mistral":
+		return mistralSynthesizer(cfg, model)
+
 	case "openai", "openai-compatible":
 		return openaiSynthesizer(cfg, model)
 
@@ -86,6 +90,20 @@ func openaiSynthesizer(cfg providerConfig, model modelContext) (provider.Synthes
 	}
 
 	return openai.NewSynthesizer(cfg.URL, model.ID, options...)
+}
+
+func mistralSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesizer, error) {
+	var options []mistral.Option
+
+	if cfg.Token != "" {
+		options = append(options, mistral.WithToken(cfg.Token))
+	}
+
+	if model.Client != nil {
+		options = append(options, mistral.WithClient(model.Client))
+	}
+
+	return mistral.NewSynthesizer(model.ID, options...)
 }
 
 func xaiSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesizer, error) {
