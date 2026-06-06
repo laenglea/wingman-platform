@@ -8,11 +8,8 @@ import (
 	"github.com/adrianliechti/wingman/pkg/otel"
 	"github.com/adrianliechti/wingman/pkg/segmenter"
 	"github.com/adrianliechti/wingman/pkg/segmenter/custom"
-	"github.com/adrianliechti/wingman/pkg/segmenter/jina"
 	"github.com/adrianliechti/wingman/pkg/segmenter/kreuzberg"
 	"github.com/adrianliechti/wingman/pkg/segmenter/text"
-	"github.com/adrianliechti/wingman/pkg/segmenter/unstructured"
-
 )
 
 func (cfg *Config) RegisterSegmenter(id string, p segmenter.Provider) {
@@ -49,7 +46,6 @@ type segmenterConfig struct {
 
 	Vars  map[string]string `yaml:"vars"`
 	Proxy *proxyConfig      `yaml:"proxy"`
-
 }
 
 type segmenterContext struct {
@@ -103,17 +99,11 @@ func (cfg *Config) registerSegmenters(f *configFile) error {
 func createSegmenter(cfg segmenterConfig, context segmenterContext) (segmenter.Provider, error) {
 	switch strings.ToLower(cfg.Type) {
 
-	case "jina":
-		return jinaSegmenter(cfg, context)
-
-	case "kreuzberg":
-		return kreuzbergSegmenter(cfg, context)
-
 	case "text":
 		return textSegmenter(cfg)
 
-	case "unstructured":
-		return unstructuredSegmenter(cfg, context)
+	case "kreuzberg":
+		return kreuzbergSegmenter(cfg, context)
 
 	case "custom", "wingman-segmenter":
 		return customSegmenter(cfg)
@@ -121,20 +111,6 @@ func createSegmenter(cfg segmenterConfig, context segmenterContext) (segmenter.P
 	default:
 		return nil, errors.New("invalid segmenter type: " + cfg.Type)
 	}
-}
-
-func jinaSegmenter(cfg segmenterConfig, context segmenterContext) (segmenter.Provider, error) {
-	var options []jina.Option
-
-	if cfg.Token != "" {
-		options = append(options, jina.WithToken(cfg.Token))
-	}
-
-	if context.Client != nil {
-		options = append(options, jina.WithClient(context.Client))
-	}
-
-	return jina.New(cfg.URL, options...)
 }
 
 func kreuzbergSegmenter(cfg segmenterConfig, context segmenterContext) (segmenter.Provider, error) {
@@ -153,20 +129,6 @@ func kreuzbergSegmenter(cfg segmenterConfig, context segmenterContext) (segmente
 
 func textSegmenter(cfg segmenterConfig) (segmenter.Provider, error) {
 	return text.New()
-}
-
-func unstructuredSegmenter(cfg segmenterConfig, context segmenterContext) (segmenter.Provider, error) {
-	var options []unstructured.Option
-
-	if cfg.Token != "" {
-		options = append(options, unstructured.WithToken(cfg.Token))
-	}
-
-	if context.Client != nil {
-		options = append(options, unstructured.WithClient(context.Client))
-	}
-
-	return unstructured.New(cfg.URL, options...)
 }
 
 func customSegmenter(cfg segmenterConfig) (*custom.Client, error) {

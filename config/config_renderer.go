@@ -2,15 +2,12 @@ package config
 
 import (
 	"errors"
-	"slices"
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/google"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
 	"github.com/adrianliechti/wingman/pkg/provider/openrouter"
-	"github.com/adrianliechti/wingman/pkg/provider/replicate"
-	"github.com/adrianliechti/wingman/pkg/provider/replicate/flux"
 	"github.com/adrianliechti/wingman/pkg/provider/xai"
 )
 
@@ -48,9 +45,6 @@ func createRenderer(cfg providerConfig, model modelContext) (provider.Renderer, 
 
 	case "openrouter":
 		return openrouterRenderer(cfg, model)
-
-	case "replicate":
-		return replicateRenderer(cfg, model)
 
 	case "xai":
 		return xaiRenderer(cfg, model)
@@ -90,24 +84,6 @@ func openaiRenderer(cfg providerConfig, model modelContext) (provider.Renderer, 
 	}
 
 	return openai.NewRenderer(cfg.URL, model.ID, options...)
-}
-
-func replicateRenderer(cfg providerConfig, model modelContext) (provider.Renderer, error) {
-	if slices.Contains(flux.SupportedModels, model.ID) {
-		var options []replicate.Option
-
-		if cfg.Token != "" {
-			options = append(options, replicate.WithToken(cfg.Token))
-		}
-
-		if model.Client != nil {
-			options = append(options, replicate.WithClient(model.Client))
-		}
-
-		return flux.NewRenderer(model.ID, options...)
-	}
-
-	return nil, errors.New("model not supported: " + model.ID)
 }
 
 func xaiRenderer(cfg providerConfig, model modelContext) (provider.Renderer, error) {

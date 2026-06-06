@@ -53,6 +53,8 @@ tasks:
 
   docs:render:
     desc: Render docs/architecture.html → docs/architecture.png (needs Node + playwright)
+    dir: docs
     cmds:
-      - npx --yes -p playwright@latest playwright install chromium
-      - npx --yes -p playwright@latest node docs/render.mjs
+      - npm install --no-save --no-package-lock --no-fund --no-audit playwright
+      - npx --no-install playwright install chromium
+      - node render.mjs

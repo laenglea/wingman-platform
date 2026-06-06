@@ -5,8 +5,6 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/adrianliechti/wingman/pkg/provider/huggingface"
-	"github.com/adrianliechti/wingman/pkg/provider/jina"
 )
 
 func (cfg *Config) RegisterReranker(id string, p provider.Reranker) {
@@ -35,45 +33,8 @@ func (cfg *Config) Reranker(id string) (provider.Reranker, error) {
 
 func createReranker(cfg providerConfig, model modelContext) (provider.Reranker, error) {
 	switch strings.ToLower(cfg.Type) {
-	case "huggingface":
-		return huggingfaceReranker(cfg, model)
-
-	case "jina", "wingman-reranker":
-		return jinaReranker(cfg, model)
-
-	case "llama":
-		cfg.URL = normalizeURL(cfg.URL, "/v1")
-		return jinaReranker(cfg, model)
 
 	default:
 		return nil, errors.New("invalid reranker type: " + cfg.Type)
 	}
-}
-
-func huggingfaceReranker(cfg providerConfig, model modelContext) (provider.Reranker, error) {
-	var options []huggingface.Option
-
-	if cfg.Token != "" {
-		options = append(options, huggingface.WithToken(cfg.Token))
-	}
-
-	if model.Client != nil {
-		options = append(options, huggingface.WithClient(model.Client))
-	}
-
-	return huggingface.NewReranker(cfg.URL, model.ID, options...)
-}
-
-func jinaReranker(cfg providerConfig, model modelContext) (provider.Reranker, error) {
-	var options []jina.Option
-
-	if cfg.Token != "" {
-		options = append(options, jina.WithToken(cfg.Token))
-	}
-
-	if model.Client != nil {
-		options = append(options, jina.WithClient(model.Client))
-	}
-
-	return jina.NewReranker(cfg.URL, model.ID, options...)
 }

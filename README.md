@@ -19,38 +19,35 @@ The platform integrates with a wide range of LLM providers:
 - Google Gemini
 - AWS Bedrock
 - Mistral AI
-- Hugging Face
+- xAI (Grok models)
+- OpenRouter, NVIDIA NIM and any OpenAI-compatible endpoint
 - Local deployments: Ollama, LLAMA.CPP
 - Custom models via gRPC plugins
 
 **Embedding Models:**
-- OpenAI, Azure OpenAI, Jina, Hugging Face, Google Gemini
+- OpenAI, Azure OpenAI, Google Gemini, Mistral AI
 - Local: Ollama, LLAMA.CPP
 - Custom embedders via gRPC
 
 **Media Processing:**
-- Image generation: OpenAI DALL-E, Replicate
+- Image generation: OpenAI DALL-E, Google Gemini, xAI
 - Speech-to-text: OpenAI Whisper, Mistral, Azure Speech
-- Text-to-speech: OpenAI TTS, Azure Speech
-- Reranking: Jina
+- Text-to-speech: OpenAI TTS, Azure Speech, xAI
 
 ### Document Processing & RAG
 
 **Document Extractors:**
-- Apache Tika for various document formats
-- Unstructured.io for advanced document parsing
 - Azure Document Intelligence
 - Docling for document conversion
 - Kreuzberg for document parsing
 - Mistral document extraction
+- LLM-based extraction using any vision/chat model
 - Text extraction from plain files
 - Custom extractors via gRPC
 
 **Text Segmentation:**
-- Jina segmenter for semantic chunking
 - Kreuzberg segmenter
 - Text-based chunking with configurable sizes
-- Unstructured.io segmentation
 - Custom segmenters via gRPC
 
 **Information Retrieval:**
@@ -370,23 +367,6 @@ providers:
 ```
 
 
-#### Replicate
-
-https://replicate.com/
-
-```yaml
-providers:
-  - type: replicate
-    token: ${REPLICATE_API_KEY}
-    #
-    # {alias}:
-    #   - id: {cohere api model name}
-    models:
-      replicate-flux-pro:
-        id: black-forest-labs/flux-pro
-```
-
-
 #### Azure Speech
 
 https://learn.microsoft.com/en-us/azure/ai-services/speech-service/
@@ -455,24 +435,6 @@ providers:
 ```
 
 
-#### Hugging Face
-
-https://huggingface.co/
-
-```yaml
-providers:
-  - type: huggingface
-    token: hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    
-    models:
-      mistral-7B-instruct:
-        id: mistralai/Mistral-7B-Instruct-v0.1
-      
-      huggingface-minilm-l6-2:
-        id: sentence-transformers/all-MiniLM-L6-v2
-```
-
-
 #### xAI
 
 https://x.ai/api
@@ -486,22 +448,6 @@ providers:
       - grok-4.20-reasoning
       - grok-imagine-image  # renderer
       - grok-tts            # synthesizer
-```
-
-
-#### Jina
-
-https://jina.ai
-
-Embeddings and reranking.
-
-```yaml
-providers:
-  - type: jina
-    token: ${JINA_API_KEY}
-
-    models:
-      - jina-embeddings-v3
 ```
 
 
@@ -556,16 +502,16 @@ searchers:
 
 #### Scrapers
 
-Fetch and extract clean content from a URL. Types: `fetch` (built-in HTTP), `exa`, `jina`, `tavily`, `custom`.
+Fetch and extract clean content from a URL. Types: `fetch` (built-in HTTP), `exa`, `tavily`, `custom`.
 
 ```yaml
 scrapers:
   web:
-    type: fetch          # or: exa · jina · tavily · custom
+    type: fetch          # or: exa · tavily · custom
 
   reader:
-    type: jina
-    token: ${JINA_API_KEY}
+    type: tavily
+    token: ${TAVILY_API_KEY}
 ```
 
 #### Researchers
@@ -590,39 +536,6 @@ researchers:
 
 
 ### Document Extraction
-
-#### Tika
-
-```shell
-# using Docker
-docker run -it --rm -p 9998:9998 apache/tika:3.0.0.0-BETA2-full
-```
-
-```yaml
-extractors:  
-  tika:
-    type: tika
-    url: http://localhost:9998
-    chunkSize: 4000
-    chunkOverlap: 200
-```
-
-
-#### Unstructured
-
-https://unstructured.io
-
-```shell
-docker run -it --rm -p 9085:8000 quay.io/unstructured-io/unstructured-api:0.0.80 --port 8000 --host 0.0.0.0
-```
-
-```yaml
-extractors:
-  unstructured:
-    type: unstructured
-    url: http://localhost:9085/general/v0/general
-```
-
 
 #### Azure Document Intelligence
 
@@ -669,6 +582,18 @@ extractors:
 ```
 
 
+#### LLM Extractor
+
+Use any configured vision/chat model to extract document content.
+
+```yaml
+extractors:
+  llm:
+    type: llm
+    model: gpt-5.4-mini
+```
+
+
 #### Text Extractor
 
 ```yaml
@@ -690,16 +615,6 @@ extractors:
 
 ### Text Segmentation
 
-#### Jina Segmenter
-
-```yaml
-segmenters:
-  jina:
-    type: jina
-    token: ${JINA_API_KEY}
-```
-
-
 #### Kreuzberg Segmenter
 
 ```yaml
@@ -718,16 +633,6 @@ segmenters:
     type: text
     chunkSize: 1000
     chunkOverlap: 200
-```
-
-
-#### Unstructured Segmenter
-
-```yaml
-segmenters:
-  unstructured:
-    type: unstructured
-    url: http://localhost:9085/general/v0/general
 ```
 
 

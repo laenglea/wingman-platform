@@ -12,8 +12,6 @@ import (
 	"github.com/adrianliechti/wingman/pkg/extractor/mistral"
 	"github.com/adrianliechti/wingman/pkg/extractor/multi"
 	"github.com/adrianliechti/wingman/pkg/extractor/text"
-	"github.com/adrianliechti/wingman/pkg/extractor/tika"
-	"github.com/adrianliechti/wingman/pkg/extractor/unstructured"
 	"github.com/adrianliechti/wingman/pkg/otel"
 	"github.com/adrianliechti/wingman/pkg/provider"
 	adapter "github.com/adrianliechti/wingman/pkg/provider/adapter/extractor"
@@ -51,7 +49,6 @@ type extractorConfig struct {
 
 	Vars  map[string]string `yaml:"vars"`
 	Proxy *proxyConfig      `yaml:"proxy"`
-
 }
 
 type extractorContext struct {
@@ -126,12 +123,6 @@ func createExtractor(cfg extractorConfig, context extractorContext) (extractor.P
 	case "text":
 		return textExtractor(cfg)
 
-	case "tika":
-		return tikaExtractor(cfg)
-
-	case "unstructured":
-		return unstructuredExtractor(cfg)
-
 	case "custom", "wingman-extractor", "wingman-reader":
 		return customExtractor(cfg)
 
@@ -186,22 +177,6 @@ func mistralExtractor(cfg extractorConfig) (extractor.Provider, error) {
 
 func textExtractor(cfg extractorConfig) (extractor.Provider, error) {
 	return text.New()
-}
-
-func tikaExtractor(cfg extractorConfig) (extractor.Provider, error) {
-	var options []tika.Option
-
-	return tika.New(cfg.URL, options...)
-}
-
-func unstructuredExtractor(cfg extractorConfig) (extractor.Provider, error) {
-	var options []unstructured.Option
-
-	if cfg.Token != "" {
-		options = append(options, unstructured.WithToken(cfg.Token))
-	}
-
-	return unstructured.New(cfg.URL, options...)
 }
 
 func customExtractor(cfg extractorConfig) (extractor.Provider, error) {

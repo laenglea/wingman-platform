@@ -661,27 +661,27 @@
           <div class="backs">
             <span class="b">openai</span><span class="b">anthropic</span><span class="b">gemini</span>
             <span class="b">bedrock</span><span class="b">mistral</span><span class="b">xai</span>
-            <span class="b">ollama</span><span class="b">llama</span><span class="b">huggingface</span>
+            <span class="b">ollama</span><span class="b">llama</span>
             <span class="b">openrouter</span><span class="b">nvidia/nim</span><span class="b">openai-compatible</span>
             <span class="b star">custom · gRPC</span>
           </div>
-          <div class="meta-c"><span class="cnt">13</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
+          <div class="meta-c"><span class="cnt">12</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
 
           <div class="iface"><div class="role">Embedder</div><div class="kind">vectors</div></div>
           <div class="backs">
             <span class="b">openai</span><span class="b">gemini</span><span class="b">mistral</span>
-            <span class="b">jina</span><span class="b">ollama</span><span class="b">llama</span>
-            <span class="b">huggingface</span><span class="b">openai-compatible</span>
+            <span class="b">ollama</span><span class="b">llama</span>
+            <span class="b">openai-compatible</span>
             <span class="b star">custom · gRPC</span>
           </div>
-          <div class="meta-c"><span class="cnt">9</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
+          <div class="meta-c"><span class="cnt">7</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
 
           <div class="iface"><div class="role">Renderer</div><div class="kind">text → image</div></div>
           <div class="backs">
             <span class="b">openai</span><span class="b">gemini</span><span class="b">xai</span>
-            <span class="b">replicate</span><span class="b">openrouter</span>
+            <span class="b">openrouter</span>
           </div>
-          <div class="meta-c"><span class="cnt">5</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
+          <div class="meta-c"><span class="cnt">4</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
 
           <div class="iface"><div class="role">Synthesizer</div><div class="kind">text → speech</div></div>
           <div class="backs">
@@ -699,32 +699,29 @@
 
           <div class="iface"><div class="role">Reranker</div><div class="kind">relevance</div></div>
           <div class="backs">
-            <span class="b">jina</span><span class="b">huggingface</span><span class="b">llama</span>
-            <span class="b">wingman-reranker</span>
+            <span class="b star">any embedder · similarity</span>
           </div>
-          <div class="meta-c"><span class="cnt">4</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
+          <div class="meta-c"><span class="cnt">1</span><span class="key"><b>providers</b>:<br/>[].models[]</span></div>
 
           <div class="iface"><div class="role">Extractor</div><div class="kind">doc → text</div></div>
           <div class="backs">
-            <span class="b">tika</span><span class="b">unstructured</span><span class="b">docling</span>
-            <span class="b">kreuzberg</span><span class="b">azure</span><span class="b">mistral</span>
-            <span class="b">llm</span><span class="b">text</span>
+            <span class="b">docling</span><span class="b">kreuzberg</span><span class="b">azure</span>
+            <span class="b">mistral</span><span class="b">llm</span><span class="b">text</span>
           </div>
-          <div class="meta-c"><span class="cnt">8</span><span class="key"><b>extractors</b>:<br/>{}.type</span></div>
+          <div class="meta-c"><span class="cnt">6</span><span class="key"><b>extractors</b>:<br/>{}.type</span></div>
 
           <div class="iface"><div class="role">Segmenter</div><div class="kind">chunk</div></div>
           <div class="backs">
-            <span class="b">jina</span><span class="b">kreuzberg</span><span class="b">unstructured</span>
-            <span class="b">text</span>
+            <span class="b">kreuzberg</span><span class="b">text</span>
           </div>
-          <div class="meta-c"><span class="cnt">4</span><span class="key"><b>segmenters</b>:<br/>{}.type</span></div>
+          <div class="meta-c"><span class="cnt">2</span><span class="key"><b>segmenters</b>:<br/>{}.type</span></div>
 
           <div class="iface"><div class="role">Searcher / Scraper</div><div class="kind">web</div></div>
           <div class="backs">
             <span class="b">duckduckgo</span><span class="b">exa</span><span class="b">tavily</span>
-            <span class="b">jina</span><span class="b">fetch</span>
+            <span class="b">fetch</span>
           </div>
-          <div class="meta-c"><span class="cnt">5</span><span class="key"><b>searchers</b> /<br/><b>scrapers</b>:{}.type</span></div>
+          <div class="meta-c"><span class="cnt">4</span><span class="key"><b>searchers</b> /<br/><b>scrapers</b>:{}.type</span></div>
 
           <div class="iface"><div class="role">Researcher</div><div class="kind">deep research</div></div>
           <div class="backs">

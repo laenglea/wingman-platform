@@ -10,7 +10,6 @@ import (
 	"github.com/adrianliechti/wingman/pkg/scraper/custom"
 	"github.com/adrianliechti/wingman/pkg/scraper/exa"
 	"github.com/adrianliechti/wingman/pkg/scraper/fetch"
-	"github.com/adrianliechti/wingman/pkg/scraper/jina"
 	"github.com/adrianliechti/wingman/pkg/scraper/tavily"
 )
 
@@ -44,7 +43,6 @@ type scraperConfig struct {
 
 	Vars  map[string]string `yaml:"vars"`
 	Proxy *proxyConfig      `yaml:"proxy"`
-
 }
 
 type scraperContext struct {
@@ -104,9 +102,6 @@ func createScraper(cfg scraperConfig, context scraperContext) (scraper.Provider,
 	case "exa":
 		return exaScraper(cfg, context)
 
-	case "jina":
-		return jinaScraper(cfg, context)
-
 	case "tavily":
 		return tavilyScraper(cfg, context)
 
@@ -126,20 +121,6 @@ func exaScraper(cfg scraperConfig, context scraperContext) (scraper.Provider, er
 	}
 
 	return exa.New(cfg.Token, options...)
-}
-
-func jinaScraper(cfg scraperConfig, context scraperContext) (scraper.Provider, error) {
-	var options []jina.Option
-
-	if cfg.Token != "" {
-		options = append(options, jina.WithToken(cfg.Token))
-	}
-
-	if context.Client != nil {
-		options = append(options, jina.WithClient(context.Client))
-	}
-
-	return jina.New(cfg.URL, options...)
 }
 
 func tavilyScraper(cfg scraperConfig, context scraperContext) (scraper.Provider, error) {

@@ -7,8 +7,6 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/custom"
 	"github.com/adrianliechti/wingman/pkg/provider/google"
-	"github.com/adrianliechti/wingman/pkg/provider/huggingface"
-	"github.com/adrianliechti/wingman/pkg/provider/jina"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
 )
 
@@ -40,12 +38,6 @@ func createEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, 
 	switch strings.ToLower(cfg.Type) {
 	case "gemini", "google":
 		return googleEmbedder(cfg, model)
-
-	case "huggingface":
-		return huggingfaceEmbedder(cfg, model)
-
-	case "jina":
-		return jinaEmbedder(cfg, model)
 
 	case "llama":
 		cfg.URL = normalizeURL(cfg.URL, "/v1")
@@ -89,34 +81,6 @@ func googleEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, 
 	}
 
 	return google.NewEmbedder(model.ID, options...)
-}
-
-func huggingfaceEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, error) {
-	var options []huggingface.Option
-
-	if cfg.Token != "" {
-		options = append(options, huggingface.WithToken(cfg.Token))
-	}
-
-	if model.Client != nil {
-		options = append(options, huggingface.WithClient(model.Client))
-	}
-
-	return huggingface.NewEmbedder(cfg.URL, model.ID, options...)
-}
-
-func jinaEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, error) {
-	var options []jina.Option
-
-	if cfg.Token != "" {
-		options = append(options, jina.WithToken(cfg.Token))
-	}
-
-	if model.Client != nil {
-		options = append(options, jina.WithClient(model.Client))
-	}
-
-	return jina.NewEmbedder(cfg.URL, model.ID, options...)
 }
 
 func openaiEmbedder(cfg providerConfig, model modelContext) (provider.Embedder, error) {
