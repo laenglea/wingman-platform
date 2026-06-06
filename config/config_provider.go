@@ -96,6 +96,7 @@ func (cfg *Config) registerProviders(f *configFile) error {
 				}
 
 				cfg.RegisterCompleter(id, completer)
+				cfg.RegisterReranker(id, reranker.FromCompleter(id, completer))
 
 			case ModelTypeEmbedder:
 				embedder, err := createEmbedder(p, context)

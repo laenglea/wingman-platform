@@ -2,29 +2,30 @@ package reranker
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sort"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
-var _ provider.Reranker = (*Adapter)(nil)
+var _ provider.Reranker = (*EmbedderAdapter)(nil)
 
-type Adapter struct {
+type EmbedderAdapter struct {
 	model string
 
 	embedder provider.Embedder
 }
 
-func FromEmbedder(model string, embedder provider.Embedder) *Adapter {
-	return &Adapter{
+func FromEmbedder(model string, embedder provider.Embedder) *EmbedderAdapter {
+	return &EmbedderAdapter{
 		model: model,
 
 		embedder: embedder,
 	}
 }
 
-func (a *Adapter) Rerank(ctx context.Context, query string, texts []string, options *provider.RerankOptions) ([]provider.Ranking, error) {
+func (a *EmbedderAdapter) Rerank(ctx context.Context, query string, texts []string, options *provider.RerankOptions) ([]provider.Ranking, error) {
 	if options == nil {
 		options = new(provider.RerankOptions)
 	}
@@ -35,10 +36,18 @@ func (a *Adapter) Rerank(ctx context.Context, query string, texts []string, opti
 		return nil, err
 	}
 
+	if len(queryResult.Embeddings) == 0 {
+		return nil, errors.New("no embedding returned for query")
+	}
+
 	textsResult, err := a.embedder.Embed(ctx, texts, nil)
 
 	if err != nil {
 		return nil, err
+	}
+
+	if len(textsResult.Embeddings) != len(texts) {
+		return nil, errors.New("embedding count does not match text count")
 	}
 
 	var results []provider.Ranking
@@ -52,7 +61,7 @@ func (a *Adapter) Rerank(ctx context.Context, query string, texts []string, opti
 		})
 	}
 
-	sort.Slice(results, func(i, j int) bool {
+	sort.SliceStable(results, func(i, j int) bool {
 		return results[i].Score > results[j].Score
 	})
 
@@ -81,8 +90,8 @@ func cosineSimilarity(a []float32, b []float32) float32 {
 
 		dotproduct += valA * valB
 
-		magnitudeA += math.Pow(valA, 2)
-		magnitudeB += math.Pow(valB, 2)
+		magnitudeA += valA * valA
+		magnitudeB += valB * valB
 	}
 
 	if magnitudeA == 0 || magnitudeB == 0 {

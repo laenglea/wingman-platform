@@ -23,7 +23,7 @@ func FromCompleter(completer provider.Completer) *Adapter {
 
 func (a *Adapter) Summarize(ctx context.Context, content string, options *summarizer.SummarizeOptions) (*summarizer.Summary, error) {
 	splitter := text.NewTextSplitter()
-	splitter.ChunkSize = 16000
+	splitter.ChunkSize = 100000
 	splitter.ChunkOverlap = 0
 
 	var segments []string
@@ -32,7 +32,7 @@ func (a *Adapter) Summarize(ctx context.Context, content string, options *summar
 		acc := provider.CompletionAccumulator{}
 
 		for completion, err := range a.completer.Complete(ctx, []provider.Message{
-			provider.UserMessage("Write a concise summary of the following: \n" + part),
+			provider.UserMessage("Write a concise summary of the following section of a larger document. Use the same language as the source. Only return the summary, no other text.\n\n" + part),
 		}, nil) {
 			if err != nil {
 				return nil, err
@@ -45,10 +45,16 @@ func (a *Adapter) Summarize(ctx context.Context, content string, options *summar
 		segments = append(segments, result.Message.Text())
 	}
 
+	if len(segments) == 1 {
+		return &summarizer.Summary{
+			Text: segments[0],
+		}, nil
+	}
+
 	acc := provider.CompletionAccumulator{}
 
 	for completion, err := range a.completer.Complete(ctx, []provider.Message{
-		provider.UserMessage("Distill the following parts into a consolidated summary: \n" + strings.Join(segments, "\n\n")),
+		provider.UserMessage("The following are summaries of consecutive sections of a single document. Combine them into one coherent summary of the entire document, preserving their order and removing redundancy. Use the same language as the summaries. Only return the summary, no other text.\n\n" + strings.Join(segments, "\n\n---\n\n")),
 	}, nil) {
 		if err != nil {
 			return nil, err

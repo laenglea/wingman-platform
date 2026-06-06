@@ -2,12 +2,23 @@ package extractor
 
 import (
 	"context"
+	"path"
+	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/extractor"
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
 var _ extractor.Provider = (*Adapter)(nil)
+
+var contentTypes = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".webp": "image/webp",
+	".gif":  "image/gif",
+	".pdf":  "application/pdf",
+}
 
 type Adapter struct {
 	completer provider.Completer
@@ -24,8 +35,16 @@ func (a *Adapter) Extract(ctx context.Context, input extractor.File, options *ex
 		options = new(extractor.ExtractOptions)
 	}
 
+	contentType := detectContentType(input)
+
+	if contentType == "" {
+		return nil, extractor.ErrUnsupported
+	}
+
+	input.ContentType = contentType
+
 	messages := []provider.Message{
-		provider.SystemMessage("Extract and return all text content from the provided file. Return only the extracted text, no other commentary."),
+		provider.SystemMessage("Extract all text content from the provided file. Transcribe it faithfully in reading order, including tables, without summarizing, translating or describing it. Return only the extracted text, no other commentary."),
 		{
 			Role: provider.MessageRoleUser,
 			Content: []provider.Content{
@@ -49,4 +68,22 @@ func (a *Adapter) Extract(ctx context.Context, input extractor.File, options *ex
 	return &extractor.Document{
 		Text: result.Message.Text(),
 	}, nil
+}
+
+func detectContentType(file extractor.File) string {
+	for _, contentType := range contentTypes {
+		if file.ContentType == contentType {
+			return contentType
+		}
+	}
+
+	if file.Name != "" {
+		ext := strings.ToLower(path.Ext(file.Name))
+
+		if contentType, ok := contentTypes[ext]; ok {
+			return contentType
+		}
+	}
+
+	return ""
 }
