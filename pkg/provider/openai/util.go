@@ -266,3 +266,15 @@ var LegacyModels = []string{
 	"gpt-4.1-mini",
 	"gpt-4.1-nano",
 }
+
+func isLegacyModel(model string) bool {
+	model = strings.ToLower(model)
+
+	for _, p := range LegacyModels {
+		if strings.Contains(model, p) {
+			return true
+		}
+	}
+
+	return false
+}

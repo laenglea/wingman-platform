@@ -69,9 +69,18 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			Messages: wireMessages(messages),
 		}
 
-		if options.ReasoningOptions != nil && options.ReasoningOptions.Effort != "" {
-			val := string(options.ReasoningOptions.Effort)
-			req.Effort = &val
+		if reasoning := options.ReasoningOptions; reasoning != nil {
+			switch {
+			case reasoning.Type == provider.ReasoningTypeDisabled:
+				val := "none"
+				req.Effort = &val
+			case reasoning.Effort != "":
+				val := string(reasoning.Effort)
+				req.Effort = &val
+			case reasoning.Type == provider.ReasoningTypeAdaptive:
+				val := "adaptive"
+				req.Effort = &val
+			}
 		}
 
 		if options.MaxTokens != nil {

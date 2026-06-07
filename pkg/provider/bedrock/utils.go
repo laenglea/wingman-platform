@@ -31,20 +31,18 @@ func isLegacyModel(model string) bool {
 	return false
 }
 
-func adaptiveEffort(e provider.Effort) (effort string, enabled bool) {
+func outputEffort(e provider.Effort) string {
 	switch e {
-	case provider.EffortAdaptive:
-		return "", true
 	case provider.EffortMinimal, provider.EffortLow:
-		return "low", true
+		return "low"
 	case provider.EffortMedium:
-		return "medium", true
+		return "medium"
 	case provider.EffortHigh:
-		return "high", true
+		return "high"
 	case provider.EffortXHigh:
-		return "xhigh", true
+		return "xhigh"
 	case provider.EffortMax:
-		return "max", true
+		return "max"
 	}
-	return "", false
+	return ""
 }

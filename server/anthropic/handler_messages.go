@@ -12,7 +12,13 @@ import (
 func ptr[T any](v T) *T { return &v }
 
 func thinkingEnabled(options *provider.CompleteOptions) bool {
-	return options.ReasoningOptions != nil && options.ReasoningOptions.Effort != provider.EffortNone
+	reasoning := options.ReasoningOptions
+
+	if reasoning == nil || reasoning.Type == provider.ReasoningTypeDisabled {
+		return false
+	}
+
+	return reasoning.Type == provider.ReasoningTypeAdaptive || reasoning.Effort != ""
 }
 
 func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
@@ -107,31 +113,49 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.Thinking != nil && req.Thinking.Type == "disabled" {
-		options.ReasoningOptions = &provider.ReasoningOptions{Effort: provider.EffortNone}
-	} else if req.Thinking != nil {
-		effort := provider.EffortAdaptive
-		if req.OutputConfig != nil {
-			switch req.OutputConfig.Effort {
-			case "low":
-				effort = provider.EffortLow
-			case "medium":
-				effort = provider.EffortMedium
-			case "high":
-				effort = provider.EffortHigh
-			case "xhigh":
-				effort = provider.EffortXHigh
-			case "max":
-				effort = provider.EffortMax
-			}
-		} else if req.Thinking.Type == "enabled" && req.Thinking.BudgetTokens > 0 {
-			// Legacy fixed-budget thinking carries no effort level; derive one
-			// from the token budget so it round-trips to non-Anthropic backends.
-			effort = provider.EffortFromBudget(&req.Thinking.BudgetTokens)
+	var reasoningType provider.ReasoningType
+	var reasoningEffort provider.Effort
+
+	if req.OutputConfig != nil {
+		switch req.OutputConfig.Effort {
+		case "low":
+			reasoningEffort = provider.EffortLow
+		case "medium":
+			reasoningEffort = provider.EffortMedium
+		case "high":
+			reasoningEffort = provider.EffortHigh
+		case "xhigh":
+			reasoningEffort = provider.EffortXHigh
+		case "max":
+			reasoningEffort = provider.EffortMax
 		}
+	}
+
+	if req.Thinking != nil {
+		switch req.Thinking.Type {
+		case "disabled":
+			reasoningType = provider.ReasoningTypeDisabled
+		case "enabled":
+			reasoningType = provider.ReasoningTypeAdaptive
+
+			if reasoningEffort == "" && req.Thinking.BudgetTokens > 0 {
+				// Legacy fixed-budget thinking carries no effort level; derive one
+				// from the token budget so it round-trips to non-Anthropic backends.
+				reasoningEffort = provider.EffortFromBudget(&req.Thinking.BudgetTokens)
+			}
+		default:
+			reasoningType = provider.ReasoningTypeAdaptive
+		}
+	}
+
+	if reasoningType != "" || reasoningEffort != "" {
+		summary := req.Thinking == nil || req.Thinking.Display != "omitted"
+
 		options.ReasoningOptions = &provider.ReasoningOptions{
-			Effort:           effort,
-			IncludeSummary:   req.Thinking.Display != "omitted",
+			Type:   reasoningType,
+			Effort: reasoningEffort,
+
+			IncludeSummary:   summary,
 			IncludeSignature: true,
 		}
 	}

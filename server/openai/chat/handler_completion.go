@@ -51,6 +51,13 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 
 	case []string:
 		stops = v
+
+	case []any:
+		for _, s := range v {
+			if text, ok := s.(string); ok {
+				stops = append(stops, text)
+			}
+		}
 	}
 
 	options := &provider.CompleteOptions{
@@ -78,7 +85,7 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 
 		switch req.ReasoningEffort {
 		case ReasoningEffortNone:
-			options.ReasoningOptions.Effort = provider.EffortNone
+			options.ReasoningOptions.Type = provider.ReasoningTypeDisabled
 
 		case ReasoningEffortMinimal:
 			options.ReasoningOptions.Effort = provider.EffortMinimal
@@ -97,6 +104,10 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 
 		case ReasoningEffortMax:
 			options.ReasoningOptions.Effort = provider.EffortMax
+		}
+
+		if options.ReasoningOptions.Effort != "" {
+			options.ReasoningOptions.Type = provider.ReasoningTypeAdaptive
 		}
 	}
 

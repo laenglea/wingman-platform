@@ -232,6 +232,8 @@ func (h *Handler) parseGenerateRequest(r *http.Request) (provider.Completer, []p
 
 		if wantThinking {
 			options.ReasoningOptions = &provider.ReasoningOptions{
+				Type: provider.ReasoningTypeAdaptive,
+
 				IncludeSummary: tc.IncludeThoughts,
 			}
 
@@ -245,7 +247,11 @@ func (h *Handler) parseGenerateRequest(r *http.Request) (provider.Completer, []p
 			case "high":
 				options.ReasoningOptions.Effort = provider.EffortHigh
 			default:
-				options.ReasoningOptions.Effort = provider.EffortFromBudget(tc.ThinkingBudget)
+				if tc.ThinkingBudget != nil && *tc.ThinkingBudget == 0 {
+					options.ReasoningOptions.Type = provider.ReasoningTypeDisabled
+				} else {
+					options.ReasoningOptions.Effort = provider.EffortFromBudget(tc.ThinkingBudget)
+				}
 			}
 		}
 	}

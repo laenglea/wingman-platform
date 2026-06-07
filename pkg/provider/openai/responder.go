@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"iter"
-	"slices"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 
@@ -283,7 +282,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 }
 
 func (r *Responder) convertResponsesRequest(messages []provider.Message, options *provider.CompleteOptions) (*responses.ResponseNewParams, error) {
-	if !slices.Contains(LegacyModels, r.model) && options.Temperature != nil {
+	if !isLegacyModel(r.model) && options.Temperature != nil {
 		optsCopy := *options
 		optsCopy.Temperature = nil
 		options = &optsCopy
@@ -320,26 +319,25 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		}
 	}
 
-	if options.ReasoningOptions != nil && !slices.Contains(LegacyModels, r.model) {
-		if options.ReasoningOptions.IncludeSignature {
+	if options.ReasoningOptions != nil && !isLegacyModel(r.model) {
+		reasoning := options.ReasoningOptions
+
+		if reasoning.IncludeSignature {
 			req.Include = append(req.Include, responses.ResponseIncludableReasoningEncryptedContent)
 		}
 
-		if options.ReasoningOptions.IncludeSummary {
+		if reasoning.IncludeSummary {
 			req.Reasoning.Summary = responses.ReasoningSummaryAuto
 		}
 
-		switch options.ReasoningOptions.Effort {
-		case provider.EffortNone:
-			req.Reasoning.Effort = responses.ReasoningEffortNone
-
+		switch reasoning.Effort {
 		case provider.EffortMinimal:
 			req.Reasoning.Effort = responses.ReasoningEffortMinimal
 
 		case provider.EffortLow:
 			req.Reasoning.Effort = responses.ReasoningEffortLow
 
-		case provider.EffortMedium, provider.EffortAdaptive:
+		case provider.EffortMedium:
 			req.Reasoning.Effort = responses.ReasoningEffortMedium
 
 		case provider.EffortHigh:
@@ -347,6 +345,15 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 
 		case provider.EffortXHigh, provider.EffortMax:
 			req.Reasoning.Effort = responses.ReasoningEffortXhigh
+
+		default:
+			if reasoning.Type == provider.ReasoningTypeAdaptive {
+				req.Reasoning.Effort = responses.ReasoningEffortMedium
+			}
+		}
+
+		if reasoning.Type == provider.ReasoningTypeDisabled {
+			req.Reasoning.Effort = responses.ReasoningEffortNone
 		}
 	}
 
@@ -424,7 +431,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 				Role: string(responses.ResponseInputMessageItemRoleSystem),
 			}
 
-			if !slices.Contains(LegacyModels, r.model) {
+			if !isLegacyModel(r.model) {
 				message.Role = string(responses.ResponseInputMessageItemRoleDeveloper)
 			}
 

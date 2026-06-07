@@ -210,6 +210,8 @@ type OutputOptions struct {
 }
 
 type ReasoningOptions struct {
+	Type ReasoningType
+
 	Effort Effort
 
 	IncludeSummary   bool
@@ -261,24 +263,24 @@ type StopDetails struct {
 	Explanation string
 }
 
+type ReasoningType string
+
+const (
+	ReasoningTypeDisabled ReasoningType = "disabled"
+	ReasoningTypeAdaptive ReasoningType = "adaptive"
+)
+
 type Effort string
 
 const (
-	EffortNone    Effort = "none"
 	EffortMinimal Effort = "minimal"
 	EffortLow     Effort = "low"
 	EffortMedium  Effort = "medium"
 	EffortHigh    Effort = "high"
 	EffortXHigh   Effort = "xhigh"
 	EffortMax     Effort = "max"
-
-	EffortAdaptive Effort = "adaptive"
 )
 
-// EffortFromBudget maps a numeric thinking-token budget to the coarser Effort
-// scale, for providers that express reasoning as a token allowance rather than
-// a level. A nil or negative budget means "let the model decide" (medium); 0
-// disables thinking.
 func EffortFromBudget(budget *int) Effort {
 	if budget == nil {
 		return EffortMedium
@@ -287,9 +289,7 @@ func EffortFromBudget(budget *int) Effort {
 	case *budget < 0:
 		return EffortMedium
 	case *budget == 0:
-		return EffortNone
-	case *budget <= 1024:
-		return EffortMinimal
+		return ""
 	case *budget <= 4096:
 		return EffortLow
 	case *budget <= 16384:

@@ -144,20 +144,18 @@ func ensureAdditionalPropertiesFalse(schema map[string]any) map[string]any {
 	return schema
 }
 
-func adaptiveEffort(e provider.Effort) (effort anthropic.BetaOutputConfigEffort, enabled bool) {
+func outputEffort(e provider.Effort) anthropic.BetaOutputConfigEffort {
 	switch e {
-	case provider.EffortAdaptive:
-		return "", true
 	case provider.EffortMinimal, provider.EffortLow:
-		return anthropic.BetaOutputConfigEffortLow, true
+		return anthropic.BetaOutputConfigEffortLow
 	case provider.EffortMedium:
-		return anthropic.BetaOutputConfigEffortMedium, true
+		return anthropic.BetaOutputConfigEffortMedium
 	case provider.EffortHigh:
-		return anthropic.BetaOutputConfigEffortHigh, true
+		return anthropic.BetaOutputConfigEffortHigh
 	case provider.EffortXHigh:
-		return anthropic.BetaOutputConfigEffortXhigh, true
+		return anthropic.BetaOutputConfigEffortXhigh
 	case provider.EffortMax:
-		return anthropic.BetaOutputConfigEffortMax, true
+		return anthropic.BetaOutputConfigEffortMax
 	}
-	return "", false
+	return ""
 }

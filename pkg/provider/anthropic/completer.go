@@ -378,20 +378,20 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	if !isLegacyModel(c.model) {
 		req.MaxTokens = 128000
 
-		if options.ReasoningOptions != nil {
-			if effort, enable := adaptiveEffort(options.ReasoningOptions.Effort); enable {
+		if reasoning := options.ReasoningOptions; reasoning != nil {
+			if reasoning.Type == provider.ReasoningTypeAdaptive {
 				display := anthropic.BetaThinkingConfigAdaptiveDisplaySummarized
-				if !options.ReasoningOptions.IncludeSummary {
+				if !reasoning.IncludeSummary {
 					display = anthropic.BetaThinkingConfigAdaptiveDisplayOmitted
 				}
 
 				req.Thinking = anthropic.BetaThinkingConfigParamUnion{
 					OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{Display: display},
 				}
+			}
 
-				if effort != "" {
-					req.OutputConfig.Effort = effort
-				}
+			if effort := outputEffort(reasoning.Effort); effort != "" {
+				req.OutputConfig.Effort = effort
 			}
 		}
 	}
@@ -409,10 +409,6 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 	if options.MaxTokens != nil {
 		req.MaxTokens = int64(*options.MaxTokens)
-	}
-
-	if options.Temperature != nil {
-		req.Temperature = anthropic.Float(float64(*options.Temperature))
 	}
 
 	for _, m := range input {
@@ -648,14 +644,10 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		tools = append(tools, anthropic.BetaToolUnionParam{OfTool: &tool})
 	}
 
-	if options.Schema != nil {
-		properties := options.Schema.Properties
-		if properties == nil {
-			// json_object mode: Anthropic requires a non-empty schema, and rejects
-			// `type: object` unless additionalProperties is explicitly false.
-			properties = map[string]any{"type": "object"}
+	if options.Schema != nil && options.Schema.Properties != nil {
+		req.OutputConfig.Format = anthropic.BetaJSONOutputFormatParam{
+			Schema: ensureAdditionalPropertiesFalse(options.Schema.Properties),
 		}
-		req.OutputConfig.Format = anthropic.BetaJSONOutputFormatParam{Schema: ensureAdditionalPropertiesFalse(properties)}
 	}
 
 	if options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 && !isLegacyModel(c.model) {
@@ -708,11 +700,15 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			forcesTool = true
 
 			if len(options.ToolOptions.Allowed) == 1 {
-				req.ToolChoice = anthropic.BetaToolChoiceUnionParam{
-					OfTool: &anthropic.BetaToolChoiceToolParam{
-						Name: options.ToolOptions.Allowed[0],
-					},
+				p := &anthropic.BetaToolChoiceToolParam{
+					Name: options.ToolOptions.Allowed[0],
 				}
+
+				if options.ToolOptions.DisableParallelToolCalls {
+					p.DisableParallelToolUse = anthropic.Bool(true)
+				}
+
+				req.ToolChoice = anthropic.BetaToolChoiceUnionParam{OfTool: p}
 			} else {
 				p := &anthropic.BetaToolChoiceAnyParam{}
 
@@ -728,6 +724,10 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		if forcesTool {
 			req.Thinking = anthropic.BetaThinkingConfigParamUnion{}
 		}
+	}
+
+	if options.Temperature != nil && req.Thinking.OfAdaptive == nil {
+		req.Temperature = anthropic.Float(float64(*options.Temperature))
 	}
 
 	if len(messages) > 0 {

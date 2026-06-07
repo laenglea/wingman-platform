@@ -112,7 +112,9 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		}
 
 		if !isLegacyModel(c.model) && options.ReasoningOptions != nil {
-			effort, enable := adaptiveEffort(options.ReasoningOptions.Effort)
+			reasoning := options.ReasoningOptions
+
+			enable := reasoning.Type == provider.ReasoningTypeAdaptive
 
 			// Schema mode forces a specific tool call, which is incompatible
 			// with extended thinking on Anthropic models.
@@ -124,19 +126,24 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				enable = false
 			}
 
+			additionalFields := map[string]any{}
+
 			if enable {
 				config.Temperature = nil
 
 				thinkingFields := map[string]any{"type": "adaptive"}
-				if !options.ReasoningOptions.IncludeSummary {
+				if !reasoning.IncludeSummary {
 					thinkingFields["display"] = "omitted"
 				}
 
-				additionalFields := map[string]any{"thinking": thinkingFields}
-				if effort != "" {
-					additionalFields["output_config"] = map[string]any{"effort": effort}
-				}
+				additionalFields["thinking"] = thinkingFields
+			}
 
+			if effort := outputEffort(reasoning.Effort); effort != "" {
+				additionalFields["output_config"] = map[string]any{"effort": effort}
+			}
+
+			if len(additionalFields) > 0 {
 				params.AdditionalModelRequestFields = document.NewLazyDocument(additionalFields)
 			}
 		}

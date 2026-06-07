@@ -11,12 +11,16 @@ import (
 func TestAdaptiveThinkingEffortHTTP(t *testing.T) {
 	h := anthropic.New(t)
 
-	efforts := []string{"low", "medium", "high", "max"}
+	efforts := []string{"low", "medium", "high", "xhigh", "max"}
 
 	for _, effort := range efforts {
 		t.Run(effort, func(t *testing.T) {
 			for _, model := range anthropic.DefaultModels() {
 				if !model.Capabilities.Thinking {
+					continue
+				}
+
+				if effort == "xhigh" && !supportsEffortXHigh(model.Name) {
 					continue
 				}
 
@@ -52,12 +56,16 @@ func TestAdaptiveThinkingEffortHTTP(t *testing.T) {
 func TestAdaptiveThinkingEffortSSE(t *testing.T) {
 	h := anthropic.New(t)
 
-	efforts := []string{"low", "medium", "high", "max"}
+	efforts := []string{"low", "medium", "high", "xhigh", "max"}
 
 	for _, effort := range efforts {
 		t.Run(effort, func(t *testing.T) {
 			for _, model := range anthropic.DefaultModels() {
 				if !model.Capabilities.Thinking {
+					continue
+				}
+
+				if effort == "xhigh" && !supportsEffortXHigh(model.Name) {
 					continue
 				}
 
@@ -152,6 +160,17 @@ func TestAdaptiveThinkingDisplayOmittedHTTP(t *testing.T) {
 	}
 }
 
+// supportsEffortXHigh returns true for the Claude families that support
+// effort level "xhigh" (Opus 4.7 and later).
+func supportsEffortXHigh(name string) bool {
+	for _, p := range []string{"opus-4-7", "opus-4-8"} {
+		if strings.Contains(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // isClaudeAdaptiveModel returns true for the Claude families that support
 // adaptive thinking.
 func isClaudeAdaptiveModel(name string) bool {
@@ -187,21 +206,88 @@ func TestThinkingExplicitlyDisabledHTTP(t *testing.T) {
 				t.Fatalf("wingman returned status %d: %s", resp.StatusCode, string(resp.RawBody))
 			}
 
-			content, ok := resp.Body["content"].([]any)
-			if !ok {
-				t.Fatalf("content is not an array: %v", resp.Body["content"])
+			requireNoThinkingBlock(t, resp.Body)
+		})
+	}
+}
+
+func TestThinkingDisabledWithEffortHTTP(t *testing.T) {
+	h := anthropic.New(t)
+
+	for _, model := range anthropic.DefaultModels() {
+		if !isClaudeAdaptiveModel(model.Name) {
+			continue
+		}
+
+		t.Run(model.Name, func(t *testing.T) {
+			body := map[string]any{
+				"max_tokens": 1024,
+				"thinking": map[string]any{
+					"type": "disabled",
+				},
+				"output_config": map[string]any{
+					"effort": "low",
+				},
+				"messages": []map[string]any{
+					{"role": "user", "content": "Reply with the single word: OK."},
+				},
 			}
 
-			for _, block := range content {
-				obj, ok := block.(map[string]any)
-				if !ok {
-					continue
-				}
-				if obj["type"] == "thinking" {
-					t.Errorf("expected no thinking block with thinking.type=disabled, got one")
-				}
+			resp := anthropic.PostMessages(t, h, h.Wingman, anthropic.WithModel(body, model.Name))
+			if resp.StatusCode != 200 {
+				t.Fatalf("wingman returned status %d: %s", resp.StatusCode, string(resp.RawBody))
 			}
+
+			requireNoThinkingBlock(t, resp.Body)
 		})
+	}
+}
+
+func TestEffortWithoutThinkingHTTP(t *testing.T) {
+	h := anthropic.New(t)
+
+	for _, model := range anthropic.DefaultModels() {
+		if !isClaudeAdaptiveModel(model.Name) {
+			continue
+		}
+
+		t.Run(model.Name, func(t *testing.T) {
+			body := map[string]any{
+				"max_tokens": 1024,
+				"output_config": map[string]any{
+					"effort": "low",
+				},
+				"messages": []map[string]any{
+					{"role": "user", "content": "Reply with the single word: OK."},
+				},
+			}
+
+			resp := anthropic.PostMessages(t, h, h.Wingman, anthropic.WithModel(body, model.Name))
+			if resp.StatusCode != 200 {
+				t.Fatalf("wingman returned status %d: %s", resp.StatusCode, string(resp.RawBody))
+			}
+
+			requireNoThinkingBlock(t, resp.Body)
+		})
+	}
+}
+
+func requireNoThinkingBlock(t *testing.T, body map[string]any) {
+	t.Helper()
+
+	content, ok := body["content"].([]any)
+	if !ok {
+		t.Fatalf("content is not an array: %v", body["content"])
+	}
+
+	for _, block := range content {
+		obj, ok := block.(map[string]any)
+		if !ok {
+			continue
+		}
+		if obj["type"] == "thinking" {
+			t.Errorf("expected no thinking block, got one")
+		}
 	}
 }
 

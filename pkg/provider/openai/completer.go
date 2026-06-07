@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"iter"
-	"slices"
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
 )
 
 var _ provider.Completer = (*Completer)(nil)
@@ -127,10 +127,8 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 		Model: c.model,
 	}
 
-	if !strings.Contains(c.url, "api.mistral.ai") {
-		req.StreamOptions = openai.ChatCompletionStreamOptionsParam{
-			IncludeUsage: openai.Bool(true),
-		}
+	req.StreamOptions = openai.ChatCompletionStreamOptionsParam{
+		IncludeUsage: openai.Bool(true),
 	}
 
 	if len(tools) > 0 {
@@ -149,18 +147,17 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 		req.Messages = messages
 	}
 
-	if options.ReasoningOptions != nil && !slices.Contains(LegacyModels, c.model) {
-		switch options.ReasoningOptions.Effort {
-		case provider.EffortNone:
-			req.ReasoningEffort = openai.ReasoningEffortNone
+	if options.ReasoningOptions != nil && !isLegacyModel(c.model) {
+		reasoning := options.ReasoningOptions
 
+		switch reasoning.Effort {
 		case provider.EffortMinimal:
 			req.ReasoningEffort = openai.ReasoningEffortMinimal
 
 		case provider.EffortLow:
 			req.ReasoningEffort = openai.ReasoningEffortLow
 
-		case provider.EffortMedium, provider.EffortAdaptive:
+		case provider.EffortMedium:
 			req.ReasoningEffort = openai.ReasoningEffortMedium
 
 		case provider.EffortHigh:
@@ -168,6 +165,15 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 
 		case provider.EffortXHigh, provider.EffortMax:
 			req.ReasoningEffort = openai.ReasoningEffortXhigh
+
+		default:
+			if reasoning.Type == provider.ReasoningTypeAdaptive {
+				req.ReasoningEffort = openai.ReasoningEffortMedium
+			}
+		}
+
+		if reasoning.Type == provider.ReasoningTypeDisabled {
+			req.ReasoningEffort = openai.ReasoningEffortNone
 		}
 	}
 
@@ -224,7 +230,7 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 	}
 
 	if options.MaxTokens != nil {
-		if slices.Contains(LegacyModels, c.model) {
+		if isLegacyModel(c.model) {
 			req.MaxTokens = openai.Int(int64(*options.MaxTokens))
 		} else {
 			req.MaxCompletionTokens = openai.Int(int64(*options.MaxTokens))
@@ -232,8 +238,15 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 	}
 
 	if options.Temperature != nil {
-		if slices.Contains(LegacyModels, c.model) {
-			req.Temperature = openai.Float(float64(*options.Temperature))
+		req.Temperature = openai.Float(float64(*options.Temperature))
+	}
+
+	if strings.Contains(c.url, "api.mistral.ai") {
+		req.StreamOptions = openai.ChatCompletionStreamOptionsParam{}
+
+		if req.MaxCompletionTokens.Valid() {
+			req.MaxTokens = req.MaxCompletionTokens
+			req.MaxCompletionTokens = param.Opt[int64]{}
 		}
 	}
 
@@ -256,7 +269,7 @@ func (c *Completer) convertMessages(input []provider.Message) ([]openai.ChatComp
 
 			message := openai.SystemMessage(parts)
 
-			if !slices.Contains(LegacyModels, c.model) {
+			if !isLegacyModel(c.model) {
 				message = openai.DeveloperMessage(parts)
 			}
 

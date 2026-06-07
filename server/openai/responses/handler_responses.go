@@ -89,7 +89,7 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 
 		switch *req.Reasoning.Effort {
 		case ReasoningEffortNone:
-			options.ReasoningOptions.Effort = provider.EffortNone
+			options.ReasoningOptions.Type = provider.ReasoningTypeDisabled
 
 		case ReasoningEffortMinimal:
 			options.ReasoningOptions.Effort = provider.EffortMinimal
@@ -108,6 +108,10 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 
 		case ReasoningEffortMax:
 			options.ReasoningOptions.Effort = provider.EffortMax
+		}
+
+		if options.ReasoningOptions.Effort != "" {
+			options.ReasoningOptions.Type = provider.ReasoningTypeAdaptive
 		}
 	}
 
@@ -335,7 +339,7 @@ func reasoningRequested(req ResponsesRequest) bool {
 		return false
 	}
 
-	if req.Reasoning.Effort != nil && *req.Reasoning.Effort != ReasoningEffortNone {
+	if req.Reasoning.Effort != nil && *req.Reasoning.Effort != ReasoningEffortNone && *req.Reasoning.Effort != ReasoningEffortMinimal {
 		return true
 	}
 

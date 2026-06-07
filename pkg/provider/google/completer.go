@@ -117,20 +117,27 @@ func convertGenerateConfig(instruction *genai.Content, options *provider.Complet
 		SystemInstruction: instruction,
 	}
 
-	if options.ReasoningOptions != nil && options.ReasoningOptions.Effort != provider.EffortNone {
+	if reasoning := options.ReasoningOptions; reasoning != nil {
 		config.ThinkingConfig = &genai.ThinkingConfig{
-			IncludeThoughts: true,
+			IncludeThoughts: reasoning.IncludeSummary,
 		}
 
-		switch options.ReasoningOptions.Effort {
-		case provider.EffortMinimal:
+		if reasoning.Type == provider.ReasoningTypeDisabled {
+			// Gemini models cannot fully disable thinking; minimal is the
+			// closest equivalent to "no thinking".
+			config.ThinkingConfig.IncludeThoughts = false
 			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelMinimal
-		case provider.EffortLow:
-			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelLow
-		case provider.EffortMedium:
-			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelMedium
-		case provider.EffortHigh, provider.EffortXHigh, provider.EffortMax:
-			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelHigh
+		} else {
+			switch reasoning.Effort {
+			case provider.EffortMinimal:
+				config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelMinimal
+			case provider.EffortLow:
+				config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelLow
+			case provider.EffortMedium:
+				config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelMedium
+			case provider.EffortHigh, provider.EffortXHigh, provider.EffortMax:
+				config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelHigh
+			}
 		}
 	}
 
