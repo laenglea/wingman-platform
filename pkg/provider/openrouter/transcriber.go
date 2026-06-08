@@ -59,7 +59,7 @@ func (t *Transcriber) Transcribe(ctx context.Context, input provider.File, optio
 func detectAudioFormat(file provider.File) string {
 	if file.ContentType != "" {
 		// Extract subtype from MIME type (e.g. "audio/mp3" -> "mp3")
-		if _, subtype, ok := strings.Cut(file.ContentType, "/"); ok {
+		if maintype, subtype, ok := strings.Cut(file.ContentType, "/"); ok && maintype == "audio" {
 			switch subtype {
 			case "x-wav":
 				return "wav"

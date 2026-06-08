@@ -51,7 +51,7 @@ func (c *Client) Extract(ctx context.Context, file extractor.File, options *extr
 		return nil, extractor.ErrUnsupported
 	}
 
-	dataurl := "data:" + file.ContentType + ";base64," + base64.StdEncoding.EncodeToString(file.Content)
+	dataurl := "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(file.Content)
 
 	body := map[string]any{
 		"model": c.model,

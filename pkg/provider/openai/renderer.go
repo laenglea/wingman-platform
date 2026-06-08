@@ -68,7 +68,7 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 		}
 
 		result.Content = data
-		result.ContentType = "image/png"
+		result.ContentType = http.DetectContentType(data)
 	} else {
 		var files []io.Reader
 
@@ -76,22 +76,22 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 			var imageName string
 			var imageType string
 
-			if i.ContentType != "" {
-				switch i.ContentType {
-				case "image/jpeg":
-					imageName = fmt.Sprintf("image-%d.jpg", n)
-					imageType = "image/jpeg"
+			switch i.ContentType {
+			case "image/jpeg":
+				imageName = fmt.Sprintf("image-%d.jpg", n)
+				imageType = "image/jpeg"
 
-				case "image/png":
-					imageName = fmt.Sprintf("image-%d.png", n)
-					imageType = "image/png"
+			case "image/png":
+				imageName = fmt.Sprintf("image-%d.png", n)
+				imageType = "image/png"
 
-				case "image/webp":
-					imageName = fmt.Sprintf("image-%d.webp", n)
-					imageType = "image/webp"
-				}
-			} else if i.Name != "" {
-				switch path.Ext(imageName) {
+			case "image/webp":
+				imageName = fmt.Sprintf("image-%d.webp", n)
+				imageType = "image/webp"
+			}
+
+			if imageType == "" {
+				switch path.Ext(i.Name) {
 				case ".jpg", ".jpeg", ".jpe":
 					imageName = fmt.Sprintf("image-%d.jpg", n)
 					imageType = "image/jpeg"
@@ -101,6 +101,22 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 					imageType = "image/png"
 
 				case ".webp":
+					imageName = fmt.Sprintf("image-%d.webp", n)
+					imageType = "image/webp"
+				}
+			}
+
+			if imageType == "" {
+				switch http.DetectContentType(i.Content) {
+				case "image/jpeg":
+					imageName = fmt.Sprintf("image-%d.jpg", n)
+					imageType = "image/jpeg"
+
+				case "image/png":
+					imageName = fmt.Sprintf("image-%d.png", n)
+					imageType = "image/png"
+
+				case "image/webp":
 					imageName = fmt.Sprintf("image-%d.webp", n)
 					imageType = "image/webp"
 				}
@@ -133,7 +149,7 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 		}
 
 		result.Content = data
-		result.ContentType = "image/png"
+		result.ContentType = http.DetectContentType(data)
 	}
 
 	return result, nil

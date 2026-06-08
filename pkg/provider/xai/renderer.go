@@ -57,7 +57,7 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 		}
 
 		result.Content = data
-		result.ContentType = "image/png"
+		result.ContentType = http.DetectContentType(data)
 	} else {
 		data, err := r.edit(ctx, input, options.Images)
 
@@ -66,7 +66,7 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 		}
 
 		result.Content = data
-		result.ContentType = "image/png"
+		result.ContentType = http.DetectContentType(data)
 	}
 
 	return result, nil

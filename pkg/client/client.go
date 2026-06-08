@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -84,6 +85,16 @@ func endpoint(base, path string) string {
 func writeFormFile(w *multipart.Writer, field, name string, r io.Reader) error {
 	contentType := mime.TypeByExtension(filepath.Ext(name))
 
+	br := bufio.NewReader(r)
+
+	if contentType == "" || contentType == "application/octet-stream" {
+		if head, err := br.Peek(512); err == nil || err == io.EOF {
+			if sniffed := http.DetectContentType(head); sniffed != "application/octet-stream" {
+				contentType = sniffed
+			}
+		}
+	}
+
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
@@ -101,7 +112,7 @@ func writeFormFile(w *multipart.Writer, field, name string, r io.Reader) error {
 		return err
 	}
 
-	_, err = io.Copy(part, r)
+	_, err = io.Copy(part, br)
 	return err
 }
 

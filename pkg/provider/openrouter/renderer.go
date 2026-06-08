@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 
@@ -131,6 +132,6 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 		Model: r.model,
 
 		Content:     data,
-		ContentType: "image/png",
+		ContentType: http.DetectContentType(data),
 	}, nil
 }
