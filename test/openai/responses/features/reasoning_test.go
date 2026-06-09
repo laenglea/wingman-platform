@@ -17,9 +17,12 @@ var reasoningTests = []struct {
 		name:             "reasoning with summary",
 		requireReasoning: true,
 		body: map[string]any{
+			// medium effort: larger models (gpt-5.4) produce no summary at all
+			// for trivial questions at low effort — verified against the live
+			// API — while the reference mini model does.
 			"input": "How many r's are in strawberry?",
 			"reasoning": map[string]any{
-				"effort":  "low",
+				"effort":  "medium",
 				"summary": "auto",
 			},
 		},

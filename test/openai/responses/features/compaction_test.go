@@ -46,6 +46,8 @@ func buildCompactionInput() []map[string]any {
 func TestCompactionHTTP(t *testing.T) {
 	h := openai.New(t)
 
+	h.Client.Timeout = 180 * time.Second
+
 	for _, model := range openai.DefaultModels() {
 		if !model.Capabilities.Compaction {
 			continue
@@ -92,6 +94,8 @@ func TestCompactionHTTP(t *testing.T) {
 
 func TestCompactionSSE(t *testing.T) {
 	h := openai.New(t)
+
+	h.Client.Timeout = 180 * time.Second
 
 	for _, model := range openai.DefaultModels() {
 		if !model.Capabilities.Compaction {

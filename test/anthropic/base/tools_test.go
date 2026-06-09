@@ -39,6 +39,8 @@ func TestToolCallingSSE(t *testing.T) {
 
 	for _, model := range anthropic.DefaultModels() {
 		t.Run(model.Name, func(t *testing.T) {
+			h.SkipUnlessConfigured(t, model.Name)
+
 			anthropicBody := anthropic.WithModel(map[string]any{
 				"max_tokens": 1024,
 				"stream":     true,

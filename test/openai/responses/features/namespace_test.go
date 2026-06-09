@@ -63,8 +63,11 @@ func TestNamespaceToolSSE(t *testing.T) {
 
 	for _, model := range openai.DefaultModels() {
 		t.Run(model.Name, func(t *testing.T) {
+			// The SSE comparison is strict on the event-type pattern; without
+			// this nudge some models write preamble text before the call,
+			// which the reference model does not.
 			body := map[string]any{
-				"input": "What's the weather in London?",
+				"input": "What's the weather in London? Call the tool directly, without any introduction or commentary.",
 				"tools": []any{namespaceWeatherTool},
 			}
 

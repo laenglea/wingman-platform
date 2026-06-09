@@ -26,6 +26,10 @@ func buildAnthropicCompactionInput() []map[string]any {
 func TestCompactionHTTP(t *testing.T) {
 	h := anthropic.New(t)
 
+	// Compaction requests carry ~75k input tokens plus a summarization pass;
+	// the live API regularly exceeds the default 60s client timeout.
+	h.Client.Timeout = 180 * time.Second
+
 	for _, model := range anthropic.DefaultModels() {
 		if !model.Capabilities.Compaction {
 			continue
