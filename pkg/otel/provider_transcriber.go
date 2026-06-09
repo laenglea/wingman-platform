@@ -51,7 +51,6 @@ func (p *observableTranscriber) Transcribe(ctx context.Context, input provider.F
 	if span.IsRecording() {
 		span.SetAttributes(KeyValues(
 			RequestAttrs(semconv.GenAIOperationNameGenerateContent, p.provider, p.model),
-			EndUserAttrs(ctx),
 		)...)
 	}
 

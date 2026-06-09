@@ -46,7 +46,7 @@ func (p *observableSearcher) Search(ctx context.Context, query string, options *
 		if p.provider != "" {
 			attrs = append(attrs, semconv.GenAIProviderNameKey.String(p.provider))
 		}
-		span.SetAttributes(KeyValues(attrs, EndUserAttrs(ctx))...)
+		span.SetAttributes(attrs...)
 	}
 
 	result, err := p.searcher.Search(ctx, query, options)

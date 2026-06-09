@@ -26,6 +26,7 @@ func (s *Server) handleAuth(next http.Handler) http.Handler {
 		}
 
 		otel.Label(ctx, otel.EndUserAttrs(ctx)...)
+		otel.SetEndUserSpan(ctx)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

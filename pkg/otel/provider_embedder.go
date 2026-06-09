@@ -52,10 +52,7 @@ func (p *observableEmbedder) Embed(ctx context.Context, texts []string, options 
 	defer span.End()
 
 	if span.IsRecording() {
-		attrs := KeyValues(
-			RequestAttrs(semconv.GenAIOperationNameEmbeddings, p.provider, p.model),
-			EndUserAttrs(ctx),
-		)
+		attrs := RequestAttrs(semconv.GenAIOperationNameEmbeddings, p.provider, p.model)
 		if options != nil && options.Dimensions != nil {
 			attrs = append(attrs, semconv.GenAIEmbeddingsDimensionCount(*options.Dimensions))
 		}

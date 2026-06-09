@@ -51,7 +51,6 @@ func (p *observableSynthesizer) Synthesize(ctx context.Context, content string, 
 	if span.IsRecording() {
 		span.SetAttributes(KeyValues(
 			RequestAttrs(semconv.GenAIOperationNameGenerateContent, p.provider, p.model),
-			EndUserAttrs(ctx),
 		)...)
 	}
 

@@ -51,7 +51,6 @@ func (p *observableRenderer) Render(ctx context.Context, input string, options *
 	if span.IsRecording() {
 		span.SetAttributes(KeyValues(
 			RequestAttrs(semconv.GenAIOperationNameGenerateContent, p.provider, p.model),
-			EndUserAttrs(ctx),
 		)...)
 	}
 

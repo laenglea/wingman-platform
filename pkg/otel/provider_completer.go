@@ -69,7 +69,6 @@ func (p *observableCompleter) Complete(ctx context.Context, messages []provider.
 				RequestAttrs(semconv.GenAIOperationNameChat, p.provider, p.model),
 				[]KeyValue{semconv.GenAIRequestStream(true)},
 				RequestOptionAttrs(options),
-				EndUserAttrs(ctx),
 				SystemInstructionsAttrs(messages),
 				PromptAttrs(messages),
 				ToolDefinitionsAttrs(tools),
