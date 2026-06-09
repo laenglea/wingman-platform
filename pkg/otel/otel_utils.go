@@ -126,6 +126,16 @@ func EndUserAttrs(ctx context.Context) []KeyValue {
 	return attrs
 }
 
+func MetricAttrs(ctx context.Context, requestModel, responseModel string) []KeyValue {
+	return KeyValues(
+		[]KeyValue{
+			semconv.GenAIRequestModel(requestModel),
+			semconv.GenAIResponseModel(responseModel),
+		},
+		EndUserAttrs(ctx),
+	)
+}
+
 func RequestAttrs(operation attribute.KeyValue, providerName, requestModel string) []KeyValue {
 	attrs := []KeyValue{
 		operation,

@@ -24,10 +24,10 @@ type observableCompleter struct {
 
 	completer provider.Completer
 
-	tokenUsageMetric           genaiconv.ClientTokenUsage
-	operationDurationMetric    genaiconv.ClientOperationDuration
-	timeToFirstChunkMetric     genaiconv.ClientOperationTimeToFirstChunk
-	timePerOutputChunkMetric   genaiconv.ClientOperationTimePerOutputChunk
+	tokenUsageMetric         genaiconv.ClientTokenUsage
+	operationDurationMetric  genaiconv.ClientOperationDuration
+	timeToFirstChunkMetric   genaiconv.ClientOperationTimeToFirstChunk
+	timePerOutputChunkMetric genaiconv.ClientOperationTimePerOutputChunk
 }
 
 func NewCompleter(provider, model string, p provider.Completer) Completer {
@@ -69,7 +69,6 @@ func (p *observableCompleter) Complete(ctx context.Context, messages []provider.
 				RequestAttrs(semconv.GenAIOperationNameChat, p.provider, p.model),
 				[]KeyValue{semconv.GenAIRequestStream(true)},
 				RequestOptionAttrs(options),
-				EndUserAttrs(ctx),
 				SystemInstructionsAttrs(messages),
 				PromptAttrs(messages),
 				ToolDefinitionsAttrs(tools),
@@ -114,21 +113,14 @@ func (p *observableCompleter) Complete(ctx context.Context, messages []provider.
 				}
 			}
 
-			// Metrics: model attrs only — keep end-user attrs out to avoid
-			// histogram cardinality explosions (spec puts user info on
-			// spans/logs, not metrics).
-			modelAttrs := []KeyValue{
-				semconv.GenAIRequestModel(p.model),
-				semconv.GenAIResponseModel(providerModel),
-			}
+			attrs := MetricAttrs(ctx, p.model, providerModel)
 
-			durationAttrs := modelAttrs
 			if lastErr != nil {
-				durationAttrs = append(durationAttrs, p.operationDurationMetric.AttrErrorType(ErrorTypeAttr(lastErr)))
+				attrs = append(attrs, p.operationDurationMetric.AttrErrorType(ErrorTypeAttr(lastErr)))
 			}
 
 			p.operationDurationMetric.Record(ctx, duration,
-				genaiconv.OperationNameChat, providerName, durationAttrs...)
+				genaiconv.OperationNameChat, providerName, attrs...)
 
 			if !firstChunkAt.IsZero() {
 				ttfc := firstChunkAt.Sub(timestamp).Seconds()
@@ -136,14 +128,14 @@ func (p *observableCompleter) Complete(ctx context.Context, messages []provider.
 					span.SetAttributes(semconv.GenAIResponseTimeToFirstChunk(ttfc))
 				}
 				p.timeToFirstChunkMetric.Record(ctx, ttfc,
-					genaiconv.OperationNameChat, providerName, modelAttrs...)
+					genaiconv.OperationNameChat, providerName, attrs...)
 			}
 
 			if lastResult == nil || lastResult.Usage == nil {
 				return
 			}
 
-			tokenAttrs := modelAttrs
+			tokenAttrs := attrs
 
 			if lastResult.Usage.InputTokens > 0 {
 				p.tokenUsageMetric.Record(ctx, int64(lastResult.Usage.InputTokens),
@@ -155,10 +147,7 @@ func (p *observableCompleter) Complete(ctx context.Context, messages []provider.
 			}
 		}()
 
-		modelAttrs := []KeyValue{
-			semconv.GenAIRequestModel(p.model),
-			semconv.GenAIResponseModel(p.model),
-		}
+		attrs := MetricAttrs(ctx, p.model, p.model)
 
 		for completion, err := range p.completer.Complete(ctx, messages, options) {
 			if err != nil {
@@ -173,7 +162,7 @@ func (p *observableCompleter) Complete(ctx context.Context, messages []provider.
 				firstChunkAt = now
 			} else {
 				p.timePerOutputChunkMetric.Record(ctx, now.Sub(prevChunkAt).Seconds(),
-					genaiconv.OperationNameChat, providerName, modelAttrs...)
+					genaiconv.OperationNameChat, providerName, attrs...)
 			}
 			prevChunkAt = now
 

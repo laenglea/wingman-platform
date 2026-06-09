@@ -52,10 +52,7 @@ func (p *observableEmbedder) Embed(ctx context.Context, texts []string, options 
 	defer span.End()
 
 	if span.IsRecording() {
-		attrs := KeyValues(
-			RequestAttrs(semconv.GenAIOperationNameEmbeddings, p.provider, p.model),
-			EndUserAttrs(ctx),
-		)
+		attrs := RequestAttrs(semconv.GenAIOperationNameEmbeddings, p.provider, p.model)
 		if options != nil && options.Dimensions != nil {
 			attrs = append(attrs, semconv.GenAIEmbeddingsDimensionCount(*options.Dimensions))
 		}
@@ -87,17 +84,14 @@ func (p *observableEmbedder) Embed(ctx context.Context, texts []string, options 
 		}
 
 		if result.Usage != nil {
-			tokenAttrs := []KeyValue{
-				semconv.GenAIRequestModel(p.model),
-				semconv.GenAIResponseModel(providerModel),
-			}
+			attrs := MetricAttrs(ctx, p.model, providerModel)
 
 			if result.Usage.InputTokens > 0 {
 				p.tokenUsageMetric.Record(ctx, int64(result.Usage.InputTokens),
 					genaiconv.OperationNameEmbeddings,
 					providerName,
 					genaiconv.TokenTypeInput,
-					tokenAttrs...,
+					attrs...,
 				)
 			}
 
@@ -106,25 +100,22 @@ func (p *observableEmbedder) Embed(ctx context.Context, texts []string, options 
 					genaiconv.OperationNameEmbeddings,
 					providerName,
 					genaiconv.TokenTypeOutput,
-					tokenAttrs...,
+					attrs...,
 				)
 			}
 		}
 	}
 
-	durationAttrs := []KeyValue{
-		semconv.GenAIRequestModel(p.model),
-		semconv.GenAIResponseModel(providerModel),
-	}
+	attrs := MetricAttrs(ctx, p.model, providerModel)
 
 	if err != nil {
-		durationAttrs = append(durationAttrs, p.operationDurationMetric.AttrErrorType(ErrorTypeAttr(err)))
+		attrs = append(attrs, p.operationDurationMetric.AttrErrorType(ErrorTypeAttr(err)))
 	}
 
 	p.operationDurationMetric.Record(ctx, duration,
 		genaiconv.OperationNameEmbeddings,
 		providerName,
-		durationAttrs...,
+		attrs...,
 	)
 
 	return result, err

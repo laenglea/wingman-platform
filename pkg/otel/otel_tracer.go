@@ -31,6 +31,7 @@ func setupTracer(ctx context.Context, resource *sdkresource.Resource) error {
 
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithSpanProcessor(endUserProcessor{}),
 		sdktrace.WithBatcher(exporter, sdktrace.WithBatchTimeout(time.Second)),
 		sdktrace.WithResource(resource),
 	)

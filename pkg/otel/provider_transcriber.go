@@ -51,7 +51,6 @@ func (p *observableTranscriber) Transcribe(ctx context.Context, input provider.F
 	if span.IsRecording() {
 		span.SetAttributes(KeyValues(
 			RequestAttrs(semconv.GenAIOperationNameGenerateContent, p.provider, p.model),
-			EndUserAttrs(ctx),
 		)...)
 	}
 
@@ -77,10 +76,7 @@ func (p *observableTranscriber) Transcribe(ctx context.Context, input provider.F
 		}
 	}
 
-	attrs := []KeyValue{
-		semconv.GenAIRequestModel(p.model),
-		semconv.GenAIResponseModel(providerModel),
-	}
+	attrs := MetricAttrs(ctx, p.model, providerModel)
 
 	if err != nil {
 		attrs = append(attrs, p.operationDurationMetric.AttrErrorType(ErrorTypeAttr(err)))

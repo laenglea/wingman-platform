@@ -57,7 +57,6 @@ func (p *observableTool) Execute(ctx context.Context, tool string, parameters ma
 		span.SetAttributes(KeyValues(
 			baseAttrs,
 			ToolArgumentAttrs(parameters),
-			EndUserAttrs(ctx),
 		)...)
 	}
 
