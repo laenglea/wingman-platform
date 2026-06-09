@@ -10,6 +10,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/tool"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
 func toMessages(system string, messages []MessageParam) ([]provider.Message, error) {
@@ -108,6 +109,7 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 		case "redacted_thinking":
 			// Encrypted thinking block — only the opaque `data` blob round-trips.
 			content = append(content, provider.ReasoningContent(provider.Reasoning{
+				Kind:      provider.ReasoningKindRedacted,
 				Signature: block.Data,
 			}))
 
@@ -194,9 +196,19 @@ func toFile(source *BlockSource) (*provider.File, error) {
 		file.Content = data
 
 	case "url":
-		// For URL sources, we store the URL in the content
-		// The provider should handle fetching if needed
-		file.Content = []byte(source.URL)
+		// No provider consumes raw URLs — fetch the content here so URL
+		// sources work across all backends.
+		fetched, err := shared.ToFile(source.URL)
+
+		if err != nil {
+			return nil, err
+		}
+
+		file.Content = fetched.Content
+
+		if file.ContentType == "" {
+			file.ContentType = fetched.ContentType
+		}
 
 	case "text":
 		// Plain-text document source — pass the bytes through.
@@ -343,16 +355,23 @@ func toContentBlocks(content []provider.Content, includeThinking bool) []Content
 
 	for _, c := range content {
 		if includeThinking && c.Reasoning != nil && (c.Reasoning.Text != "" || c.Reasoning.Summary != "" || c.Reasoning.Signature != "") {
-			thinking := c.Reasoning.Text
-			if thinking == "" {
-				thinking = c.Reasoning.Summary
-			}
+			if c.Reasoning.Kind == provider.ReasoningKindRedacted {
+				result = append(result, ContentBlock{
+					Type: "redacted_thinking",
+					Data: c.Reasoning.Signature,
+				})
+			} else {
+				thinking := c.Reasoning.Text
+				if thinking == "" {
+					thinking = c.Reasoning.Summary
+				}
 
-			result = append(result, ContentBlock{
-				Type:      "thinking",
-				Thinking:  thinking,
-				Signature: c.Reasoning.Signature,
-			})
+				result = append(result, ContentBlock{
+					Type:      "thinking",
+					Thinking:  thinking,
+					Signature: c.Reasoning.Signature,
+				})
+			}
 		}
 
 		if c.Compaction != nil && (c.Compaction.Content != "" || c.Compaction.Signature != "") {

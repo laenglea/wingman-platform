@@ -3,6 +3,8 @@ package anthropic
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -51,9 +53,13 @@ func TestToMessage_ThinkingBlocks(t *testing.T) {
 	}
 
 	// redacted_thinking carries only the opaque data blob.
-	if reasonings[1].Text != "" || reasonings[1].Signature != "REDACTED_BLOB" {
-		t.Errorf("redacted_thinking block: got (text=%q, sig=%q), want (\"\", \"REDACTED_BLOB\")",
-			reasonings[1].Text, reasonings[1].Signature)
+	if reasonings[1].Text != "" || reasonings[1].Signature != "REDACTED_BLOB" || reasonings[1].Kind != provider.ReasoningKindRedacted {
+		t.Errorf("redacted_thinking block: got (text=%q, sig=%q, kind=%q), want (\"\", \"REDACTED_BLOB\", \"redacted\")",
+			reasonings[1].Text, reasonings[1].Signature, reasonings[1].Kind)
+	}
+
+	if reasonings[0].Kind == provider.ReasoningKindRedacted {
+		t.Error("thinking block should not be marked redacted")
 	}
 
 	if !hasText {
@@ -62,17 +68,24 @@ func TestToMessage_ThinkingBlocks(t *testing.T) {
 }
 
 // TestToMessage_DocumentBlocks verifies that document content blocks flow
-// through correctly. Base64 (PDF) and URL sources become File content;
-// plain-text sources inline as text so they work across providers without
-// a dedicated document concept.
+// through correctly. Base64 (PDF) sources become File content; URL sources
+// are fetched (no provider consumes raw URLs); plain-text sources inline as
+// text so they work across providers without a dedicated document concept.
 func TestToMessage_DocumentBlocks(t *testing.T) {
 	pdfBytes := []byte("%PDF-1.4 fake pdf bytes")
 	pdfB64 := base64.StdEncoding.EncodeToString(pdfBytes)
 
+	urlBytes := []byte("%PDF-1.4 fetched pdf bytes")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Write(urlBytes)
+	}))
+	defer server.Close()
+
 	body := []byte(`[
 		{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` + pdfB64 + `"}},
 		{"type":"document","source":{"type":"text","media_type":"text/plain","data":"hello world"}},
-		{"type":"document","source":{"type":"url","url":"https://example.com/doc.pdf"}},
+		{"type":"document","source":{"type":"url","url":"` + server.URL + `/doc.pdf"}},
 		{"type":"text","text":"summarize"}
 	]`)
 
@@ -105,13 +118,56 @@ func TestToMessage_DocumentBlocks(t *testing.T) {
 		t.Errorf("base64 PDF: bytes or content-type mismatch (got type=%q, len=%d)",
 			files[0].ContentType, len(files[0].Content))
 	}
-	if string(files[1].Content) != "https://example.com/doc.pdf" {
-		t.Errorf("url doc: got %q", string(files[1].Content))
+	if string(files[1].Content) != string(urlBytes) || files[1].ContentType != "application/pdf" {
+		t.Errorf("url doc: got type=%q content=%q", files[1].ContentType, string(files[1].Content))
 	}
 
 	// "hello world" text doc + the trailing "summarize" text block.
 	if len(texts) != 2 || texts[0] != "hello world" || texts[1] != "summarize" {
 		t.Errorf("expected texts [hello world, summarize], got %v", texts)
+	}
+}
+
+// TestToMessage_ImageURLBlock verifies that URL-sourced images are fetched
+// and carry the media type from the response when the block omits it.
+func TestToMessage_ImageURLBlock(t *testing.T) {
+	imgBytes := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(imgBytes)
+	}))
+	defer server.Close()
+
+	body := []byte(`[
+		{"type":"image","source":{"type":"url","url":"` + server.URL + `/cat.png"}},
+		{"type":"text","text":"describe"}
+	]`)
+
+	var blocks []ContentBlockParam
+	if err := json.Unmarshal(body, &blocks); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	msg, err := toMessage(0, MessageParam{Role: MessageRoleUser, Content: blocksToAny(blocks)})
+	if err != nil {
+		t.Fatalf("toMessage: %v", err)
+	}
+
+	var file *provider.File
+	for _, c := range msg.Content {
+		if c.File != nil {
+			file = c.File
+		}
+	}
+
+	if file == nil {
+		t.Fatal("expected file content")
+	}
+	if string(file.Content) != string(imgBytes) {
+		t.Errorf("image bytes mismatch (len=%d)", len(file.Content))
+	}
+	if file.ContentType != "image/png" {
+		t.Errorf("content type: got %q, want image/png", file.ContentType)
 	}
 }
 
@@ -254,5 +310,31 @@ func TestToTools_PassesThroughRegular(t *testing.T) {
 	}
 	if len(tools) != 1 {
 		t.Fatalf("tools length = %d", len(tools))
+	}
+}
+
+// TestToContentBlocks_RedactedThinking verifies redacted reasoning round-trips
+// as a redacted_thinking block with the opaque blob in `data`.
+func TestToContentBlocks_RedactedThinking(t *testing.T) {
+	content := []provider.Content{
+		provider.ReasoningContent(provider.Reasoning{Text: "step", Signature: "SIG"}),
+		provider.ReasoningContent(provider.Reasoning{Kind: provider.ReasoningKindRedacted, Signature: "BLOB"}),
+		provider.TextContent("answer"),
+	}
+
+	blocks := toContentBlocks(content, true)
+
+	if len(blocks) != 3 {
+		t.Fatalf("expected 3 blocks, got %d: %+v", len(blocks), blocks)
+	}
+
+	if blocks[0].Type != "thinking" || blocks[0].Thinking != "step" || blocks[0].Signature != "SIG" {
+		t.Errorf("thinking block: %+v", blocks[0])
+	}
+	if blocks[1].Type != "redacted_thinking" || blocks[1].Data != "BLOB" || blocks[1].Signature != "" {
+		t.Errorf("redacted_thinking block: %+v", blocks[1])
+	}
+	if blocks[2].Type != "text" || blocks[2].Text == nil || *blocks[2].Text != "answer" {
+		t.Errorf("text block: %+v", blocks[2])
 	}
 }

@@ -55,10 +55,25 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tools, err := toTools(req.Tools)
+	options, err := toCompleteOptions(req)
+
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
+	}
+
+	if req.Stream {
+		h.handleMessagesStream(w, r, req, completer, messages, options)
+	} else {
+		h.handleMessagesComplete(w, r, req, completer, messages, options)
+	}
+}
+
+func toCompleteOptions(req MessageRequest) (*provider.CompleteOptions, error) {
+	tools, err := toTools(req.Tools)
+
+	if err != nil {
+		return nil, err
 	}
 
 	options := &provider.CompleteOptions{
@@ -98,18 +113,25 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		options.MaxTokens = &req.MaxTokens
 	}
 
-	// Handle structured output via output_format
+	// Handle structured output via output_config.format (canonical) or the
+	// deprecated top-level output_format.
 	// Support both explicit type: "json_schema" and SDK format (just schema field)
-	if req.OutputFormat != nil && (req.OutputFormat.Type == "json_schema" || req.OutputFormat.Schema != nil) {
-		name := req.OutputFormat.Name
+	format := req.OutputFormat
+
+	if req.OutputConfig != nil && req.OutputConfig.Format != nil {
+		format = req.OutputConfig.Format
+	}
+
+	if format != nil && (format.Type == "json_schema" || format.Schema != nil) {
+		name := format.Name
 		if name == "" {
 			name = "response" // default name for providers that require it
 		}
 
 		options.Schema = &provider.Schema{
 			Name:       name,
-			Strict:     req.OutputFormat.Strict,
-			Properties: req.OutputFormat.Schema,
+			Strict:     format.Strict,
+			Properties: format.Schema,
 		}
 	}
 
@@ -162,20 +184,20 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	if req.ContextManagement != nil {
 		for _, edit := range req.ContextManagement.Edits {
-			if strings.HasPrefix(edit.Type, "compact") && edit.Trigger != nil {
-				options.CompactionOptions = &provider.CompactionOptions{
-					Threshold: edit.Trigger.Value,
+			if strings.HasPrefix(edit.Type, "compact") {
+				options.CompactionOptions = &provider.CompactionOptions{}
+
+				// Without an explicit trigger the upstream default applies.
+				if edit.Trigger != nil {
+					options.CompactionOptions.Threshold = edit.Trigger.Value
 				}
+
 				break
 			}
 		}
 	}
 
-	if req.Stream {
-		h.handleMessagesStream(w, r, req, completer, messages, options)
-	} else {
-		h.handleMessagesComplete(w, r, req, completer, messages, options)
-	}
+	return options, nil
 }
 
 func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request, req MessageRequest, completer provider.Completer, messages []provider.Message, options *provider.CompleteOptions) {

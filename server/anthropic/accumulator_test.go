@@ -175,3 +175,54 @@ func TestStreamingAccumulatorSplitsThinkingBlocks(t *testing.T) {
 		t.Errorf("block 2: got %q / %q", thinking[2], signatures[2])
 	}
 }
+
+func TestStreamingAccumulatorRedactedThinking(t *testing.T) {
+	var events []StreamEvent
+	acc := NewStreamingAccumulator("msg_123", "claude-test", func(event StreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	acc.ThinkingEnabled = true
+
+	add := func(content provider.Content) {
+		t.Helper()
+		if err := acc.Add(provider.Completion{Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{content}}}); err != nil {
+			t.Fatalf("add completion: %v", err)
+		}
+	}
+
+	add(provider.ReasoningContent(provider.Reasoning{Kind: provider.ReasoningKindRedacted, Signature: "BLOB"}))
+	add(provider.TextContent("hello"))
+
+	if err := acc.Complete(); err != nil {
+		t.Fatalf("complete stream: %v", err)
+	}
+
+	var redacted *ContentBlock
+	redactedStopped := false
+	redactedIndex := -1
+
+	for _, event := range events {
+		switch event.Type {
+		case StreamEventContentBlockStart:
+			if event.ContentBlock.Type == "redacted_thinking" {
+				redacted = event.ContentBlock
+				redactedIndex = event.Index
+			}
+		case StreamEventContentBlockStop:
+			if event.Index == redactedIndex && redacted != nil {
+				redactedStopped = true
+			}
+		}
+	}
+
+	if redacted == nil {
+		t.Fatal("expected redacted_thinking content_block_start")
+	}
+	if redacted.Data != "BLOB" {
+		t.Errorf("data: got %q, want BLOB", redacted.Data)
+	}
+	if !redactedStopped {
+		t.Error("expected content_block_stop for redacted_thinking block")
+	}
+}

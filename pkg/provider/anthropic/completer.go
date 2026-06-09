@@ -55,10 +55,13 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		message := anthropic.BetaMessage{}
 		stream := c.messages.NewStreaming(ctx, *req)
 
+		toolArgsSeen := map[int64]bool{}
+
 		for stream.Next() {
 			event := stream.Current()
 
-			// HACK: handle empty tool use blocks
+			// HACK: tool use blocks without input_json_delta would otherwise
+			// accumulate empty arguments downstream — normalize to "{}"
 			switch event := event.AsAny().(type) {
 			case anthropic.BetaRawContentBlockStopEvent:
 				if int(event.Index) >= len(message.Content) {
@@ -67,8 +70,10 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 				block := &message.Content[event.Index]
 
-				if block.Type == "tool_use" && len(block.Input) == 0 {
-					block.Input = json.RawMessage([]byte("{}"))
+				if block.Type == "tool_use" && !toolArgsSeen[event.Index] {
+					if len(block.Input) == 0 {
+						block.Input = json.RawMessage([]byte("{}"))
+					}
 
 					delta := &provider.Completion{
 						ID:    message.ID,
@@ -79,6 +84,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 							Content: []provider.Content{
 								provider.ToolCallContent(provider.ToolCall{
+									ID:        block.ID,
 									Arguments: "{}",
 								}),
 							},
@@ -152,7 +158,28 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					}
 
 				case anthropic.BetaRedactedThinkingBlock:
-					// Redacted thinking blocks are silently skipped
+					// Round-trip the opaque blob so multi-turn tool use survives redaction
+					delta := &provider.Completion{
+						ID:    message.ID,
+						Model: c.model,
+
+						Message: &provider.Message{
+							Role: provider.MessageRoleAssistant,
+
+							Content: []provider.Content{
+								provider.ReasoningContent(provider.Reasoning{
+									Kind:      provider.ReasoningKindRedacted,
+									Signature: event.Data,
+								}),
+							},
+						},
+
+						Usage: toUsage(message.Usage),
+					}
+
+					if !yield(delta, nil) {
+						return
+					}
 
 				case anthropic.BetaCompactionBlock:
 					delta := &provider.Completion{
@@ -291,6 +318,14 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					}
 
 				case anthropic.BetaInputJSONDelta:
+					if int(blockIndex) >= len(message.Content) {
+						break
+					}
+
+					if event.PartialJSON != "" {
+						toolArgsSeen[blockIndex] = true
+					}
+
 					currentBlock := message.Content[blockIndex]
 
 					delta := &provider.Completion{
@@ -442,11 +477,13 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			})
 
 		case provider.MessageRoleUser:
+			// tool_result blocks must precede other content in a user message
 			var blocks []anthropic.BetaContentBlockParamUnion
+			var contentBlocks []anthropic.BetaContentBlockParamUnion
 
 			for _, c := range m.Content {
 				if text := strings.TrimRight(c.Text, " \t\n\r"); text != "" {
-					blocks = append(blocks, anthropic.NewBetaTextBlock(text))
+					contentBlocks = append(contentBlocks, anthropic.NewBetaTextBlock(text))
 				}
 
 				if c.File != nil {
@@ -455,13 +492,13 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 					switch mime {
 					case "image/jpeg", "image/png", "image/gif", "image/webp":
-						blocks = append(blocks, anthropic.NewBetaImageBlock(anthropic.BetaBase64ImageSourceParam{
+						contentBlocks = append(contentBlocks, anthropic.NewBetaImageBlock(anthropic.BetaBase64ImageSourceParam{
 							Data:      content,
 							MediaType: anthropic.BetaBase64ImageSourceMediaType(mime),
 						}))
 
 					case "application/pdf":
-						blocks = append(blocks, anthropic.NewBetaDocumentBlock(anthropic.BetaBase64PDFSourceParam{
+						contentBlocks = append(contentBlocks, anthropic.NewBetaDocumentBlock(anthropic.BetaBase64PDFSourceParam{
 							Data: content,
 						}))
 
@@ -529,6 +566,8 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				}
 			}
 
+			blocks = append(blocks, contentBlocks...)
+
 			message := anthropic.NewBetaUserMessage(blocks...)
 			messages = append(messages, message)
 
@@ -542,7 +581,11 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 				if c.Reasoning != nil && c.Reasoning.Signature != "" {
 					// Include thinking blocks for conversation continuity
-					blocks = append(blocks, anthropic.NewBetaThinkingBlock(c.Reasoning.Signature, c.Reasoning.Text))
+					if c.Reasoning.Kind == provider.ReasoningKindRedacted {
+						blocks = append(blocks, anthropic.NewBetaRedactedThinkingBlock(c.Reasoning.Signature))
+					} else {
+						blocks = append(blocks, anthropic.NewBetaThinkingBlock(c.Reasoning.Signature, c.Reasoning.Text))
+					}
 				}
 
 				if c.Compaction != nil && (c.Compaction.Content != "" || c.Compaction.Signature != "") {
@@ -650,18 +693,20 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		}
 	}
 
-	if options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 && !isLegacyModel(c.model) {
+	if options.CompactionOptions != nil && !isLegacyModel(c.model) {
 		hasCompaction = true
+
+		edit := &anthropic.BetaCompact20260112EditParam{}
+
+		if options.CompactionOptions.Threshold > 0 {
+			edit.Trigger = anthropic.BetaInputTokensTriggerParam{
+				Value: int64(options.CompactionOptions.Threshold),
+			}
+		}
 
 		req.ContextManagement = anthropic.BetaContextManagementConfigParam{
 			Edits: []anthropic.BetaContextManagementConfigEditUnionParam{
-				{
-					OfCompact20260112: &anthropic.BetaCompact20260112EditParam{
-						Trigger: anthropic.BetaInputTokensTriggerParam{
-							Value: int64(options.CompactionOptions.Threshold),
-						},
-					},
-				},
+				{OfCompact20260112: edit},
 			},
 		}
 	}

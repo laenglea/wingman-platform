@@ -251,7 +251,22 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			}
 		}
 
-		if s.ThinkingEnabled && content.Reasoning != nil && (content.Reasoning.Text != "" || content.Reasoning.Signature != "") {
+		if s.ThinkingEnabled && content.Reasoning != nil && content.Reasoning.Kind == provider.ReasoningKindRedacted && content.Reasoning.Signature != "" {
+			index, err := s.startBlock(&ContentBlock{
+				Type: "redacted_thinking",
+				Data: content.Reasoning.Signature,
+			})
+
+			if err != nil {
+				return err
+			}
+
+			if err := s.stopBlock(index); err != nil {
+				return err
+			}
+		}
+
+		if s.ThinkingEnabled && content.Reasoning != nil && content.Reasoning.Kind != provider.ReasoningKindRedacted && (content.Reasoning.Text != "" || content.Reasoning.Signature != "") {
 			reasoning := content.Reasoning
 
 			// A signature ends a thinking block; a new ID starts the next item

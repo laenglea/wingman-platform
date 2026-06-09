@@ -44,7 +44,8 @@ type ThinkingConfig struct {
 }
 
 type OutputConfig struct {
-	Effort string `json:"effort,omitempty"` // "low", "medium", "high", "xhigh", "max"
+	Effort string        `json:"effort,omitempty"` // "low", "medium", "high", "xhigh", "max"
+	Format *OutputFormat `json:"format,omitempty"`
 }
 
 type OutputFormat struct {
@@ -168,7 +169,7 @@ type Message struct {
 }
 
 type ContentBlock struct {
-	Type string `json:"type"` // "text", "tool_use", "thinking", or "compaction"
+	Type string `json:"type"` // "text", "tool_use", "thinking", "redacted_thinking", or "compaction"
 
 	// For text blocks
 	Text *string `json:"text,omitempty"`
@@ -176,6 +177,9 @@ type ContentBlock struct {
 	// For thinking blocks
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
+
+	// For redacted_thinking blocks
+	Data string `json:"data,omitempty"`
 
 	// For compaction blocks
 	Content          string `json:"content,omitempty"`

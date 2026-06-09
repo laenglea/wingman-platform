@@ -285,39 +285,13 @@ func (c *Completer) convertMessages(input []provider.Message) ([]openai.ChatComp
 				}
 
 				if c.File != nil {
-					mime := c.File.ContentType
-					content := base64.StdEncoding.EncodeToString(c.File.Content)
+					part, err := toFileContentPart(c.File)
 
-					switch {
-					case mime == "image/png" || mime == "image/jpeg" || mime == "image/webp" || mime == "image/gif":
-						image := openai.ChatCompletionContentPartImageImageURLParam{
-							URL: "data:" + mime + ";base64," + content,
-						}
-						parts = append(parts, openai.ImageContentPart(image))
-
-					case mime == "audio/wav" || mime == "audio/x-wav":
-						audio := openai.ChatCompletionContentPartInputAudioInputAudioParam{
-							Data:   content,
-							Format: "wav",
-						}
-						parts = append(parts, openai.InputAudioContentPart(audio))
-
-					case mime == "audio/mpeg" || mime == "audio/mp3":
-						audio := openai.ChatCompletionContentPartInputAudioInputAudioParam{
-							Data:   content,
-							Format: "mp3",
-						}
-						parts = append(parts, openai.InputAudioContentPart(audio))
-
-					default:
-						// Forward as a generic file part — OpenAI's wire accepts any
-						// mime here and decides what its models can interpret.
-						file := openai.ChatCompletionContentPartFileFileParam{
-							Filename: openai.String(c.File.Name),
-							FileData: openai.String("data:" + mime + ";base64," + content),
-						}
-						parts = append(parts, openai.FileContentPart(file))
+					if err != nil {
+						return nil, err
 					}
+
+					parts = append(parts, part)
 				}
 
 				if c.ToolResult != nil {
@@ -326,18 +300,29 @@ func (c *Completer) convertMessages(input []provider.Message) ([]openai.ChatComp
 			}
 
 			// Each tool result becomes a separate tool message (OpenAI Chat Completions
-			// format — text-only at the wire, so non-text parts are dropped here).
+			// format — text-only at the wire). Non-text parts (e.g. screenshots) are
+			// bridged into a trailing user message instead of being dropped.
 			for _, tr := range toolResults {
 				var b strings.Builder
 				for _, p := range tr.Parts {
 					if p.Text != "" {
 						b.WriteString(p.Text)
 					}
+
+					if p.File != nil {
+						part, err := toFileContentPart(p.File)
+
+						if err != nil {
+							return nil, err
+						}
+
+						parts = append(parts, part)
+					}
 				}
 				result = append(result, openai.ToolMessage(b.String(), tr.ID))
 			}
 
-			if len(toolResults) == 0 {
+			if len(toolResults) == 0 || len(parts) > 0 {
 				result = append(result, openai.UserMessage(parts))
 			}
 
@@ -380,6 +365,42 @@ func (c *Completer) convertMessages(input []provider.Message) ([]openai.ChatComp
 	}
 
 	return result, nil
+}
+
+func toFileContentPart(file *provider.File) (openai.ChatCompletionContentPartUnionParam, error) {
+	mime := file.ContentType
+	content := base64.StdEncoding.EncodeToString(file.Content)
+
+	switch {
+	case mime == "image/png" || mime == "image/jpeg" || mime == "image/webp" || mime == "image/gif":
+		image := openai.ChatCompletionContentPartImageImageURLParam{
+			URL: "data:" + mime + ";base64," + content,
+		}
+		return openai.ImageContentPart(image), nil
+
+	case mime == "audio/wav" || mime == "audio/x-wav":
+		audio := openai.ChatCompletionContentPartInputAudioInputAudioParam{
+			Data:   content,
+			Format: "wav",
+		}
+		return openai.InputAudioContentPart(audio), nil
+
+	case mime == "audio/mpeg" || mime == "audio/mp3":
+		audio := openai.ChatCompletionContentPartInputAudioInputAudioParam{
+			Data:   content,
+			Format: "mp3",
+		}
+		return openai.InputAudioContentPart(audio), nil
+
+	default:
+		// Forward as a generic file part — OpenAI's wire accepts any
+		// mime here and decides what its models can interpret.
+		f := openai.ChatCompletionContentPartFileFileParam{
+			Filename: openai.String(file.Name),
+			FileData: openai.String("data:" + mime + ";base64," + content),
+		}
+		return openai.FileContentPart(f), nil
+	}
 }
 
 func convertTools(tools []provider.Tool) ([]openai.ChatCompletionToolUnionParam, error) {

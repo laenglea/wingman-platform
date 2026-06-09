@@ -52,6 +52,7 @@ type ChatCompletionRequest struct {
 
 	Temperature         *float32 `json:"temperature,omitempty"`
 	MaxCompletionTokens *int     `json:"max_completion_tokens,omitempty"`
+	MaxTokens           *int     `json:"max_tokens,omitempty"` // deprecated alias of max_completion_tokens
 
 	ResponseFormat *ChatCompletionResponseFormat `json:"response_format,omitempty"`
 

@@ -177,6 +177,12 @@ func (a *CompletionAccumulator) Add(c Completion) {
 // the last entry. Collapsing distinct IDs would pair one item's ID with
 // another's encrypted_content, which OpenAI rejects on the next turn.
 func (a *CompletionAccumulator) addReasoning(r *Reasoning) {
+	if r.Kind == ReasoningKindRedacted {
+		a.reasonings = append(a.reasonings, Reasoning{ID: r.ID, Kind: r.Kind, Signature: r.Signature})
+		a.contentOrder = append(a.contentOrder, accumulatedContentRef{kind: accumulatedContentReasoning, index: len(a.reasonings) - 1})
+		return
+	}
+
 	var target *Reasoning
 
 	if r.ID != "" {
@@ -186,7 +192,7 @@ func (a *CompletionAccumulator) addReasoning(r *Reasoning) {
 				break
 			}
 		}
-	} else if len(a.reasonings) > 0 {
+	} else if len(a.reasonings) > 0 && a.reasonings[len(a.reasonings)-1].Kind != ReasoningKindRedacted {
 		target = &a.reasonings[len(a.reasonings)-1]
 	}
 

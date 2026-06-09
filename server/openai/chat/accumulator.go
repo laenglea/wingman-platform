@@ -2,6 +2,8 @@ package chat
 
 import (
 	"github.com/adrianliechti/wingman/pkg/provider"
+
+	"github.com/google/uuid"
 )
 
 // StreamEventType represents the type of streaming event
@@ -39,6 +41,7 @@ type StreamingAccumulator struct {
 	handler StreamEventHandler
 
 	// Configuration
+	id    string
 	model string
 
 	// State tracking
@@ -54,6 +57,7 @@ type StreamingAccumulator struct {
 func NewStreamingAccumulator(model string, handler StreamEventHandler) *StreamingAccumulator {
 	return &StreamingAccumulator{
 		handler:         handler,
+		id:              "chatcmpl-" + uuid.NewString(),
 		model:           model,
 		finishReason:    FinishReasonStop,
 		toolCallIndices: make(map[string]int),
@@ -80,6 +84,10 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			},
 		},
 		ServiceTier: "default",
+	}
+
+	if chunk.ID == "" {
+		chunk.ID = s.id
 	}
 
 	if chunk.Model == "" {
@@ -171,6 +179,10 @@ func (s *StreamingAccumulator) Complete(includeUsage bool) error {
 			},
 		}
 
+		if finishChunk.ID == "" {
+			finishChunk.ID = s.id
+		}
+
 		if finishChunk.Model == "" {
 			finishChunk.Model = s.model
 		}
@@ -203,6 +215,10 @@ func (s *StreamingAccumulator) Complete(includeUsage bool) error {
 					ReasoningTokens: result.Usage.ReasoningTokens,
 				},
 			},
+		}
+
+		if usageChunk.ID == "" {
+			usageChunk.ID = s.id
 		}
 
 		if usageChunk.Model == "" {

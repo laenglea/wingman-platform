@@ -7,6 +7,8 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
+
+	"github.com/google/uuid"
 )
 
 func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
@@ -43,6 +45,16 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	options := toCompleteOptions(req, tools)
+
+	if req.Stream {
+		h.handleChatCompletionStream(w, r, req, completer, messages, options)
+	} else {
+		h.handleChatCompletionComplete(w, r, req, completer, messages, options)
+	}
+}
+
+func toCompleteOptions(req ChatCompletionRequest, tools []provider.Tool) *provider.CompleteOptions {
 	var stops []string
 
 	switch v := req.Stop.(type) {
@@ -60,13 +72,19 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	maxTokens := req.MaxCompletionTokens
+
+	if maxTokens == nil {
+		maxTokens = req.MaxTokens
+	}
+
 	options := &provider.CompleteOptions{
 		Stop:  stops,
 		Tools: tools,
 
 		ToolOptions: toToolOptions(req.ToolChoice),
 
-		MaxTokens:   req.MaxCompletionTokens,
+		MaxTokens:   maxTokens,
 		Temperature: req.Temperature,
 	}
 
@@ -146,11 +164,7 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.Stream {
-		h.handleChatCompletionStream(w, r, req, completer, messages, options)
-	} else {
-		h.handleChatCompletionComplete(w, r, req, completer, messages, options)
-	}
+	return options
 }
 
 func (h *Handler) handleChatCompletionComplete(w http.ResponseWriter, r *http.Request, req ChatCompletionRequest, completer provider.Completer, messages []provider.Message, options *provider.CompleteOptions) {
@@ -184,6 +198,10 @@ func (h *Handler) handleChatCompletionComplete(w http.ResponseWriter, r *http.Re
 
 	if result.Model == "" {
 		result.Model = req.Model
+	}
+
+	if result.ID == "" {
+		result.ID = "chatcmpl-" + uuid.NewString()
 	}
 
 	if completion.Message != nil {
