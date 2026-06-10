@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/adrianliechti/wingman/pkg/provider"
+
 	"github.com/openai/openai-go/v3/azure"
 	"github.com/openai/openai-go/v3/option"
 )
@@ -48,7 +50,7 @@ func (c *Config) init() {
 	}
 
 	if c.client == nil {
-		c.client = http.DefaultClient
+		c.client = provider.DefaultClient
 	}
 
 	c.url = strings.TrimRight(c.url, "/") + "/"

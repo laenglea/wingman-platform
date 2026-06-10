@@ -2,10 +2,13 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/adrianliechti/wingman/pkg/otel"
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/router"
 	"github.com/adrianliechti/wingman/pkg/router/adaptive"
 	"github.com/adrianliechti/wingman/pkg/router/roundrobin"
 )
@@ -15,6 +18,18 @@ type routerConfig struct {
 
 	Models   []string `yaml:"models"`
 	Fallback string   `yaml:"fallback"`
+
+	// FirstTokenTimeout bounds the wait for the first response token before
+	// failing over to another provider (e.g. "30s"). Defaults to 2m
+	FirstTokenTimeout string `yaml:"first_token_timeout"`
+
+	// FailureThreshold is the number of consecutive failures that open a
+	// provider's circuit. Defaults to 5
+	FailureThreshold int `yaml:"failure_threshold"`
+
+	// RecoveryTimeout is how long an open circuit waits before allowing a
+	// probe request (e.g. "1m"). Defaults to 30s
+	RecoveryTimeout string `yaml:"recovery_timeout"`
 }
 
 type routerContext struct {
@@ -60,50 +75,85 @@ func (cfg *Config) registerRouters(f *configFile) error {
 			context.Fallback = fallback
 		}
 
-		router, err := createRouter(config, context)
+		completer, err := createRouter(config, context)
 
 		if err != nil {
 			return err
 		}
 
-		if completer, ok := router.(provider.Completer); ok {
-			completer = otel.NewCompleterSpan("router "+id, completer)
-			cfg.RegisterCompleter(id, completer)
-		}
+		cfg.RegisterCompleter(id, otel.NewCompleterSpan("router "+id, completer))
 	}
 
 	return nil
 }
 
-func createRouter(cfg routerConfig, context routerContext) (any, error) {
+func createRouter(cfg routerConfig, context routerContext) (provider.Completer, error) {
+	options, err := routerOptions(cfg, context)
+
+	if err != nil {
+		return nil, err
+	}
+
 	switch strings.ToLower(cfg.Type) {
 	case "roundrobin":
-		return roundrobinRouter(cfg, context)
+		return roundrobin.NewCompleter(context.Completers, options...)
 
 	case "adaptive":
-		return adaptiveRouter(cfg, context)
+		return adaptive.NewCompleter(context.Completers, options...)
 
 	default:
 		return nil, errors.New("invalid router type: " + cfg.Type)
 	}
 }
 
-func roundrobinRouter(cfg routerConfig, context routerContext) (any, error) {
-	var options []roundrobin.Option
+func routerOptions(cfg routerConfig, context routerContext) ([]router.Option, error) {
+	var options []router.Option
 
 	if context.Fallback != nil {
-		options = append(options, roundrobin.WithFallback(context.Fallback))
+		options = append(options, router.WithFallback(context.Fallback))
 	}
 
-	return roundrobin.NewCompleter(context.Completers, options...)
+	if cfg.FirstTokenTimeout != "" {
+		timeout, err := parseTimeout("first_token_timeout", cfg.FirstTokenTimeout)
+
+		if err != nil {
+			return nil, err
+		}
+
+		options = append(options, router.WithFirstTokenTimeout(timeout))
+	}
+
+	if cfg.FailureThreshold < 0 {
+		return nil, errors.New("invalid failure_threshold: must not be negative")
+	}
+
+	if cfg.FailureThreshold > 0 {
+		options = append(options, router.WithFailureThreshold(cfg.FailureThreshold))
+	}
+
+	if cfg.RecoveryTimeout != "" {
+		timeout, err := parseTimeout("recovery_timeout", cfg.RecoveryTimeout)
+
+		if err != nil {
+			return nil, err
+		}
+
+		options = append(options, router.WithRecoveryTimeout(timeout))
+	}
+
+	return options, nil
 }
 
-func adaptiveRouter(cfg routerConfig, context routerContext) (any, error) {
-	var options []adaptive.Option
+func parseTimeout(name, value string) (time.Duration, error) {
+	timeout, err := time.ParseDuration(value)
 
-	if context.Fallback != nil {
-		options = append(options, adaptive.WithFallback(context.Fallback))
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s: %w", name, err)
 	}
 
-	return adaptive.NewCompleter(context.Completers, options...)
+	if timeout < 0 {
+		return 0, fmt.Errorf("invalid %s: must not be negative", name)
+	}
+
+	return timeout, nil
 }

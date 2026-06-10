@@ -4,15 +4,19 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/adrianliechti/wingman/pkg/provider"
+
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func setupHTTP(_ context.Context, _ *sdkresource.Resource) error {
-	rt := Transport(http.DefaultTransport)
+	http.DefaultTransport = Transport(http.DefaultTransport)
 
-	http.DefaultTransport = rt
+	// provider.DefaultClient bypasses http.DefaultTransport; instrument it as
+	// well so upstream LLM calls keep their HTTP spans
+	provider.DefaultClient.Transport = Transport(provider.DefaultClient.Transport)
 
 	return nil
 }

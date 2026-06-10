@@ -3,6 +3,9 @@ package config
 import (
 	"net/http"
 	"net/url"
+
+	"github.com/adrianliechti/wingman/pkg/otel"
+	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
 type proxyConfig struct {
@@ -20,7 +23,7 @@ func (cfg *proxyConfig) proxyTransport() (*http.Transport, error) {
 		return nil, err
 	}
 
-	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr := provider.DefaultTransport()
 	tr.Proxy = http.ProxyURL(proxyURL)
 
 	return tr, nil
@@ -34,6 +37,6 @@ func (cfg *proxyConfig) proxyClient() (*http.Client, error) {
 	}
 
 	return &http.Client{
-		Transport: transport,
+		Transport: otel.Transport(transport),
 	}, nil
 }

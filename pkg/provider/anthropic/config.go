@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/adrianliechti/wingman/pkg/provider"
+
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
@@ -46,12 +48,15 @@ func (cfg *Config) Options() []option.RequestOption {
 
 	url = strings.TrimRight(url, "/") + "/"
 
-	options := []option.RequestOption{
-		option.WithBaseURL(url),
+	client := cfg.client
+
+	if client == nil {
+		client = provider.DefaultClient
 	}
 
-	if cfg.client != nil {
-		options = append(options, option.WithHTTPClient(cfg.client))
+	options := []option.RequestOption{
+		option.WithBaseURL(url),
+		option.WithHTTPClient(client),
 	}
 
 	if cfg.token != "" {

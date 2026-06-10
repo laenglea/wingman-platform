@@ -30,7 +30,7 @@ func NewSynthesizer(model string, options ...Option) (*Synthesizer, error) {
 	}
 
 	if cfg.client == nil {
-		cfg.client = http.DefaultClient
+		cfg.client = provider.DefaultClient
 	}
 
 	return &Synthesizer{

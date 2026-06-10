@@ -474,6 +474,8 @@ providers:
 
 A router exposes several models under one id and distributes requests across them — useful for load balancing and failover across providers. Types: `roundrobin` (even rotation) and `adaptive` (prefers healthy/faster backends).
 
+Routers protect backends with a circuit breaker and fail over transparently: if a provider errors or produces no output within `first_token_timeout` (default `2m`), the request is retried on the next healthy provider before any error reaches the client.
+
 ```yaml
 routers:
   fast-lb:
@@ -482,7 +484,14 @@ routers:
       - gpt-5.4-mini
       - claude-haiku-4-5
       - local-devstral
+    # fallback: some-model         # used when all providers are unavailable
+    # first_token_timeout: 30s     # fail over if no output arrives in time
+    # failure_threshold: 5         # consecutive failures before a circuit opens
+    # recovery_timeout: 30s        # wait before probing an open circuit
 ```
+
+> [!TIP]
+> Set `max_retries: 0` on models used as router members. Provider SDKs retry rate limits in place (honoring `Retry-After`, which can mean waiting 30s+ on the same backend) — disabling SDK retries lets the router fail over to another backend immediately.
 
 
 ### Web Access (Search · Scrape · Research)

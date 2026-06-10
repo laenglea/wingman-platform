@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"net/http"
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -33,7 +32,7 @@ type Completer struct {
 func NewCompleter(model string, options ...Option) (*Completer, error) {
 	cfg := &Config{
 		model:  model,
-		client: http.DefaultClient,
+		client: provider.DefaultClient,
 	}
 
 	for _, option := range options {

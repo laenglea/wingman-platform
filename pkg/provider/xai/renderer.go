@@ -31,7 +31,7 @@ func NewRenderer(model string, options ...Option) (*Renderer, error) {
 	}
 
 	if cfg.client == nil {
-		cfg.client = http.DefaultClient
+		cfg.client = provider.DefaultClient
 	}
 
 	return &Renderer{

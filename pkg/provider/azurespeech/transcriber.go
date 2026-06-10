@@ -30,7 +30,7 @@ func NewTranscriber(region, model string, options ...Option) (*Transcriber, erro
 		region: region,
 		model:  model,
 
-		client: http.DefaultClient,
+		client: provider.DefaultClient,
 	}
 
 	for _, option := range options {

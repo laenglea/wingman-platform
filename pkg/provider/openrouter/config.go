@@ -2,6 +2,8 @@ package openrouter
 
 import (
 	"net/http"
+
+	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
 type Config struct {
@@ -26,7 +28,7 @@ func newConfig(model string, options ...Option) *Config {
 	}
 
 	if cfg.client == nil {
-		cfg.client = http.DefaultClient
+		cfg.client = provider.DefaultClient
 	}
 
 	return cfg

@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/adrianliechti/wingman/pkg/provider"
+
 	"google.golang.org/genai"
 )
 
@@ -29,11 +31,17 @@ func WithToken(token string) Option {
 }
 
 func (c *Config) newClient(ctx context.Context) (*genai.Client, error) {
+	client := c.client
+
+	if client == nil {
+		client = provider.DefaultClient
+	}
+
 	config := &genai.ClientConfig{
 		APIKey:  c.token,
 		Backend: genai.BackendGeminiAPI,
 
-		HTTPClient: c.client,
+		HTTPClient: client,
 	}
 
 	return genai.NewClient(ctx, config)

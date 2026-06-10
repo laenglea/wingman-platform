@@ -27,7 +27,7 @@ func NewSynthesizer(region, model string, options ...Option) (*Synthesizer, erro
 		region: region,
 		model:  model,
 
-		client: http.DefaultClient,
+		client: provider.DefaultClient,
 	}
 
 	for _, option := range options {
