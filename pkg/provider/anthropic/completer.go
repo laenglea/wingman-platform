@@ -10,6 +10,10 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/computeruse"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/toolsearch"
 
 	"github.com/anthropics/anthropic-sdk-go"
 )
@@ -168,8 +172,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 							Content: []provider.Content{
 								provider.ReasoningContent(provider.Reasoning{
-									Kind:      provider.ReasoningKindRedacted,
 									Signature: event.Data,
+									Redacted:  true,
 								}),
 							},
 						},
@@ -328,6 +332,12 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 					currentBlock := message.Content[blockIndex]
 
+					// server-executed tools (tool search, web search) resolve
+					// within the turn — their input must not leak as tool calls
+					if currentBlock.Type != "tool_use" {
+						break
+					}
+
 					delta := &provider.Completion{
 						ID:    message.ID,
 						Model: c.model,
@@ -371,6 +381,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				}
 
 				switch message.StopReason {
+				case anthropic.BetaStopReasonStopSequence:
+					delta.StopSequence = message.StopSequence
 				case anthropic.BetaStopReasonMaxTokens, anthropic.BetaStopReasonModelContextWindowExceeded:
 					delta.Status = provider.CompletionStatusIncomplete
 				case anthropic.BetaStopReasonRefusal:
@@ -446,6 +458,29 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		req.MaxTokens = int64(*options.MaxTokens)
 	}
 
+	var hasToolSearch bool
+
+	for _, t := range options.Tools {
+		if t.Kind == provider.ToolKindToolSearch && t.Execution != "client" {
+			hasToolSearch = true
+		}
+	}
+
+	// Tools a client-executed tool_search returned in prior turns — they must
+	// be available (non-deferred) so the model can call them.
+	var discovered []provider.Tool
+
+	// Tools already called in the conversation stay loaded as well.
+	usedNames := map[string]bool{}
+
+	for _, m := range input {
+		for _, c := range m.Content {
+			if c.ToolCall != nil {
+				usedNames[provider.FlattenToolName(*c.ToolCall)] = true
+			}
+		}
+	}
+
 	for _, m := range input {
 		switch m.Role {
 		case provider.MessageRoleSystem:
@@ -508,6 +543,26 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				}
 
 				if c.ToolResult != nil {
+					if c.ToolResult.Kind == provider.ToolKindToolSearch {
+						discovered = append(discovered, toolsearch.Tools(c.ToolResult.Payload)...)
+
+						if c.ToolResult.Execution != "client" {
+							// server-side search happened inside another
+							// backend's turn — only the discovered tools matter
+							continue
+						}
+
+						blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
+							OfToolResult: &anthropic.BetaToolResultBlockParam{
+								ToolUseID: c.ToolResult.ID,
+								Content: []anthropic.BetaToolResultBlockParamContentUnion{
+									{OfText: &anthropic.BetaTextBlockParam{Text: string(c.ToolResult.Payload)}},
+								},
+							},
+						})
+						continue
+					}
+
 					var parts []anthropic.BetaToolResultBlockParamContentUnion
 
 					for _, p := range c.ToolResult.Parts {
@@ -581,7 +636,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 				if c.Reasoning != nil && c.Reasoning.Signature != "" {
 					// Include thinking blocks for conversation continuity
-					if c.Reasoning.Kind == provider.ReasoningKindRedacted {
+					if c.Reasoning.Redacted {
 						blocks = append(blocks, anthropic.NewBetaRedactedThinkingBlock(c.Reasoning.Signature))
 					} else {
 						blocks = append(blocks, anthropic.NewBetaThinkingBlock(c.Reasoning.Signature, c.Reasoning.Text))
@@ -607,6 +662,10 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				}
 
 				if c.ToolCall != nil {
+					if c.ToolCall.Kind == provider.ToolKindToolSearch && c.ToolCall.Execution != "client" {
+						continue
+					}
+
 					var input map[string]any
 
 					if err := json.Unmarshal([]byte(c.ToolCall.Arguments), &input); err != nil || input == nil {
@@ -632,34 +691,101 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		}
 	}
 
-	for _, t := range provider.FlattenTools(options.Tools) {
+	toolList := provider.FlattenTools(options.Tools)
+
+	defined := map[string]bool{}
+	for _, t := range toolList {
+		defined[t.Name] = true
+	}
+
+	discoveredNames := map[string]bool{}
+	for _, t := range provider.FlattenTools(discovered) {
+		discoveredNames[t.Name] = true
+
+		if !defined[t.Name] {
+			defined[t.Name] = true
+			toolList = append(toolList, t)
+		}
+	}
+
+	for _, t := range toolList {
+		if t.Kind == provider.ToolKindToolSearch {
+			if t.Execution == "client" {
+				t = toolsearch.FunctionTool(t)
+			} else if strings.Contains(t.Name, "bm25") {
+				tools = append(tools, anthropic.BetaToolUnionParam{
+					OfToolSearchToolBm25_20251119: &anthropic.BetaToolSearchToolBm25_20251119Param{
+						Type: "tool_search_tool_bm25_20251119",
+					},
+				})
+				continue
+			} else {
+				tools = append(tools, anthropic.BetaToolUnionParam{
+					OfToolSearchToolRegex20251119: &anthropic.BetaToolSearchToolRegex20251119Param{
+						Type: "tool_search_tool_regex_20251119",
+					},
+				})
+				continue
+			}
+		}
+
 		if t.Kind == provider.ToolKindTextEditor {
-			tools = append(tools, anthropic.BetaToolUnionParam{
-				OfTextEditor20250728: &anthropic.BetaToolTextEditor20250728Param{},
-			})
-			continue
+			if t.Name == texteditor.NameApplyPatch {
+				// apply_patch dialect — emulate as a function tool so calls and
+				// results stay in the client's dialect end-to-end
+				t = texteditor.FunctionTool(t)
+			} else {
+				editor := &anthropic.BetaToolTextEditor20250728Param{}
+
+				if t.MaxCharacters > 0 {
+					editor.MaxCharacters = anthropic.Int(int64(t.MaxCharacters))
+				}
+
+				tools = append(tools, anthropic.BetaToolUnionParam{
+					OfTextEditor20250728: editor,
+				})
+				continue
+			}
 		}
 
 		if t.Kind == provider.ToolKindComputer {
-			req.Betas = append(req.Betas, "computer-use-2025-11-24")
+			if t.Dialect == computeruse.DialectOpenAI {
+				// OpenAI dialect — emulate as a function tool so calls and
+				// results stay in the client's dialect end-to-end
+				t = computeruse.FunctionTool(t)
+			} else {
+				req.Betas = append(req.Betas, "computer-use-2025-11-24")
 
-			w, h := int64(1024), int64(768)
-			if t.Display != nil {
-				if t.Display.Width > 0 {
-					w = int64(t.Display.Width)
+				w, h := int64(1024), int64(768)
+				if t.Display != nil {
+					if t.Display.Width > 0 {
+						w = int64(t.Display.Width)
+					}
+					if t.Display.Height > 0 {
+						h = int64(t.Display.Height)
+					}
 				}
-				if t.Display.Height > 0 {
-					h = int64(t.Display.Height)
-				}
+
+				tools = append(tools, anthropic.BetaToolUnionParam{
+					OfComputerUseTool20251124: &anthropic.BetaToolComputerUse20251124Param{
+						DisplayWidthPx:  w,
+						DisplayHeightPx: h,
+					},
+				})
+				continue
+			}
+		}
+
+		if t.Kind == provider.ToolKindShell {
+			if t.Name == shell.NameBash || t.Name == "" {
+				tools = append(tools, anthropic.BetaToolUnionParam{
+					OfBashTool20250124: &anthropic.BetaToolBash20250124Param{},
+				})
+				continue
 			}
 
-			tools = append(tools, anthropic.BetaToolUnionParam{
-				OfComputerUseTool20251124: &anthropic.BetaToolComputerUse20251124Param{
-					DisplayWidthPx:  w,
-					DisplayHeightPx: h,
-				},
-			})
-			continue
+			// OpenAI shell dialect — emulate as a function tool
+			t = shell.FunctionTool(t)
 		}
 
 		if t.Name == "" {
@@ -682,6 +808,12 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 		if t.Description != "" {
 			tool.Description = anthropic.String(t.Description)
+		}
+
+		// deferring requires a search tool to discover the definition, and
+		// tools already discovered or called in prior turns must stay loaded
+		if t.Deferred != nil && *t.Deferred && hasToolSearch && !discoveredNames[t.Name] && !usedNames[t.Name] {
+			tool.DeferLoading = anthropic.Bool(true)
 		}
 
 		tools = append(tools, anthropic.BetaToolUnionParam{OfTool: &tool})

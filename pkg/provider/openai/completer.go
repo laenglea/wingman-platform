@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/computeruse"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
@@ -407,6 +410,20 @@ func convertTools(tools []provider.Tool) ([]openai.ChatCompletionToolUnionParam,
 	var result []openai.ChatCompletionToolUnionParam
 
 	for _, t := range tools {
+		if t.Kind == provider.ToolKindTextEditor {
+			// no native editor tool at the Chat Completions wire — emulate as a
+			// function tool in the client's dialect
+			t = texteditor.FunctionTool(t)
+		}
+
+		if t.Kind == provider.ToolKindComputer {
+			t = computeruse.FunctionTool(t)
+		}
+
+		if t.Kind == provider.ToolKindShell {
+			t = shell.FunctionTool(t)
+		}
+
 		if t.Kind != provider.ToolKindFunction {
 			continue
 		}

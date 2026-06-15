@@ -11,6 +11,9 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/computeruse"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
 )
 
 var _ provider.Completer = (*Completer)(nil)
@@ -392,6 +395,18 @@ func convertTools(tools []provider.Tool) []*genai.Tool {
 	var functions []*genai.FunctionDeclaration
 
 	for _, t := range tools {
+		if t.Kind == provider.ToolKindTextEditor {
+			t = texteditor.FunctionTool(t)
+		}
+
+		if t.Kind == provider.ToolKindComputer {
+			t = computeruse.FunctionTool(t)
+		}
+
+		if t.Kind == provider.ToolKindShell {
+			t = shell.FunctionTool(t)
+		}
+
 		if t.Kind != provider.ToolKindFunction {
 			continue
 		}

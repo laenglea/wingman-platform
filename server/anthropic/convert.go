@@ -9,6 +9,9 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/computeruse"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
 	"github.com/adrianliechti/wingman/pkg/tool"
 	"github.com/adrianliechti/wingman/server/openai/shared"
 )
@@ -109,8 +112,8 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 		case "redacted_thinking":
 			// Encrypted thinking block — only the opaque `data` blob round-trips.
 			content = append(content, provider.ReasoningContent(provider.Reasoning{
-				Kind:      provider.ReasoningKindRedacted,
 				Signature: block.Data,
+				Redacted:  true,
 			}))
 
 		case "tool_use":
@@ -318,30 +321,52 @@ func toTools(tools []ToolParam) ([]provider.Tool, error) {
 		switch {
 		case strings.HasPrefix(t.Type, "text_editor"):
 			result = append(result, provider.Tool{
-				Name: "str_replace_based_edit_tool",
-				Kind: provider.ToolKindTextEditor,
+				Name:          texteditor.NameTextEditor,
+				Kind:          provider.ToolKindTextEditor,
+				MaxCharacters: t.MaxCharacters,
 			})
 
 		case strings.HasPrefix(t.Type, "computer"):
 			result = append(result, provider.Tool{
-				Name: "computer",
-				Kind: provider.ToolKindComputer,
+				Name:    computeruse.Name,
+				Kind:    provider.ToolKindComputer,
+				Dialect: computeruse.DialectAnthropic,
 				Display: &provider.Display{
 					Width:  t.DisplayWidthPx,
 					Height: t.DisplayHeightPx,
 				},
 			})
 
-		case t.Type == "" || t.Type == "custom":
+		case strings.HasPrefix(t.Type, "bash"):
 			result = append(result, provider.Tool{
+				Name: shell.NameBash,
+				Kind: provider.ToolKindShell,
+			})
+
+		case strings.HasPrefix(t.Type, "tool_search_tool"):
+			result = append(result, provider.Tool{
+				Name:      t.Name,
+				Kind:      provider.ToolKindToolSearch,
+				Execution: "server",
+			})
+
+		case t.Type == "" || t.Type == "custom":
+			converted := provider.Tool{
 				Name:        t.Name,
 				Description: t.Description,
 				Parameters:  tool.NormalizeSchema(t.InputSchema),
-			})
+			}
+
+			if t.DeferLoading {
+				deferred := true
+				converted.Deferred = &deferred
+			}
+
+			result = append(result, converted)
 
 		default:
 			return nil, fmt.Errorf(
-				"tools.%d: Input tag '%s' found using 'type' does not match any of the expected tags: 'custom', 'text_editor_*', 'computer_*'",
+				"tools.%d: Input tag '%s' found using 'type' does not match any of the expected tags: 'custom', 'text_editor_*', 'computer_*', 'bash_*', 'tool_search_tool_*'",
 				i, t.Type,
 			)
 		}
@@ -355,7 +380,7 @@ func toContentBlocks(content []provider.Content, includeThinking bool) []Content
 
 	for _, c := range content {
 		if includeThinking && c.Reasoning != nil && (c.Reasoning.Text != "" || c.Reasoning.Summary != "" || c.Reasoning.Signature != "") {
-			if c.Reasoning.Kind == provider.ReasoningKindRedacted {
+			if c.Reasoning.Redacted {
 				result = append(result, ContentBlock{
 					Type: "redacted_thinking",
 					Data: c.Reasoning.Signature,
@@ -390,13 +415,42 @@ func toContentBlocks(content []provider.Content, includeThinking bool) []Content
 		}
 
 		if c.ToolCall != nil {
+			if c.ToolCall.Kind == provider.ToolKindToolSearch && c.ToolCall.Execution != "client" {
+				// server-executed search — informational, no client response expected
+				var input any
+				if c.ToolCall.Arguments != "" {
+					json.Unmarshal([]byte(c.ToolCall.Arguments), &input)
+				}
+				if input == nil {
+					input = map[string]any{}
+				}
+
+				result = append(result, ContentBlock{
+					Type:  "server_tool_use",
+					ID:    c.ToolCall.ID,
+					Name:  "tool_search_tool_regex",
+					Input: input,
+				})
+				continue
+			}
+
 			name := c.ToolCall.Name
 			var input any
 
-			if name == "apply_patch" {
-				// Cross-provider: convert apply_patch args to text_editor input
-				input = applyPatchArgsToTextEditorInput(c.ToolCall.Arguments)
-				name = "str_replace_based_edit_tool"
+			if name == texteditor.NameApplyPatch {
+				// Cross-dialect fallback (e.g. mixed histories): convert
+				// apply_patch args to text_editor input
+				input = texteditor.ParseOperation(c.ToolCall.Arguments).Input().Map()
+				name = texteditor.NameTextEditor
+			} else if name == computeruse.Name && c.ToolCall.Kind == provider.ToolKindComputer {
+				// Cross-dialect fallback: degrade OpenAI batched actions to a
+				// single Anthropic action
+				input = computeruse.AnthropicInput(c.ToolCall.Arguments)
+			} else if (name == shell.NameShell || name == shell.NameLocalShell) && c.ToolCall.Kind == provider.ToolKindShell {
+				// Cross-dialect fallback: render OpenAI shell actions as a
+				// bash command
+				input = shell.BashInput(c.ToolCall.Arguments)
+				name = shell.NameBash
 			} else {
 				if c.ToolCall.Arguments != "" {
 					json.Unmarshal([]byte(c.ToolCall.Arguments), &input)
@@ -422,73 +476,24 @@ func toContentBlocks(content []provider.Content, includeThinking bool) []Content
 	return result
 }
 
-// applyPatchArgsToTextEditorInput converts apply_patch JSON args to text_editor input format.
-func applyPatchArgsToTextEditorInput(args string) map[string]any {
-	var op struct {
-		Type string `json:"type"`
-		Path string `json:"path"`
-		Diff string `json:"diff"`
-	}
-
-	json.Unmarshal([]byte(args), &op)
-
-	switch op.Type {
-	case "create_file":
-		return map[string]any{
-			"command":   "create",
-			"path":      op.Path,
-			"file_text": parseDiffAdded(op.Diff),
-		}
-	case "update_file":
-		old, new_ := parseDiffOldNew(op.Diff)
-		return map[string]any{
-			"command": "str_replace",
-			"path":    op.Path,
-			"old_str": old,
-			"new_str": new_,
-		}
-	default:
-		return map[string]any{
-			"command": "view",
-			"path":    op.Path,
-		}
-	}
-}
-
-func parseDiffAdded(diff string) string {
-	var lines []string
-	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, "+") {
-			lines = append(lines, line[1:])
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-func parseDiffOldNew(diff string) (string, string) {
-	var oldLines, newLines []string
-	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, "-") {
-			oldLines = append(oldLines, line[1:])
-		} else if strings.HasPrefix(line, "+") {
-			newLines = append(newLines, line[1:])
-		}
-	}
-	return strings.Join(oldLines, "\n"), strings.Join(newLines, "\n")
-}
-
-func toStopReason(status provider.CompletionStatus, content []provider.Content) StopReason {
-	switch status {
+func toStopReason(completion *provider.Completion) StopReason {
+	switch completion.Status {
 	case provider.CompletionStatusIncomplete:
 		return StopReasonMaxTokens
 	case provider.CompletionStatusRefused:
 		return StopReasonRefusal
 	}
 
-	for _, c := range content {
-		if c.ToolCall != nil {
-			return StopReasonToolUse
+	if completion.Message != nil {
+		for _, c := range completion.Message.Content {
+			if c.ToolCall != nil {
+				return StopReasonToolUse
+			}
 		}
+	}
+
+	if completion.StopSequence != "" {
+		return StopReasonStopSequence
 	}
 
 	return StopReasonEndTurn

@@ -8,6 +8,9 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/computeruse"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -149,6 +152,18 @@ func wireTools(tools []provider.Tool) []*Tool {
 	var result []*Tool
 
 	for _, tool := range tools {
+		if tool.Kind == provider.ToolKindTextEditor {
+			tool = texteditor.FunctionTool(tool)
+		}
+
+		if tool.Kind == provider.ToolKindComputer {
+			tool = computeruse.FunctionTool(tool)
+		}
+
+		if tool.Kind == provider.ToolKindShell {
+			tool = shell.FunctionTool(tool)
+		}
+
 		if tool.Kind != provider.ToolKindFunction {
 			continue
 		}

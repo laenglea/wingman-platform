@@ -2,6 +2,7 @@ package bedrock
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,9 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/computeruse"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
 
 	"github.com/google/uuid"
 
@@ -247,6 +251,27 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 								Content: []provider.Content{
 									provider.ReasoningContent(provider.Reasoning{
 										Signature: r.Value,
+									}),
+								},
+							},
+						}
+
+						if !yield(delta, nil) {
+							return
+						}
+
+					case *types.ReasoningContentBlockDeltaMemberRedactedContent:
+						delta := &provider.Completion{
+							ID:    id,
+							Model: c.model,
+
+							Message: &provider.Message{
+								Role: provider.MessageRoleAssistant,
+
+								Content: []provider.Content{
+									provider.ReasoningContent(provider.Reasoning{
+										Signature: base64.StdEncoding.EncodeToString(r.Value),
+										Redacted:  true,
 									}),
 								},
 							},
@@ -706,14 +731,28 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 		}
 
 		if c.Reasoning != nil && c.Reasoning.Signature != "" {
-			content = append(content, &types.ContentBlockMemberReasoningContent{
-				Value: &types.ReasoningContentBlockMemberReasoningText{
-					Value: types.ReasoningTextBlock{
-						Text:      aws.String(c.Reasoning.Text),
-						Signature: aws.String(c.Reasoning.Signature),
+			if c.Reasoning.Redacted {
+				data, err := base64.StdEncoding.DecodeString(c.Reasoning.Signature)
+
+				if err != nil {
+					return nil, err
+				}
+
+				content = append(content, &types.ContentBlockMemberReasoningContent{
+					Value: &types.ReasoningContentBlockMemberRedactedContent{
+						Value: data,
 					},
-				},
-			})
+				})
+			} else {
+				content = append(content, &types.ContentBlockMemberReasoningContent{
+					Value: &types.ReasoningContentBlockMemberReasoningText{
+						Value: types.ReasoningTextBlock{
+							Text:      aws.String(c.Reasoning.Text),
+							Signature: aws.String(c.Reasoning.Signature),
+						},
+					},
+				})
+			}
 		}
 
 		if c.ToolCall != nil {
@@ -745,6 +784,18 @@ func (c *Completer) convertToolConfig(tools []provider.Tool, options *provider.T
 	result := &types.ToolConfiguration{}
 
 	for _, t := range tools {
+		if t.Kind == provider.ToolKindTextEditor {
+			t = texteditor.FunctionTool(t)
+		}
+
+		if t.Kind == provider.ToolKindComputer {
+			t = computeruse.FunctionTool(t)
+		}
+
+		if t.Kind == provider.ToolKindShell {
+			t = shell.FunctionTool(t)
+		}
+
 		if t.Kind != provider.ToolKindFunction {
 			continue
 		}

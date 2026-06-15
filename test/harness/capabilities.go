@@ -8,6 +8,8 @@ type Capabilities struct {
 	Compaction       bool
 	TextEditor       bool
 	ComputerUse      bool
+	Shell            bool
+	ToolSearch       bool
 	Audio            bool
 	Cache            bool
 }

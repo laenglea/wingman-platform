@@ -14,6 +14,10 @@ type File struct {
 type Tool struct {
 	Kind ToolKind
 
+	// Dialect disambiguates built-in tools sharing a name across protocols
+	// ("computer"). Empty means the backend's own dialect.
+	Dialect string
+
 	Name      string
 	Namespace string
 
@@ -29,6 +33,8 @@ type Tool struct {
 
 	Format  *ToolFormat
 	Display *Display
+
+	MaxCharacters int
 }
 
 type ToolFormat struct {
@@ -44,6 +50,7 @@ const (
 	ToolKindCustom     ToolKind = "custom"
 	ToolKindTextEditor ToolKind = "text_editor"
 	ToolKindComputer   ToolKind = "computer"
+	ToolKindShell      ToolKind = "shell"
 	ToolKindToolSearch ToolKind = "tool_search"
 )
 
@@ -65,8 +72,9 @@ type ToolResult struct {
 	// (hosted) or "client" (BYOT) execution.
 	Execution string
 
-	// Payload carries opaque JSON for tool kinds whose result is structured
-	// (e.g. tool_search_output's `tools` array). When set, Parts is ignored.
+	// Payload carries opaque JSON for tool kinds with structured result data
+	// (tool_search_output's `tools` array, computer_call_output's
+	// acknowledged safety checks).
 	Payload []byte
 
 	Parts []Part
