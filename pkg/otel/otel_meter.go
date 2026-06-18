@@ -29,10 +29,18 @@ func setupMeter(ctx context.Context, resource *sdkresource.Resource) error {
 		return err
 	}
 
-	provider := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter, sdkmetric.WithInterval(3*time.Second))),
+	options := []sdkmetric.Option{
 		sdkmetric.WithResource(resource),
-	)
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter, sdkmetric.WithInterval(30*time.Second))),
+	}
+
+	if endpoint := os.Getenv("INSIGHTS_ENDPOINT"); endpoint != "" {
+		if insights, err := otlpmetrichttp.New(ctx, otlpmetrichttp.WithEndpointURL(endpoint)); err == nil {
+			options = append(options, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(insights, sdkmetric.WithInterval(60*time.Second))))
+		}
+	}
+
+	provider := sdkmetric.NewMeterProvider(options...)
 
 	otel.SetMeterProvider(provider)
 

@@ -119,10 +119,6 @@ func EndUserAttrs(ctx context.Context) []KeyValue {
 		attrs = append(attrs, attribute.String("user.full_name", name))
 	}
 
-	if session, ok := ctx.Value(auth.SessionContextKey).(string); ok && session != "" {
-		attrs = append(attrs, attribute.String("session.id", session))
-	}
-
 	return attrs
 }
 
