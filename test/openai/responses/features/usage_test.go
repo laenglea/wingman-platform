@@ -74,6 +74,47 @@ func TestUsageTokensCorrectness(t *testing.T) {
 	}
 }
 
+func TestUsageTokensCorrectnessSSE(t *testing.T) {
+	h := openai.New(t)
+	ctx := context.Background()
+
+	shortBody := map[string]any{
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "Reply with the single word: OK."}},
+			},
+		},
+	}
+	longBody := map[string]any{
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": buildLongUserPrompt("responses-usage-sse") + "\n\nReply with: OK"}},
+			},
+		},
+	}
+
+	for _, model := range openai.DefaultModels() {
+		t.Run(model.Name, func(t *testing.T) {
+			h.SkipUnlessConfigured(t, model.Name)
+
+			short := responsesUsageSSE(t, ctx, h, model.Name, shortBody)
+			long := responsesUsageSSE(t, ctx, h, model.Name, longBody)
+
+			short.assertInvariants(t, "short stream")
+			long.assertInvariants(t, "long stream")
+
+			if long.input <= short.input {
+				t.Errorf("expected long prompt streaming input_tokens (%d) > short prompt streaming input_tokens (%d)",
+					long.input, short.input)
+			}
+		})
+	}
+}
+
 type responsesUsageResult struct {
 	input     int
 	output    int
@@ -117,12 +158,50 @@ func responsesUsage(t *testing.T, ctx context.Context, h *openai.Harness, ep har
 		t.Fatalf("[%s] status %d: %s", ep.Name, resp.StatusCode, string(resp.RawBody))
 	}
 
+	return responsesUsageFromMap(t, resp.Body["usage"])
+}
+
+func responsesUsageSSE(t *testing.T, ctx context.Context, h *openai.Harness, model string, body map[string]any) responsesUsageResult {
+	t.Helper()
+
+	req := responses.WithModel(body, model)
+	req["stream"] = true
+	events, err := h.Client.PostSSE(ctx, h.Wingman, "/responses", req)
+	if err != nil {
+		t.Fatalf("[wingman] SSE request: %v", err)
+	}
+
+	for _, event := range events {
+		if event.Event != "response.completed" {
+			continue
+		}
+		response, ok := event.Data["response"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if usage, ok := response["usage"]; ok {
+			return responsesUsageFromMap(t, usage)
+		}
+	}
+
+	t.Fatalf("no response.completed usage found in %d events", len(events))
+	return responsesUsageResult{}
+}
+
+func responsesUsageFromMap(t *testing.T, usage any) responsesUsageResult {
+	t.Helper()
+
+	obj, ok := usage.(map[string]any)
+	if !ok {
+		t.Fatalf("usage is %T, want object", usage)
+	}
+
 	return responsesUsageResult{
-		input:     getInt(t, resp.Body, "usage", "input_tokens"),
-		output:    getInt(t, resp.Body, "usage", "output_tokens"),
-		total:     getInt(t, resp.Body, "usage", "total_tokens"),
-		cached:    getInt(t, resp.Body, "usage", "input_tokens_details", "cached_tokens"),
-		reasoning: getInt(t, resp.Body, "usage", "output_tokens_details", "reasoning_tokens"),
+		input:     getInt(t, obj, "input_tokens"),
+		output:    getInt(t, obj, "output_tokens"),
+		total:     getInt(t, obj, "total_tokens"),
+		cached:    getInt(t, obj, "input_tokens_details", "cached_tokens"),
+		reasoning: getInt(t, obj, "output_tokens_details", "reasoning_tokens"),
 	}
 }
 

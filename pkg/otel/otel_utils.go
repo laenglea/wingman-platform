@@ -163,6 +163,10 @@ func UsageAttrs(usage *provider.Usage) []KeyValue {
 		attrs = append(attrs, semconv.GenAIUsageOutputTokens(usage.OutputTokens))
 	}
 
+	if usage.ReasoningTokens > 0 {
+		attrs = append(attrs, semconv.GenAIUsageReasoningOutputTokens(usage.ReasoningTokens))
+	}
+
 	if usage.CacheCreationInputTokens > 0 {
 		attrs = append(attrs, semconv.GenAIUsageCacheCreationInputTokens(usage.CacheCreationInputTokens))
 	}

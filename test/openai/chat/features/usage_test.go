@@ -66,6 +66,39 @@ func TestUsageTokensCorrectness(t *testing.T) {
 	}
 }
 
+func TestUsageTokensCorrectnessSSE(t *testing.T) {
+	h := openai.New(t)
+	ctx := context.Background()
+
+	shortBody := map[string]any{
+		"messages": []map[string]any{
+			{"role": "user", "content": "Reply with the single word: OK."},
+		},
+	}
+	longBody := map[string]any{
+		"messages": []map[string]any{
+			{"role": "user", "content": buildLongUserPrompt("chat-usage-sse") + "\n\nReply with the single word: OK."},
+		},
+	}
+
+	for _, model := range openai.DefaultModels() {
+		t.Run(model.Name, func(t *testing.T) {
+			h.SkipUnlessConfigured(t, model.Name)
+
+			short := chatUsageSSE(t, ctx, h, model.Name, shortBody)
+			long := chatUsageSSE(t, ctx, h, model.Name, longBody)
+
+			short.assertInvariants(t, "short stream")
+			long.assertInvariants(t, "long stream")
+
+			if long.input <= short.input {
+				t.Errorf("expected long prompt streaming prompt_tokens (%d) > short prompt streaming prompt_tokens (%d)",
+					long.input, short.input)
+			}
+		})
+	}
+}
+
 type chatUsageResult struct {
 	input  int
 	output int
@@ -104,11 +137,43 @@ func chatUsage(t *testing.T, ctx context.Context, h *openai.Harness, ep harness.
 		t.Fatalf("[%s] status %d: %s", ep.Name, resp.StatusCode, string(resp.RawBody))
 	}
 
+	return chatUsageFromMap(t, resp.Body["usage"])
+}
+
+func chatUsageSSE(t *testing.T, ctx context.Context, h *openai.Harness, model string, body map[string]any) chatUsageResult {
+	t.Helper()
+
+	req := chat.WithModel(body, model)
+	req["stream"] = true
+	req["stream_options"] = map[string]any{"include_usage": true}
+	events, err := h.Client.PostSSE(ctx, h.Wingman, "/chat/completions", req)
+	if err != nil {
+		t.Fatalf("[wingman] SSE request: %v", err)
+	}
+
+	for _, event := range events {
+		if usage, ok := event.Data["usage"]; ok && usage != nil {
+			return chatUsageFromMap(t, usage)
+		}
+	}
+
+	t.Fatalf("no streaming usage chunk found in %d events", len(events))
+	return chatUsageResult{}
+}
+
+func chatUsageFromMap(t *testing.T, usage any) chatUsageResult {
+	t.Helper()
+
+	obj, ok := usage.(map[string]any)
+	if !ok {
+		t.Fatalf("usage is %T, want object", usage)
+	}
+
 	return chatUsageResult{
-		input:  getInt(t, resp.Body, "usage", "prompt_tokens"),
-		output: getInt(t, resp.Body, "usage", "completion_tokens"),
-		total:  getInt(t, resp.Body, "usage", "total_tokens"),
-		cached: getInt(t, resp.Body, "usage", "prompt_tokens_details", "cached_tokens"),
+		input:  getInt(t, obj, "prompt_tokens"),
+		output: getInt(t, obj, "completion_tokens"),
+		total:  getInt(t, obj, "total_tokens"),
+		cached: getInt(t, obj, "prompt_tokens_details", "cached_tokens"),
 	}
 }
 

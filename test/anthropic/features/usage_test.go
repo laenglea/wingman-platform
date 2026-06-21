@@ -73,6 +73,40 @@ func TestUsageTokensCorrectness(t *testing.T) {
 	}
 }
 
+func TestUsageTokensCorrectnessSSE(t *testing.T) {
+	h := anthropic.New(t)
+
+	shortBody := map[string]any{
+		"max_tokens": 16,
+		"messages": []map[string]any{
+			{"role": "user", "content": "Reply with the single word: OK."},
+		},
+	}
+	longBody := map[string]any{
+		"max_tokens": 16,
+		"messages": []map[string]any{
+			{"role": "user", "content": buildLongUserPrompt("usage-tendency-sse") + "\n\nReply with the single word: OK."},
+		},
+	}
+
+	for _, model := range anthropic.DefaultModels() {
+		t.Run(model.Name, func(t *testing.T) {
+			h.SkipUnlessConfigured(t, model.Name)
+
+			short := messagesUsageSSE(t, h, model.Name, shortBody)
+			long := messagesUsageSSE(t, h, model.Name, longBody)
+
+			short.assertInvariants(t, "short stream")
+			long.assertInvariants(t, "long stream")
+
+			if long.totalInput() <= short.totalInput() {
+				t.Errorf("expected long prompt streaming total input (%d) > short prompt streaming total input (%d)\nshort=%+v long=%+v",
+					long.totalInput(), short.totalInput(), short, long)
+			}
+		})
+	}
+}
+
 type messagesUsageResult struct {
 	input         int
 	output        int
@@ -109,11 +143,42 @@ func messagesUsage(t *testing.T, h *anthropic.Harness, ep harness.Endpoint, mode
 		t.Fatalf("[%s] status %d: %s", ep.Name, resp.StatusCode, string(resp.RawBody))
 	}
 
+	return messagesUsageFromMap(t, resp.Body["usage"])
+}
+
+func messagesUsageSSE(t *testing.T, h *anthropic.Harness, model string, body map[string]any) messagesUsageResult {
+	t.Helper()
+
+	req := anthropic.WithModel(body, model)
+	req["stream"] = true
+	events := anthropic.PostMessagesSSE(t, h, h.Wingman, req)
+
+	for _, event := range events {
+		if event.Event != "message_delta" {
+			continue
+		}
+		if usage, ok := event.Data["usage"]; ok {
+			return messagesUsageFromMap(t, usage)
+		}
+	}
+
+	t.Fatalf("no message_delta usage event found in %d events", len(events))
+	return messagesUsageResult{}
+}
+
+func messagesUsageFromMap(t *testing.T, usage any) messagesUsageResult {
+	t.Helper()
+
+	obj, ok := usage.(map[string]any)
+	if !ok {
+		t.Fatalf("usage is %T, want object", usage)
+	}
+
 	return messagesUsageResult{
-		input:         getInt(t, resp.Body, "usage", "input_tokens"),
-		output:        getInt(t, resp.Body, "usage", "output_tokens"),
-		cacheRead:     getInt(t, resp.Body, "usage", "cache_read_input_tokens"),
-		cacheCreation: getInt(t, resp.Body, "usage", "cache_creation_input_tokens"),
+		input:         getInt(t, obj, "input_tokens"),
+		output:        getInt(t, obj, "output_tokens"),
+		cacheRead:     getInt(t, obj, "cache_read_input_tokens"),
+		cacheCreation: getInt(t, obj, "cache_creation_input_tokens"),
 	}
 }
 
