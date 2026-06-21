@@ -683,6 +683,7 @@ type Usage struct {
 	OutputTokens             int32                  `protobuf:"varint,2,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
 	CacheReadInputTokens     int32                  `protobuf:"varint,3,opt,name=cache_read_input_tokens,json=cacheReadInputTokens,proto3" json:"cache_read_input_tokens,omitempty"`
 	CacheCreationInputTokens int32                  `protobuf:"varint,4,opt,name=cache_creation_input_tokens,json=cacheCreationInputTokens,proto3" json:"cache_creation_input_tokens,omitempty"`
+	ReasoningTokens          int32                  `protobuf:"varint,5,opt,name=reasoning_tokens,json=reasoningTokens,proto3" json:"reasoning_tokens,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -741,6 +742,13 @@ func (x *Usage) GetCacheReadInputTokens() int32 {
 func (x *Usage) GetCacheCreationInputTokens() int32 {
 	if x != nil {
 		return x.CacheCreationInputTokens
+	}
+	return 0
+}
+
+func (x *Usage) GetReasoningTokens() int32 {
+	if x != nil {
+		return x.ReasoningTokens
 	}
 	return 0
 }
@@ -979,12 +987,13 @@ const file_provider_proto_rawDesc = "" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1e\n" +
 	"\n" +
 	"properties\x18\x03 \x01(\tR\n" +
-	"properties\"\xc5\x01\n" +
+	"properties\"\xf0\x01\n" +
 	"\x05Usage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x05R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x02 \x01(\x05R\foutputTokens\x125\n" +
 	"\x17cache_read_input_tokens\x18\x03 \x01(\x05R\x14cacheReadInputTokens\x12=\n" +
-	"\x1bcache_creation_input_tokens\x18\x04 \x01(\x05R\x18cacheCreationInputTokens\"$\n" +
+	"\x1bcache_creation_input_tokens\x18\x04 \x01(\x05R\x18cacheCreationInputTokens\x12)\n" +
+	"\x10reasoning_tokens\x18\x05 \x01(\x05R\x0freasoningTokens\"$\n" +
 	"\fEmbedRequest\x12\x14\n" +
 	"\x05texts\x18\x01 \x03(\tR\x05texts\"\x9d\x01\n" +
 	"\n" +
