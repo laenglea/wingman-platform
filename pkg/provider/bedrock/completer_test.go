@@ -150,3 +150,76 @@ func TestToUsage_NilReturnsNil(t *testing.T) {
 		t.Fatalf("expected nil usage, got %+v", usage)
 	}
 }
+
+// For Claude models, wingman injects Bedrock Converse cachePoint blocks (type
+// "default") after the system blocks, on the last user message, and after the
+// tool definitions — the documented tools→system→messages cache layout, three
+// of the four allowed checkpoints. Sub-threshold prefixes just don't cache (no
+// error), so no token-minimum guard is needed.
+func TestConvert_CachePointPlacementForClaude(t *testing.T) {
+	c := &Completer{Config: &Config{model: "anthropic.claude-sonnet-4-6"}}
+
+	sys := c.convertSystem([]provider.Message{provider.SystemMessage("You are helpful.")})
+	if len(sys) == 0 {
+		t.Fatal("expected system blocks")
+	}
+	cp, ok := sys[len(sys)-1].(*types.SystemContentBlockMemberCachePoint)
+	if !ok {
+		t.Fatalf("expected trailing system cachePoint, got %T", sys[len(sys)-1])
+	}
+	if cp.Value.Type != types.CachePointTypeDefault {
+		t.Errorf("system cachePoint type = %q, want default", cp.Value.Type)
+	}
+
+	msgs, err := c.convertMessages([]provider.Message{provider.UserMessage("Hello there.")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) == 0 {
+		t.Fatal("expected messages")
+	}
+	last := msgs[len(msgs)-1].Content
+	if _, ok := last[len(last)-1].(*types.ContentBlockMemberCachePoint); !ok {
+		t.Errorf("expected trailing cachePoint on last user message, got %T", last[len(last)-1])
+	}
+
+	tc := c.convertToolConfig([]provider.Tool{{Name: "get_weather", Description: "x", Parameters: testSchema}}, nil)
+	if tc == nil || len(tc.Tools) == 0 {
+		t.Fatal("expected tool config")
+	}
+	if _, ok := tc.Tools[len(tc.Tools)-1].(*types.ToolMemberCachePoint); !ok {
+		t.Errorf("expected trailing tool cachePoint, got %T", tc.Tools[len(tc.Tools)-1])
+	}
+}
+
+// Non-Claude Bedrock models (Nova/Titan/Llama) must NOT get cachePoint blocks —
+// their cache support differs and an unsupported cachePoint can be rejected.
+func TestConvert_NoCachePointForNonClaude(t *testing.T) {
+	c := &Completer{Config: &Config{model: "amazon.nova-pro-v1:0"}}
+
+	for _, b := range c.convertSystem([]provider.Message{provider.SystemMessage("You are helpful.")}) {
+		if _, ok := b.(*types.SystemContentBlockMemberCachePoint); ok {
+			t.Error("non-Claude model must not get a system cachePoint")
+		}
+	}
+
+	msgs, err := c.convertMessages([]provider.Message{provider.UserMessage("Hello there.")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range msgs {
+		for _, b := range m.Content {
+			if _, ok := b.(*types.ContentBlockMemberCachePoint); ok {
+				t.Error("non-Claude model must not get a message cachePoint")
+			}
+		}
+	}
+
+	if tc := c.convertToolConfig([]provider.Tool{{Name: "get_weather", Description: "x", Parameters: testSchema}}, nil); tc != nil {
+		for _, tl := range tc.Tools {
+			if _, ok := tl.(*types.ToolMemberCachePoint); ok {
+				t.Error("non-Claude model must not get a tool cachePoint")
+			}
+		}
+	}
+}

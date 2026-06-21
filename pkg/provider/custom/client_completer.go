@@ -348,6 +348,8 @@ func unwireCompletion(val *Completion) provider.Completion {
 			InputTokens:  int(val.Usage.InputTokens),
 			OutputTokens: int(val.Usage.OutputTokens),
 
+			ReasoningTokens: int(val.Usage.ReasoningTokens),
+
 			CacheReadInputTokens:     int(val.Usage.CacheReadInputTokens),
 			CacheCreationInputTokens: int(val.Usage.CacheCreationInputTokens),
 		}

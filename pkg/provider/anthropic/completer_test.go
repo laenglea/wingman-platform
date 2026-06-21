@@ -400,3 +400,26 @@ func TestToUsage_ZeroReturnsNil(t *testing.T) {
 		t.Fatalf("expected nil usage, got %+v", usage)
 	}
 }
+
+// TestToUsage_ReasoningTokens verifies thinking tokens map to ReasoningTokens
+// as a subset of the reasoning-inclusive OutputTokens.
+func TestToUsage_ReasoningTokens(t *testing.T) {
+	usage := toUsage(anthropic.BetaUsage{
+		InputTokens:         10,
+		OutputTokens:        30,
+		OutputTokensDetails: anthropic.BetaOutputTokensDetails{ThinkingTokens: 12},
+	})
+
+	if usage == nil {
+		t.Fatal("expected usage")
+	}
+	if usage.OutputTokens != 30 {
+		t.Errorf("OutputTokens = %d, want 30 (thinking-inclusive)", usage.OutputTokens)
+	}
+	if usage.ReasoningTokens != 12 {
+		t.Errorf("ReasoningTokens = %d, want 12", usage.ReasoningTokens)
+	}
+	if usage.ReasoningTokens > usage.OutputTokens {
+		t.Errorf("reasoning tokens (%d) exceed OutputTokens (%d)", usage.ReasoningTokens, usage.OutputTokens)
+	}
+}
