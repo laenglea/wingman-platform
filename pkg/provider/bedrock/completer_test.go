@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 )
 
@@ -104,5 +105,48 @@ func TestConvertAssistantContent_Reasoning(t *testing.T) {
 
 	if _, ok := content[2].(*types.ContentBlockMemberText); !ok {
 		t.Fatalf("block 2: got %T", content[2])
+	}
+}
+
+// TestToUsage_CacheInclusiveInputTokens verifies the intermediate Usage uses a
+// cache-inclusive InputTokens total. Bedrock reports InputTokens as only the
+// fresh (non-cached) tokens, with cache read/write counted separately, so the
+// mapping must fold both back into InputTokens while still exposing the cached
+// subset in the cache fields.
+func TestToUsage_CacheInclusiveInputTokens(t *testing.T) {
+	usage := toUsage(&types.TokenUsage{
+		InputTokens:           aws.Int32(10),
+		OutputTokens:          aws.Int32(7),
+		CacheReadInputTokens:  aws.Int32(40),
+		CacheWriteInputTokens: aws.Int32(50),
+	})
+
+	if usage == nil {
+		t.Fatal("expected usage")
+	}
+
+	if usage.InputTokens != 100 {
+		t.Errorf("InputTokens = %d, want 100 (10 fresh + 40 read + 50 write)", usage.InputTokens)
+	}
+	if usage.OutputTokens != 7 {
+		t.Errorf("OutputTokens = %d, want 7", usage.OutputTokens)
+	}
+	if usage.CacheReadInputTokens != 40 {
+		t.Errorf("CacheReadInputTokens = %d, want 40", usage.CacheReadInputTokens)
+	}
+	if usage.CacheCreationInputTokens != 50 {
+		t.Errorf("CacheCreationInputTokens = %d, want 50", usage.CacheCreationInputTokens)
+	}
+
+	// Cache fields must always be a subset of the inclusive input total.
+	if usage.CacheReadInputTokens+usage.CacheCreationInputTokens > usage.InputTokens {
+		t.Errorf("cache tokens (%d+%d) exceed InputTokens (%d)",
+			usage.CacheReadInputTokens, usage.CacheCreationInputTokens, usage.InputTokens)
+	}
+}
+
+func TestToUsage_NilReturnsNil(t *testing.T) {
+	if usage := toUsage(nil); usage != nil {
+		t.Fatalf("expected nil usage, got %+v", usage)
 	}
 }

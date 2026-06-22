@@ -15,7 +15,8 @@ func TestStreamingAccumulatorEmitsCacheUsage(t *testing.T) {
 
 	err := acc.Add(provider.Completion{
 		Usage: &provider.Usage{
-			InputTokens:              0,
+			// Cache-inclusive intermediate total: 10 fresh + 40 read + 50 write.
+			InputTokens:              100,
 			CacheReadInputTokens:     40,
 			CacheCreationInputTokens: 50,
 		},
@@ -40,6 +41,9 @@ func TestStreamingAccumulatorEmitsCacheUsage(t *testing.T) {
 	if start.Message == nil {
 		t.Fatal("expected message_start payload")
 	}
+	if start.Message.Usage.InputTokens != 10 {
+		t.Fatalf("expected message_start input tokens 10 (cache-exclusive), got %d", start.Message.Usage.InputTokens)
+	}
 	if start.Message.Usage.CacheReadInputTokens != 40 {
 		t.Fatalf("expected message_start cache read input tokens 40, got %d", start.Message.Usage.CacheReadInputTokens)
 	}
@@ -55,6 +59,9 @@ func TestStreamingAccumulatorEmitsCacheUsage(t *testing.T) {
 	}
 	if delta == nil {
 		t.Fatal("expected message_delta usage")
+	}
+	if delta.InputTokens != 10 {
+		t.Fatalf("expected message_delta input tokens 10 (cache-exclusive), got %d", delta.InputTokens)
 	}
 	if delta.CacheReadInputTokens != 40 {
 		t.Fatalf("expected message_delta cache read input tokens 40, got %d", delta.CacheReadInputTokens)
