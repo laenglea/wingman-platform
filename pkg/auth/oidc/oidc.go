@@ -90,6 +90,10 @@ func (p *Provider) Authenticate(ctx context.Context, r *http.Request) (context.C
 		if name := firstNonEmpty(claims.Name, claims.PreferredUsername, claims.Azp); name != "" {
 			ctx = context.WithValue(ctx, auth.NameContextKey, name)
 		}
+
+		if claims.Azp != "" {
+			ctx = context.WithValue(ctx, auth.PeerContextKey, claims.Azp)
+		}
 	}
 
 	return ctx, nil
