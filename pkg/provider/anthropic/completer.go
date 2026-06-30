@@ -426,7 +426,8 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		req.MaxTokens = 128000
 
 		if reasoning := options.ReasoningOptions; reasoning != nil {
-			if reasoning.Type == provider.ReasoningTypeAdaptive {
+			switch reasoning.Type {
+			case provider.ReasoningTypeAdaptive:
 				display := anthropic.BetaThinkingConfigAdaptiveDisplaySummarized
 				if !reasoning.IncludeSummary {
 					display = anthropic.BetaThinkingConfigAdaptiveDisplayOmitted
@@ -435,6 +436,9 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				req.Thinking = anthropic.BetaThinkingConfigParamUnion{
 					OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{Display: display},
 				}
+
+			case provider.ReasoningTypeDisabled:
+				req.Thinking = disabledThinking(c.model)
 			}
 
 			if effort := outputEffort(reasoning.Effort); effort != "" {
@@ -899,11 +903,11 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 		// Claude doesn't allow thinking with forced tool_choice
 		if forcesTool {
-			req.Thinking = anthropic.BetaThinkingConfigParamUnion{}
+			req.Thinking = disabledThinking(c.model)
 		}
 	}
 
-	if options.Temperature != nil && req.Thinking.OfAdaptive == nil {
+	if options.Temperature != nil && req.Thinking.OfAdaptive == nil && !isNoSamplingModel(c.model) {
 		req.Temperature = anthropic.Float(float64(*options.Temperature))
 	}
 
