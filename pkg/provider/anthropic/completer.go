@@ -639,7 +639,9 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				}
 
 				if c.Reasoning != nil && c.Reasoning.Signature != "" {
-					// Include thinking blocks for conversation continuity
+					// Include thinking blocks for conversation continuity.
+					// Adaptive signatures carry the encrypted chain of thought,
+					// so empty text still resumes reasoning on replay.
 					if c.Reasoning.Redacted {
 						blocks = append(blocks, anthropic.NewBetaRedactedThinkingBlock(c.Reasoning.Signature))
 					} else {
