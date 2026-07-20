@@ -562,18 +562,18 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 			tool.Description = aws.String(options.Schema.Description)
 		}
 
-		if options.Schema.Strict != nil {
-			tool.Strict = options.Schema.Strict
-		}
-
 		properties := options.Schema.Properties
 		if properties == nil {
 			properties = map[string]any{"type": "object"}
 		}
 
-		// strict validation requires additionalProperties: false on every object
-		// and rejects constraint keywords other providers accept
-		if options.Schema.Strict != nil && *options.Schema.Strict {
+		// Only forward strict when explicitly enabled and the model supports it:
+		// strict=false carries no information, and models without structured
+		// output reject the field itself. Strict mode also requires
+		// additionalProperties: false on every object and rejects constraint
+		// keywords other providers accept.
+		if options.Schema.Strict != nil && *options.Schema.Strict && supportsStrictTools(c.model) {
+			tool.Strict = options.Schema.Strict
 			properties = ensureAdditionalPropertiesFalse(sanitizeStrictSchema(properties))
 		}
 
@@ -848,14 +848,14 @@ func (c *Completer) convertToolConfig(tools []provider.Tool, options *provider.T
 			tool.Description = aws.String(t.Description)
 		}
 
-		if t.Strict != nil {
-			tool.Strict = t.Strict
-		}
-
 		params := t.Parameters
 
-		// strict validation rejects constraint keywords other providers accept
-		if t.Strict != nil && *t.Strict {
+		// Only forward strict when explicitly enabled and the model supports it:
+		// strict=false carries no information, and models without structured
+		// output reject the field itself. Strict mode also rejects constraint
+		// keywords other providers accept, so sanitize only when it is sent.
+		if t.Strict != nil && *t.Strict && supportsStrictTools(c.model) {
+			tool.Strict = t.Strict
 			params = sanitizeStrictSchema(params)
 		}
 
