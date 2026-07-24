@@ -20,16 +20,32 @@ var LegacyModels = []string{
 	"haiku-4-5",
 }
 
-func isLegacyModel(model string) bool {
-	model = strings.ToLower(model)
+// NoSamplingModels reject temperature/top_p/top_k outright — the same set as
+// on the native Anthropic API.
+var NoSamplingModels = []string{
+	"fable-5",
+	"mythos-5",
+	"mythos-preview",
 
-	for _, p := range LegacyModels {
-		if strings.Contains(model, p) {
-			return true
-		}
-	}
+	"opus-4-7",
+	"opus-4-8",
+	"opus-5",
 
-	return false
+	"sonnet-5",
+}
+
+// DefaultThinkingModels think when the field is omitted but still accept an
+// explicit `thinking: {type: "disabled"}` — required by Bedrock for forced
+// tool_choice. Fable/Mythos also think by default but reject the disable.
+var DefaultThinkingModels = []string{
+	"opus-5",
+	"sonnet-5",
+}
+
+// DisabledThinkingEffortCapModels accept `thinking: {type: "disabled"}` only
+// at effort "high" or below — pairing it with "xhigh" or "max" returns a 400.
+var DisabledThinkingEffortCapModels = []string{
+	"opus-5",
 }
 
 // Structured outputs (strict tool use) is supported by the Claude 4.5 and 4.6
@@ -48,13 +64,13 @@ var StrictToolModels = []string{
 }
 
 func supportsStrictTools(model string) bool {
-	if !isClaudeModel(model) {
-		return true
-	}
+	return !isClaudeModel(model) || matchesModel(model, StrictToolModels)
+}
 
+func matchesModel(model string, patterns []string) bool {
 	model = strings.ToLower(model)
 
-	for _, p := range StrictToolModels {
+	for _, p := range patterns {
 		if strings.Contains(model, p) {
 			return true
 		}
