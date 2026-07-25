@@ -279,6 +279,49 @@ func TestConvertRequest_ThinkingExplicitDisableAlwaysThinkingModel(t *testing.T)
 	}
 }
 
+// TestConvertRequest_DisabledThinkingCapsEffort verifies models that reject
+// an explicit disable at effort xhigh/max (Claude Opus 5) get the effort
+// capped to high instead of failing the whole request.
+func TestConvertRequest_DisabledThinkingCapsEffort(t *testing.T) {
+	completer, _ := NewCompleter("http://localhost", "claude-opus-5")
+
+	body := requestBody(t, completer, []provider.Message{provider.UserMessage("hi")}, &provider.CompleteOptions{
+		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortXHigh},
+	})
+
+	thinking, ok := body["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("thinking: got %v, want disabled", body["thinking"])
+	}
+
+	config, _ := body["output_config"].(map[string]any)
+	if config["effort"] != "high" {
+		t.Errorf("effort: got %v, want high", config["effort"])
+	}
+}
+
+// TestConvertRequest_ForcedToolDisablesThinkingAndCapsEffort verifies the
+// forced tool_choice path — which disables thinking after effort is already
+// set — also gets the Claude Opus 5 effort cap applied.
+func TestConvertRequest_ForcedToolDisablesThinkingAndCapsEffort(t *testing.T) {
+	completer, _ := NewCompleter("http://localhost", "claude-opus-5")
+
+	body := requestBody(t, completer, []provider.Message{provider.UserMessage("hi")}, &provider.CompleteOptions{
+		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortXHigh},
+		ToolOptions:      &provider.ToolOptions{Choice: provider.ToolChoiceAny},
+	})
+
+	thinking, _ := body["thinking"].(map[string]any)
+	if thinking["type"] != "disabled" {
+		t.Fatalf("thinking: got %v, want disabled", body["thinking"])
+	}
+
+	config, _ := body["output_config"].(map[string]any)
+	if config["effort"] != "high" {
+		t.Errorf("effort: got %v, want high", config["effort"])
+	}
+}
+
 // TestConvertRequest_TemperatureDroppedForNoSamplingModel verifies
 // temperature is never forwarded to models that reject sampling parameters
 // outright (Sonnet 5, Opus 4.7/4.8, Fable 5), even when thinking is left at

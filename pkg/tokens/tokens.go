@@ -21,8 +21,8 @@ import "unicode"
 type Family string
 
 const (
-	// Claude2026 is the tokenizer of Claude Sonnet 5, Opus 4.7/4.8, and
-	// Fable/Mythos 5.
+	// Claude2026 is the tokenizer of Claude Sonnet 5, Opus 4.7/4.8, Opus 5,
+	// and Fable/Mythos 5.
 	Claude2026 Family = "claude-2026"
 	// ClaudeLegacy is the tokenizer of Claude Opus ≤ 4.6, Sonnet ≤ 4.6, and
 	// all Haiku models.
@@ -41,6 +41,7 @@ var familyPrefixes = map[string]Family{
 	"claude-mythos":   Claude2026,
 	"claude-opus-4-8": Claude2026,
 	"claude-opus-4-7": Claude2026,
+	"claude-opus-5":   Claude2026,
 	"claude-sonnet-5": Claude2026,
 	"claude":          ClaudeLegacy,
 

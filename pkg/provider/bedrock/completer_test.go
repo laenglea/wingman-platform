@@ -57,6 +57,64 @@ func TestConvertConverseInputUsesForcedToolForSchema(t *testing.T) {
 	}
 }
 
+// TestConverseAdditionalFields_SchemaDisablesThinking verifies schema mode on
+// models that think by default (Sonnet 5, Opus 5) sends an explicit disable —
+// Bedrock rejects forced tool_choice while thinking is active, and omitting
+// the field leaves it active on these models.
+func TestConverseAdditionalFields_SchemaDisablesThinking(t *testing.T) {
+	c := &Completer{Config: &Config{model: "eu.anthropic.claude-sonnet-5"}}
+
+	fields, thinking := c.converseAdditionalFields(&provider.CompleteOptions{
+		Schema: &provider.Schema{Name: "classify", Properties: testSchema},
+	})
+
+	if thinking {
+		t.Error("expected thinking not enabled")
+	}
+
+	got, _ := fields["thinking"].(map[string]any)
+	if got["type"] != "disabled" {
+		t.Errorf("thinking: got %v, want disabled", fields["thinking"])
+	}
+}
+
+// TestConverseAdditionalFields_SchemaOmitsThinkingForOlderModels verifies
+// models where omitting the field already means no thinking (Opus 4.8) keep
+// the omit behavior instead of sending an unnecessary disable.
+func TestConverseAdditionalFields_SchemaOmitsThinkingForOlderModels(t *testing.T) {
+	c := &Completer{Config: &Config{model: "eu.anthropic.claude-opus-4-8"}}
+
+	fields, _ := c.converseAdditionalFields(&provider.CompleteOptions{
+		Schema: &provider.Schema{Name: "classify", Properties: testSchema},
+	})
+
+	if _, present := fields["thinking"]; present {
+		t.Errorf("expected thinking omitted, got %v", fields["thinking"])
+	}
+}
+
+// TestConverseAdditionalFields_DisabledThinkingCapsEffort verifies Claude
+// Opus 5 — which rejects an explicit disable at effort xhigh/max — gets the
+// effort capped to high when schema mode forces thinking off.
+func TestConverseAdditionalFields_DisabledThinkingCapsEffort(t *testing.T) {
+	c := &Completer{Config: &Config{model: "eu.anthropic.claude-opus-5"}}
+
+	fields, _ := c.converseAdditionalFields(&provider.CompleteOptions{
+		Schema:           &provider.Schema{Name: "classify", Properties: testSchema},
+		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortXHigh},
+	})
+
+	got, _ := fields["thinking"].(map[string]any)
+	if got["type"] != "disabled" {
+		t.Fatalf("thinking: got %v, want disabled", fields["thinking"])
+	}
+
+	config, _ := fields["output_config"].(map[string]any)
+	if config["effort"] != "high" {
+		t.Errorf("effort: got %v, want high", config["effort"])
+	}
+}
+
 // TestConvertAssistantContent_Reasoning verifies signed thinking maps to a
 // reasoning text block and redacted thinking to a redacted content block with
 // the blob decoded from base64.
