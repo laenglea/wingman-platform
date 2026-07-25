@@ -95,7 +95,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			config.MaxTokens = aws.Int32(int32(*options.MaxTokens))
 		}
 
-		if options.Temperature != nil {
+		if options.Temperature != nil && !matchesModel(c.model, NoSamplingModels) {
 			config.Temperature = options.Temperature
 		}
 
@@ -114,41 +114,12 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			InferenceConfig: config,
 		}
 
-		if !isLegacyModel(c.model) && options.ReasoningOptions != nil {
-			reasoning := options.ReasoningOptions
-
-			enable := reasoning.Type == provider.ReasoningTypeAdaptive
-
-			// Schema mode forces a specific tool call, which is incompatible
-			// with extended thinking on Anthropic models.
-			if options.Schema != nil {
-				enable = false
-			}
-
-			if options.ToolOptions != nil && options.ToolOptions.Choice == provider.ToolChoiceAny {
-				enable = false
-			}
-
-			additionalFields := map[string]any{}
-
-			if enable {
+		if fields, thinking := c.converseAdditionalFields(options); len(fields) > 0 {
+			if thinking {
 				config.Temperature = nil
-
-				thinkingFields := map[string]any{"type": "adaptive"}
-				if !reasoning.IncludeSummary {
-					thinkingFields["display"] = "omitted"
-				}
-
-				additionalFields["thinking"] = thinkingFields
 			}
 
-			if effort := outputEffort(reasoning.Effort); effort != "" {
-				additionalFields["output_config"] = map[string]any{"effort": effort}
-			}
-
-			if len(additionalFields) > 0 {
-				params.AdditionalModelRequestFields = document.NewLazyDocument(additionalFields)
-			}
+			params.AdditionalModelRequestFields = document.NewLazyDocument(fields)
 		}
 
 		resp, err := c.client.ConverseStream(ctx, params)
@@ -538,6 +509,54 @@ func convertError(err error) error {
 	}
 
 	return err
+}
+
+// converseAdditionalFields builds the Anthropic request fields Converse has
+// no native mapping for. The second result reports whether adaptive thinking
+// is enabled — temperature must be cleared in that case.
+func (c *Completer) converseAdditionalFields(options *provider.CompleteOptions) (map[string]any, bool) {
+	if matchesModel(c.model, LegacyModels) {
+		return nil, false
+	}
+
+	reasoning := options.ReasoningOptions
+
+	// Forced tool calls (schema mode, tool choice "any") are incompatible
+	// with thinking on Anthropic models over Bedrock.
+	forced := options.Schema != nil ||
+		(options.ToolOptions != nil && options.ToolOptions.Choice == provider.ToolChoiceAny)
+
+	enable := !forced && reasoning != nil && reasoning.Type == provider.ReasoningTypeAdaptive
+	disable := forced || (reasoning != nil && reasoning.Type == provider.ReasoningTypeDisabled)
+
+	fields := map[string]any{}
+
+	effort := ""
+
+	if reasoning != nil {
+		effort = outputEffort(reasoning.Effort)
+	}
+
+	if enable {
+		thinking := map[string]any{"type": "adaptive"}
+		if !reasoning.IncludeSummary {
+			thinking["display"] = "omitted"
+		}
+
+		fields["thinking"] = thinking
+	} else if disable && matchesModel(c.model, DefaultThinkingModels) {
+		fields["thinking"] = map[string]any{"type": "disabled"}
+
+		if matchesModel(c.model, DisabledThinkingEffortCapModels) && (effort == "xhigh" || effort == "max") {
+			effort = "high"
+		}
+	}
+
+	if effort != "" {
+		fields["output_config"] = map[string]any{"effort": effort}
+	}
+
+	return fields, enable
 }
 
 func (c *Completer) convertConverseInput(input []provider.Message, options *provider.CompleteOptions) (*bedrockruntime.ConverseInput, error) {

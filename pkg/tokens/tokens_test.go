@@ -51,6 +51,7 @@ func TestFamilyFor(t *testing.T) {
 	cases := map[string]Family{
 		"claude-sonnet-5":           Claude2026,
 		"claude-opus-4-8":           Claude2026,
+		"claude-opus-5":             Claude2026,
 		"claude-haiku-4-5-20251001": ClaudeLegacy,
 		"claude-opus-4-6":           ClaudeLegacy,
 		"gpt-5.6":                   GPTO200k,

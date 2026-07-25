@@ -441,7 +441,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
 	}
 
-	if !isLegacyModel(c.model) {
+	if !matchesModel(c.model, LegacyModels) {
 		req.MaxTokens = 128000
 
 		if reasoning := options.ReasoningOptions; reasoning != nil {
@@ -519,7 +519,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				break
 			}
 
-			if len(messages) == 0 || isLegacyModel(c.model) {
+			if len(messages) == 0 || matchesModel(c.model, LegacyModels) {
 				system = append(system, texts...)
 				break
 			}
@@ -885,7 +885,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		}
 	}
 
-	if options.CompactionOptions != nil && !isLegacyModel(c.model) {
+	if options.CompactionOptions != nil && !matchesModel(c.model, LegacyModels) {
 		hasCompaction = true
 
 		edit := &anthropic.BetaCompact20260112EditParam{}
@@ -963,7 +963,14 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		}
 	}
 
-	if options.Temperature != nil && req.Thinking.OfAdaptive == nil && !isNoSamplingModel(c.model) {
+	if req.Thinking.OfDisabled != nil && matchesModel(c.model, DisabledThinkingEffortCapModels) {
+		switch req.OutputConfig.Effort {
+		case anthropic.BetaOutputConfigEffortXhigh, anthropic.BetaOutputConfigEffortMax:
+			req.OutputConfig.Effort = anthropic.BetaOutputConfigEffortHigh
+		}
+	}
+
+	if options.Temperature != nil && req.Thinking.OfAdaptive == nil && !matchesModel(c.model, NoSamplingModels) {
 		req.Temperature = anthropic.Float(float64(*options.Temperature))
 	}
 

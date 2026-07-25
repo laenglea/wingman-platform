@@ -104,36 +104,12 @@ var LegacyModels = []string{
 	"haiku-4-5",
 }
 
-func isLegacyModel(model string) bool {
-	model = strings.ToLower(model)
-
-	for _, p := range LegacyModels {
-		if strings.Contains(model, p) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // AlwaysThinkingModels reject an explicit `thinking: {type: "disabled"}` —
 // thinking cannot be turned off on these models.
 var AlwaysThinkingModels = []string{
 	"fable-5",
 	"mythos-5",
 	"mythos-preview",
-}
-
-func isAlwaysThinkingModel(model string) bool {
-	model = strings.ToLower(model)
-
-	for _, p := range AlwaysThinkingModels {
-		if strings.Contains(model, p) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // NoSamplingModels reject temperature/top_p/top_k outright, regardless of
@@ -147,14 +123,21 @@ var NoSamplingModels = []string{
 
 	"opus-4-7",
 	"opus-4-8",
+	"opus-5",
 
 	"sonnet-5",
 }
 
-func isNoSamplingModel(model string) bool {
+// DisabledThinkingEffortCapModels accept `thinking: {type: "disabled"}` only
+// at effort "high" or below — pairing it with "xhigh" or "max" returns a 400.
+var DisabledThinkingEffortCapModels = []string{
+	"opus-5",
+}
+
+func matchesModel(model string, patterns []string) bool {
 	model = strings.ToLower(model)
 
-	for _, p := range NoSamplingModels {
+	for _, p := range patterns {
 		if strings.Contains(model, p) {
 			return true
 		}
@@ -168,7 +151,7 @@ func isNoSamplingModel(model string) bool {
 // so for those (and legacy models, which don't take a thinking config at
 // all) the field is left omitted instead.
 func disabledThinking(model string) anthropic.BetaThinkingConfigParamUnion {
-	if isLegacyModel(model) || isAlwaysThinkingModel(model) {
+	if matchesModel(model, LegacyModels) || matchesModel(model, AlwaysThinkingModels) {
 		return anthropic.BetaThinkingConfigParamUnion{}
 	}
 
