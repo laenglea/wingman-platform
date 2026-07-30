@@ -55,8 +55,7 @@ func (cfg *Config) Tool(id string) (tool.Provider, error) {
 type toolConfig struct {
 	Type string `yaml:"type"`
 
-	URL   string `yaml:"url"`
-	Token string `yaml:"token"`
+	URL string `yaml:"url"`
 
 	Vars  map[string]string `yaml:"vars"`
 	Auth  *authConfig       `yaml:"auth"`

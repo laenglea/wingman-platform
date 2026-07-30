@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 
 	"github.com/adrianliechti/wingman/pkg/auth"
-	"github.com/adrianliechti/wingman/pkg/auth/obo"
 	"github.com/adrianliechti/wingman/pkg/mcp"
 )
 
@@ -26,7 +25,7 @@ type Server struct {
 	icon   atomic.Pointer[iconCache]
 }
 
-func New(url string, headers map[string]string, exchanger *obo.Exchanger) (*Server, error) {
+func New(url string, headers map[string]string, exchanger auth.TokenExchanger) (*Server, error) {
 	u, err := neturl.Parse(url)
 
 	if err != nil {
@@ -77,19 +76,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 type rt struct {
 	headers   map[string]string
-	exchanger *obo.Exchanger
+	exchanger auth.TokenExchanger
 	transport http.RoundTripper
 }
 
 func (rt *rt) RoundTrip(req *http.Request) (*http.Response, error) {
 	if rt.exchanger != nil {
-		if token, _ := req.Context().Value(auth.TokenContextKey).(string); token != "" {
-			downstream, err := rt.exchanger.Token(req.Context(), token)
+		caller, _ := req.Context().Value(auth.TokenContextKey).(string)
 
-			if err != nil {
-				return nil, err
-			}
+		downstream, err := rt.exchanger.Token(req.Context(), caller)
 
+		if err != nil {
+			return nil, err
+		}
+
+		if downstream == "" {
+			// The proxy copies the inbound Authorization header. It is the
+			// caller's own credential, which the upstream is not meant to see
+			// unless the configured auth says so.
+			req.Header.Del("Authorization")
+		} else {
 			req.Header.Set("Authorization", "Bearer "+downstream)
 		}
 	}

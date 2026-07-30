@@ -57,16 +57,31 @@ func (h *Handler) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	options := &provider.TranscribeOptions{
-		Language:     language,
 		Instructions: instructions,
+
+		Keywords: r.Form["keywords"],
 	}
 
-	transcription, err := p.Transcribe(r.Context(), input, options)
-
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if language != "" {
+		options.Languages = []string{language}
 	}
+
+	if languages := r.Form["languages"]; len(languages) > 0 {
+		options.Languages = languages
+	}
+
+	var acc provider.TranscriptionAccumulator
+
+	for delta, err := range p.Transcribe(r.Context(), input, options) {
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+
+		acc.Add(*delta)
+	}
+
+	transcription := acc.Result()
 
 	w.Header().Set("Content-Type", "text/plain")
 

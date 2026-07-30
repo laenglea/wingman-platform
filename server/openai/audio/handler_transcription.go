@@ -1,9 +1,12 @@
 package audio
 
 import (
+	"errors"
 	"io"
 	"mime"
 	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -29,8 +32,64 @@ func (h *Handler) handleAudioTranscription(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	prompt := r.FormValue("prompt")
-	language := r.FormValue("language")
+	format := r.FormValue("response_format")
+
+	if format == "" {
+		format = "json"
+	}
+
+	if !slices.Contains([]string{"json", "text", "srt", "vtt", "verbose_json", "diarized_json"}, format) {
+		writeError(w, http.StatusBadRequest, errors.New("unsupported response_format: "+format))
+		return
+	}
+
+	stream := r.FormValue("stream") == "true"
+
+	if stream && !slices.Contains([]string{"json", "text", "diarized_json"}, format) {
+		writeError(w, http.StatusBadRequest, errors.New("streaming is not supported with response_format: "+format))
+		return
+	}
+
+	options := &provider.TranscribeOptions{
+		Instructions: r.FormValue("prompt"),
+
+		Languages: formValues(r, "language", "languages"),
+		Keywords:  formValues(r, "keywords"),
+
+		ChunkingStrategy: r.FormValue("chunking_strategy"),
+	}
+
+	granularities := formValues(r, "timestamp_granularities")
+
+	switch format {
+	case "srt", "vtt", "verbose_json":
+		options.Timestamps = true
+
+	case "diarized_json":
+		options.Diarize = true
+	}
+
+	names := formValues(r, "known_speaker_names")
+	references := formValues(r, "known_speaker_references")
+
+	for i, name := range names {
+		if i >= len(references) {
+			break
+		}
+
+		reference, err := decodeSpeakerReference(references[i])
+
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+
+		options.Speakers = append(options.Speakers, provider.TranscribeSpeaker{
+			Name: name,
+
+			Reference: *reference,
+		})
+	}
 
 	file, header, err := r.FormFile("file")
 
@@ -61,27 +120,70 @@ func (h *Handler) handleAudioTranscription(w http.ResponseWriter, r *http.Reques
 		ContentType: contentType,
 	}
 
-	options := &provider.TranscribeOptions{
-		Instructions: prompt,
+	seq := transcriber.Transcribe(r.Context(), input, options)
 
-		Language: language,
-	}
-
-	transcription, err := transcriber.Transcribe(r.Context(), input, options)
-
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if stream {
+		writeTranscriptionStream(w, seq)
 		return
 	}
 
-	result := Transcription{
-		Task: "transcribe",
+	var acc provider.TranscriptionAccumulator
 
-		// Language: transcription.Language,
-		// Duration: transcription.Duration,
+	for delta, err := range seq {
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
 
-		Text: transcription.Text,
+		acc.Add(*delta)
 	}
 
-	writeJson(w, result)
+	transcription := acc.Result()
+
+	switch format {
+	case "text":
+		writeText(w, transcription.Text)
+
+	case "srt":
+		writeText(w, formatSRT(segmentsOf(&transcription)))
+
+	case "vtt":
+		writeText(w, formatVTT(segmentsOf(&transcription)))
+
+	case "verbose_json":
+		writeJson(w, verboseTranscription(&transcription, slices.Contains(granularities, "word")))
+
+	case "diarized_json":
+		writeJson(w, diarizedTranscription(&transcription))
+
+	default:
+		writeJson(w, Transcription{
+			Task: "transcribe",
+
+			Language: transcription.Language,
+			Duration: transcription.Duration,
+
+			Text: transcription.Text,
+
+			Languages: transcriptionLanguages(&transcription),
+		})
+	}
+}
+
+func writeText(w http.ResponseWriter, text string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	io.WriteString(w, text)
+}
+
+func formValues(r *http.Request, names ...string) []string {
+	var values []string
+
+	for _, name := range names {
+		values = append(values, r.MultipartForm.Value[name]...)
+		values = append(values, r.MultipartForm.Value[name+"[]"]...)
+	}
+
+	return slices.DeleteFunc(values, func(value string) bool {
+		return strings.TrimSpace(value) == ""
+	})
 }

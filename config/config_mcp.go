@@ -48,8 +48,7 @@ type mcpConfig struct {
 
 	Name string `yaml:"name"`
 
-	URL   string `yaml:"url"`
-	Token string `yaml:"token"`
+	URL string `yaml:"url"`
 
 	Tools []string `yaml:"tools"`
 
@@ -120,7 +119,7 @@ func createMCP(cfg mcpConfig, context mcpContext) (mcp.Provider, error) {
 func serverMCP(cfg mcpConfig, context mcpContext) (mcp.Provider, error) {
 	tools := slices.Collect(maps.Values(context.Tools))
 
-	return server.New(cfg.Name, tools)
+	return server.New(cfg.Name, cfg.Instructions, tools)
 }
 
 func proxyMCP(cfg mcpConfig, context mcpContext) (mcp.Provider, error) {

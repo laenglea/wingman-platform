@@ -2,6 +2,7 @@ package otel
 
 import (
 	"context"
+	"iter"
 	"time"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -44,49 +45,62 @@ func NewTranscriber(provider, model string, p provider.Transcriber) Transcriber 
 func (p *observableTranscriber) otelSetup() {
 }
 
-func (p *observableTranscriber) Transcribe(ctx context.Context, input provider.File, options *provider.TranscribeOptions) (*provider.Transcription, error) {
-	ctx, span := otel.Tracer(instrumentationName).Start(ctx, GenAISpanName(genaiconv.OperationNameGenerateContent, p.model), trace.WithSpanKind(trace.SpanKindClient))
-	defer span.End()
-
-	if span.IsRecording() {
-		span.SetAttributes(KeyValues(
-			RequestAttrs(semconv.GenAIOperationNameGenerateContent, p.provider, p.model),
-		)...)
-	}
-
-	timestamp := time.Now()
-
-	result, err := p.transcriber.Transcribe(ctx, input, options)
-
-	if err != nil {
-		RecordError(span, err)
-	}
-
-	duration := time.Since(timestamp).Seconds()
-	providerName := genaiconv.ProviderNameAttr(p.provider)
-	providerModel := p.model
-
-	if result != nil {
-		if result.Model != "" {
-			providerModel = result.Model
-		}
+func (p *observableTranscriber) Transcribe(ctx context.Context, input provider.File, options *provider.TranscribeOptions) iter.Seq2[*provider.Transcription, error] {
+	return func(yield func(*provider.Transcription, error) bool) {
+		ctx, span := otel.Tracer(instrumentationName).Start(ctx, GenAISpanName(genaiconv.OperationNameGenerateContent, p.model), trace.WithSpanKind(trace.SpanKindClient))
+		defer span.End()
 
 		if span.IsRecording() {
-			span.SetAttributes(semconv.GenAIResponseModel(providerModel))
+			span.SetAttributes(KeyValues(
+				RequestAttrs(semconv.GenAIOperationNameGenerateContent, p.provider, p.model),
+			)...)
+		}
+
+		timestamp := time.Now()
+		providerName := genaiconv.ProviderNameAttr(p.provider)
+
+		var providerModel string
+		var lastErr error
+
+		// Deferred so consumer cancellation still records the observation.
+		defer func() {
+			duration := time.Since(timestamp).Seconds()
+
+			if providerModel == "" {
+				providerModel = p.model
+			} else if span.IsRecording() {
+				span.SetAttributes(semconv.GenAIResponseModel(providerModel))
+			}
+
+			attrs := MetricAttrs(ctx, p.model, providerModel)
+
+			if lastErr != nil {
+				attrs = append(attrs, p.operationDurationMetric.AttrErrorType(ErrorTypeAttr(lastErr)))
+			}
+
+			p.operationDurationMetric.Record(ctx, duration,
+				genaiconv.OperationNameGenerateContent,
+				providerName,
+				attrs...,
+			)
+		}()
+
+		for result, err := range p.transcriber.Transcribe(ctx, input, options) {
+			if err != nil {
+				lastErr = err
+				RecordError(span, err)
+
+				yield(nil, err)
+				return
+			}
+
+			if result != nil && result.Model != "" {
+				providerModel = result.Model
+			}
+
+			if !yield(result, nil) {
+				return
+			}
 		}
 	}
-
-	attrs := MetricAttrs(ctx, p.model, providerModel)
-
-	if err != nil {
-		attrs = append(attrs, p.operationDurationMetric.AttrErrorType(ErrorTypeAttr(err)))
-	}
-
-	p.operationDurationMetric.Record(ctx, duration,
-		genaiconv.OperationNameGenerateContent,
-		providerName,
-		attrs...,
-	)
-
-	return result, err
 }
