@@ -49,5 +49,17 @@ func (r *SynthesisService) New(ctx context.Context, input SynthesizeRequest, opt
 		return nil, err
 	}
 
-	return p.Synthesize(ctx, input.Input, &input.SynthesizeOptions)
+	var acc provider.SynthesisAccumulator
+
+	for delta, err := range p.Synthesize(ctx, input.Input, &input.SynthesizeOptions) {
+		if err != nil {
+			return nil, err
+		}
+
+		acc.Add(*delta)
+	}
+
+	synthesis := acc.Result()
+
+	return &synthesis, nil
 }

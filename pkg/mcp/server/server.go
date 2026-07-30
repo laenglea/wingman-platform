@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	mcppkg "github.com/adrianliechti/wingman/pkg/mcp"
@@ -21,14 +22,23 @@ type Server struct {
 	tools []tool.Provider
 
 	server *mcp.Server
+
+	mu sync.Mutex
+	// registered maps each provider's advertised tool names to a revision of
+	// their definition, so a refresh can retire tools that disappeared upstream
+	// and skip re-adding ones that did not change.
+	registered []map[string]string
 }
 
-func New(name string, tools []tool.Provider) (*Server, error) {
+func New(name, instructions string, tools []tool.Provider) (*Server, error) {
 	serverImpl := &mcp.Implementation{
-		Name: name,
+		Name:    name,
+		Version: "1.0.0",
 	}
 
 	serverOpts := &mcp.ServerOptions{
+		Instructions: instructions,
+
 		KeepAlive: time.Second * 30,
 	}
 
@@ -47,6 +57,8 @@ func New(name string, tools []tool.Provider) (*Server, error) {
 
 		server: server,
 		tools:  tools,
+
+		registered: make([]map[string]string, len(tools)),
 	}
 
 	go s.refresh()
@@ -74,13 +86,20 @@ func (s *Server) refreshTools() error {
 
 	var resultErr error
 
-	for _, p := range s.tools {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i, p := range s.tools {
 		tools, err := p.Tools(ctx)
 
 		if err != nil {
+			// Keep the previously registered tools: a transient upstream
+			// failure should not retract them.
 			resultErr = errors.Join(resultErr, err)
 			continue
 		}
+
+		current := make(map[string]string, len(tools))
 
 		for _, t := range tools {
 			data, _ := json.Marshal(t.Parameters)
@@ -89,6 +108,15 @@ func (s *Server) refreshTools() error {
 
 			if err := schema.UnmarshalJSON(data); err != nil {
 				resultErr = errors.Join(resultErr, err)
+				continue
+			}
+
+			revision := t.Description + "\x00" + string(data)
+			current[t.Name] = revision
+
+			// AddTool unconditionally reports a change, so re-adding an
+			// unchanged tool would notify every client on each refresh.
+			if s.registered[i][t.Name] == revision {
 				continue
 			}
 
@@ -140,6 +168,20 @@ func (s *Server) refreshTools() error {
 				InputSchema: schema,
 			}, handler)
 		}
+
+		var stale []string
+
+		for name := range s.registered[i] {
+			if _, ok := current[name]; !ok {
+				stale = append(stale, name)
+			}
+		}
+
+		if len(stale) > 0 {
+			s.server.RemoveTools(stale...)
+		}
+
+		s.registered[i] = current
 	}
 
 	return resultErr

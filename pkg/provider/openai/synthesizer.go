@@ -1,8 +1,10 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"iter"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 
@@ -33,57 +35,78 @@ func NewSynthesizer(url, model string, options ...Option) (*Synthesizer, error) 
 	}, nil
 }
 
-func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *provider.SynthesizeOptions) (*provider.Synthesis, error) {
-	if options == nil {
-		options = new(provider.SynthesizeOptions)
-	}
+func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *provider.SynthesizeOptions) iter.Seq2[*provider.Synthesis, error] {
+	return func(yield func(*provider.Synthesis, error) bool) {
+		if options == nil {
+			options = new(provider.SynthesizeOptions)
+		}
 
-	params := openai.AudioSpeechNewParams{
-		Model: s.model,
-		Input: content,
+		params := openai.AudioSpeechNewParams{
+			Model: s.model,
+			Input: content,
 
-		Voice: openai.AudioSpeechNewParamsVoiceUnion{
-			OfString: openai.String(string(openai.AudioSpeechNewParamsVoiceString2Alloy)),
-		},
-	}
+			Voice: openai.AudioSpeechNewParamsVoiceUnion{
+				OfString: openai.String(string(openai.AudioSpeechNewParamsVoiceString2Alloy)),
+			},
+		}
 
-	if options.Voice != "" {
-		params.Voice = openai.AudioSpeechNewParamsVoiceUnion{
-			OfString: openai.String(options.Voice),
+		if options.Voice != "" {
+			params.Voice = openai.AudioSpeechNewParamsVoiceUnion{
+				OfString: openai.String(options.Voice),
+			}
+		}
+
+		if options.Speed != nil {
+			params.Speed = openai.Float(float64(*options.Speed))
+		}
+
+		if options.Format != "" {
+			params.ResponseFormat = openai.AudioSpeechNewParamsResponseFormat(options.Format)
+		}
+
+		result, err := s.speech.New(ctx, params)
+
+		if err != nil {
+			yield(nil, convertError(err))
+			return
+		}
+
+		defer result.Body.Close()
+
+		id := uuid.NewString()
+
+		contentType := "audio/mpeg"
+
+		if ct := result.Header.Get("Content-Type"); ct != "" {
+			contentType = ct
+		}
+
+		buffer := make([]byte, 32*1024)
+
+		for {
+			n, err := result.Body.Read(buffer)
+
+			if n > 0 {
+				chunk := provider.Synthesis{
+					ID:    id,
+					Model: s.model,
+
+					Content:     bytes.Clone(buffer[:n]),
+					ContentType: contentType,
+				}
+
+				if !yield(&chunk, nil) {
+					return
+				}
+			}
+
+			if err != nil {
+				if err != io.EOF {
+					yield(nil, err)
+				}
+
+				return
+			}
 		}
 	}
-
-	if options.Speed != nil {
-		params.Speed = openai.Float(float64(*options.Speed))
-	}
-
-	if options.Format != "" {
-		params.ResponseFormat = openai.AudioSpeechNewParamsResponseFormat(options.Format)
-	}
-
-	result, err := s.speech.New(ctx, params)
-
-	if err != nil {
-		return nil, convertError(err)
-	}
-
-	data, err := io.ReadAll(result.Body)
-
-	if err != nil {
-		return nil, err
-	}
-
-	contentType := "audio/mpeg"
-
-	if ct := result.Header.Get("Content-Type"); ct != "" {
-		contentType = ct
-	}
-
-	return &provider.Synthesis{
-		ID:    uuid.NewString(),
-		Model: s.model,
-
-		Content:     data,
-		ContentType: contentType,
-	}, nil
 }

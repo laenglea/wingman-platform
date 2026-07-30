@@ -3,6 +3,7 @@ package openrouter
 import (
 	"context"
 	"encoding/base64"
+	"iter"
 	"path"
 	"strings"
 
@@ -22,7 +23,20 @@ func NewTranscriber(model string, options ...Option) (*Transcriber, error) {
 	}, nil
 }
 
-func (t *Transcriber) Transcribe(ctx context.Context, input provider.File, options *provider.TranscribeOptions) (*provider.Transcription, error) {
+func (t *Transcriber) Transcribe(ctx context.Context, input provider.File, options *provider.TranscribeOptions) iter.Seq2[*provider.Transcription, error] {
+	return func(yield func(*provider.Transcription, error) bool) {
+		transcription, err := t.transcribe(ctx, input, options)
+
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+
+		yield(transcription, nil)
+	}
+}
+
+func (t *Transcriber) transcribe(ctx context.Context, input provider.File, options *provider.TranscribeOptions) (*provider.Transcription, error) {
 	if options == nil {
 		options = new(provider.TranscribeOptions)
 	}
@@ -36,8 +50,12 @@ func (t *Transcriber) Transcribe(ctx context.Context, input provider.File, optio
 		},
 	}
 
-	if options.Language != "" {
-		body["language"] = options.Language
+	if len(options.Languages) > 0 {
+		body["language"] = options.Languages[0]
+	}
+
+	if options.Instructions != "" {
+		body["prompt"] = options.Instructions
 	}
 
 	var result struct {

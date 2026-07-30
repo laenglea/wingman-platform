@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"iter"
 	"net/http"
 	"strings"
 
@@ -50,7 +51,20 @@ type speechResponse struct {
 	AudioData string `json:"audio_data"`
 }
 
-func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *provider.SynthesizeOptions) (*provider.Synthesis, error) {
+func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *provider.SynthesizeOptions) iter.Seq2[*provider.Synthesis, error] {
+	return func(yield func(*provider.Synthesis, error) bool) {
+		synthesis, err := s.synthesize(ctx, content, options)
+
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+
+		yield(synthesis, nil)
+	}
+}
+
+func (s *Synthesizer) synthesize(ctx context.Context, content string, options *provider.SynthesizeOptions) (*provider.Synthesis, error) {
 	if options == nil {
 		options = new(provider.SynthesizeOptions)
 	}
