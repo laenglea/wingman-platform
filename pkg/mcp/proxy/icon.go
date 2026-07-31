@@ -84,12 +84,29 @@ func (s *Server) fetchIcon() (string, []byte) {
 	})
 
 	for _, icon := range icons {
-		if contentType, data, ok := resolveIcon(hc, icon); ok {
+		if contentType, data, ok := resolveIcon(s.iconClient(icon.Source), icon); ok {
 			return contentType, data
 		}
 	}
 
 	return "", nil
+}
+
+// iconClient picks the HTTP client used to fetch an icon. Icon sources are
+// chosen by the upstream server, so the configured headers (which may carry
+// credentials) are only attached when the icon lives on that same origin.
+func (s *Server) iconClient(source string) *http.Client {
+	u, err := url.Parse(source)
+
+	if err != nil {
+		return http.DefaultClient
+	}
+
+	if strings.EqualFold(u.Scheme, s.url.Scheme) && strings.EqualFold(u.Host, s.url.Host) {
+		return &http.Client{Transport: s.rt}
+	}
+
+	return http.DefaultClient
 }
 
 func iconPriority(mimeType string) int {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"strings"
 
@@ -39,7 +40,20 @@ func NewSynthesizer(region, model string, options ...Option) (*Synthesizer, erro
 	}, nil
 }
 
-func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *provider.SynthesizeOptions) (*provider.Synthesis, error) {
+func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *provider.SynthesizeOptions) iter.Seq2[*provider.Synthesis, error] {
+	return func(yield func(*provider.Synthesis, error) bool) {
+		synthesis, err := s.synthesize(ctx, content, options)
+
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+
+		yield(synthesis, nil)
+	}
+}
+
+func (s *Synthesizer) synthesize(ctx context.Context, content string, options *provider.SynthesizeOptions) (*provider.Synthesis, error) {
 	if options == nil {
 		options = new(provider.SynthesizeOptions)
 	}
@@ -104,6 +118,9 @@ var voiceMap = map[string]string{
 	"onyx":    "en-US-OnyxTurboMultilingualNeural",
 	"sage":    "en-US-AndrewMultilingualNeural",
 	"shimmer": "en-US-ShimmerTurboMultilingualNeural",
+	"verse":   "en-US-BrianMultilingualNeural",
+	"marin":   "en-US-AvaMultilingualNeural",
+	"cedar":   "en-US-AndrewMultilingualNeural",
 }
 
 func mapVoice(voice string) string {

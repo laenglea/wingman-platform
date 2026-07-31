@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/adrianliechti/wingman/pkg/auth"
-	"github.com/adrianliechti/wingman/pkg/auth/obo"
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/tool"
 
@@ -26,7 +25,7 @@ type Client struct {
 	transport mcp.Transport
 }
 
-func New(url string, headers map[string]string, exchanger *obo.Exchanger) (*Client, error) {
+func New(url string, headers map[string]string, exchanger auth.TokenExchanger) (*Client, error) {
 	hc := &http.Client{
 		Transport: &rt{
 			headers:   headers,
@@ -80,15 +79,14 @@ func (c *Client) Tools(ctx context.Context) ([]tool.Tool, error) {
 
 	defer session.Close()
 
-	resp, err := session.ListTools(ctx, nil)
-
-	if err != nil {
-		return nil, err
-	}
-
 	var result []tool.Tool
 
-	for _, t := range resp.Tools {
+	// Tools paginates; ListTools would silently stop at the server's page size.
+	for t, err := range session.Tools(ctx, nil) {
+		if err != nil {
+			return nil, err
+		}
+
 		input, _ := t.InputSchema.(map[string]any)
 
 		result = append(result, tool.Tool{
@@ -221,19 +219,23 @@ func resultText(result *mcp.CallToolResult) string {
 
 type rt struct {
 	headers   map[string]string
-	exchanger *obo.Exchanger
+	exchanger auth.TokenExchanger
 	transport http.RoundTripper
 }
 
 func (rt *rt) RoundTrip(req *http.Request) (*http.Response, error) {
 	if rt.exchanger != nil {
-		if token, _ := req.Context().Value(auth.TokenContextKey).(string); token != "" {
-			downstream, err := rt.exchanger.Token(req.Context(), token)
+		caller, _ := req.Context().Value(auth.TokenContextKey).(string)
 
-			if err != nil {
-				return nil, err
-			}
+		downstream, err := rt.exchanger.Token(req.Context(), caller)
 
+		if err != nil {
+			return nil, err
+		}
+
+		if downstream == "" {
+			req.Header.Del("Authorization")
+		} else {
 			req.Header.Set("Authorization", "Bearer "+downstream)
 		}
 	}

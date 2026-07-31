@@ -42,8 +42,12 @@ func (r *TranscriptionService) New(ctx context.Context, input TranscribeRequest,
 		w.WriteField("model", input.Model)
 	}
 
-	if input.Language != "" {
-		w.WriteField("language", input.Language)
+	for _, language := range input.Languages {
+		w.WriteField("languages", language)
+	}
+
+	for _, keyword := range input.Keywords {
+		w.WriteField("keywords", keyword)
 	}
 
 	if input.Instructions != "" {

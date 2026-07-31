@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"strconv"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 
@@ -42,18 +44,51 @@ func NewTranscriber(region, model string, options ...Option) (*Transcriber, erro
 	}, nil
 }
 
-func (t *Transcriber) Transcribe(ctx context.Context, input provider.File, options *provider.TranscribeOptions) (*provider.Transcription, error) {
+func (t *Transcriber) Transcribe(ctx context.Context, input provider.File, options *provider.TranscribeOptions) iter.Seq2[*provider.Transcription, error] {
+	return func(yield func(*provider.Transcription, error) bool) {
+		transcription, err := t.transcribe(ctx, input, options)
+
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+
+		yield(transcription, nil)
+	}
+}
+
+func (t *Transcriber) transcribe(ctx context.Context, input provider.File, options *provider.TranscribeOptions) (*provider.Transcription, error) {
 	if options == nil {
 		options = new(provider.TranscribeOptions)
 	}
 
-	locale := options.Language
-	if locale == "" {
-		locale = "en-US"
+	locales := options.Languages
+
+	if len(locales) == 0 {
+		locales = []string{"en-US"}
 	}
 
 	definition := transcriptionDefinition{
-		Locales: []string{locale},
+		Locales: locales,
+	}
+
+	if options.Diarize || len(options.Speakers) > 0 {
+		maxSpeakers := len(options.Speakers)
+
+		if maxSpeakers < 2 {
+			maxSpeakers = 2
+		}
+
+		definition.Diarization = &transcriptionDiarization{
+			Enabled:     true,
+			MaxSpeakers: maxSpeakers,
+		}
+	}
+
+	if len(options.Keywords) > 0 {
+		definition.PhraseList = &transcriptionPhraseList{
+			Phrases: options.Keywords,
+		}
 	}
 
 	definitionJSON, err := json.Marshal(definition)
@@ -144,16 +179,72 @@ func (t *Transcriber) Transcribe(ctx context.Context, input provider.File, optio
 		text += p.Text
 	}
 
-	return &provider.Transcription{
+	transcription := provider.Transcription{
 		ID:    uuid.NewString(),
 		Model: t.model,
 
 		Text: text,
-	}, nil
+
+		Duration: float64(result.DurationMilliseconds) / 1000,
+	}
+
+	if len(locales) == 1 {
+		transcription.Language = locales[0]
+	}
+
+	for i, p := range result.Phrases {
+		if i == 0 && transcription.Language == "" {
+			transcription.Language = p.Locale
+		}
+
+		var speaker string
+
+		if definition.Diarization != nil {
+			speaker = strconv.Itoa(p.Speaker)
+		}
+
+		transcription.Segments = append(transcription.Segments, provider.TranscriptionSegment{
+			ID: strconv.Itoa(i),
+
+			Speaker: speaker,
+
+			Start: float64(p.OffsetMilliseconds) / 1000,
+			End:   float64(p.OffsetMilliseconds+p.DurationMilliseconds) / 1000,
+
+			Text: p.Text,
+		})
+
+		if !options.Timestamps {
+			continue
+		}
+
+		for _, w := range p.Words {
+			transcription.Words = append(transcription.Words, provider.TranscriptionWord{
+				Word: w.Text,
+
+				Start: float64(w.OffsetMilliseconds) / 1000,
+				End:   float64(w.OffsetMilliseconds+w.DurationMilliseconds) / 1000,
+			})
+		}
+	}
+
+	return &transcription, nil
 }
 
 type transcriptionDefinition struct {
 	Locales []string `json:"locales,omitempty"`
+
+	Diarization *transcriptionDiarization `json:"diarization,omitempty"`
+	PhraseList  *transcriptionPhraseList  `json:"phraseList,omitempty"`
+}
+
+type transcriptionDiarization struct {
+	Enabled     bool `json:"enabled"`
+	MaxSpeakers int  `json:"maxSpeakers,omitempty"`
+}
+
+type transcriptionPhraseList struct {
+	Phrases []string `json:"phrases"`
 }
 
 type transcriptionResponse struct {
@@ -165,9 +256,16 @@ type transcriptionResponse struct {
 
 	Phrases []struct {
 		Text                 string  `json:"text"`
+		Speaker              int     `json:"speaker"`
 		Confidence           float64 `json:"confidence"`
 		Locale               string  `json:"locale"`
 		OffsetMilliseconds   int     `json:"offsetMilliseconds"`
 		DurationMilliseconds int     `json:"durationMilliseconds"`
+
+		Words []struct {
+			Text                 string `json:"text"`
+			OffsetMilliseconds   int    `json:"offsetMilliseconds"`
+			DurationMilliseconds int    `json:"durationMilliseconds"`
+		} `json:"words"`
 	} `json:"phrases"`
 }
