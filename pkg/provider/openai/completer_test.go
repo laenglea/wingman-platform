@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -89,7 +90,7 @@ func TestCompleterRelaysFragmentsVerbatim(t *testing.T) {
 		t.Fatalf("new completer: %v", err)
 	}
 
-	var fragments string
+	var fragments strings.Builder
 
 	acc := provider.CompletionAccumulator{}
 
@@ -101,7 +102,7 @@ func TestCompleterRelaysFragmentsVerbatim(t *testing.T) {
 		if completion.Message != nil {
 			for _, c := range completion.Message.Content {
 				if c.ToolCall != nil {
-					fragments += c.ToolCall.Arguments
+					fragments.WriteString(c.ToolCall.Arguments)
 				}
 			}
 		}
@@ -109,8 +110,8 @@ func TestCompleterRelaysFragmentsVerbatim(t *testing.T) {
 		acc.Add(*completion)
 	}
 
-	if fragments != `{"a":{"a":1}}` {
-		t.Errorf("emitted fragments rebuild %q, want verbatim relay", fragments)
+	if fragments.String() != `{"a":{"a":1}}` {
+		t.Errorf("emitted fragments rebuild %q, want verbatim relay", fragments.String())
 	}
 
 	calls := acc.Result().Message.ToolCalls()

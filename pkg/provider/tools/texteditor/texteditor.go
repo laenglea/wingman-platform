@@ -203,7 +203,7 @@ func addedDiff(content string) string {
 
 	var b strings.Builder
 
-	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(content, "\n"), "\n") {
 		b.WriteString("+" + line + "\n")
 	}
 
@@ -214,11 +214,11 @@ func replaceDiff(oldText, newText string) string {
 	var b strings.Builder
 	b.WriteString("@@\n")
 
-	for _, line := range strings.Split(strings.TrimRight(oldText, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(oldText, "\n"), "\n") {
 		b.WriteString("-" + line + "\n")
 	}
 
-	for _, line := range strings.Split(strings.TrimRight(newText, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(newText, "\n"), "\n") {
 		b.WriteString("+" + line + "\n")
 	}
 
@@ -257,7 +257,7 @@ func ParseEnvelope(input string) Operation {
 	var op Operation
 	var body []string
 
-	for _, line := range strings.Split(input, "\n") {
+	for line := range strings.SplitSeq(input, "\n") {
 		switch {
 		case strings.HasPrefix(line, "*** Begin Patch"):
 			continue

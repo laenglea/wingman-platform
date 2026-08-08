@@ -417,7 +417,7 @@ type InputApplyPatchCall struct {
 	ID        string              `json:"id,omitempty"`
 	CallID    string              `json:"call_id,omitempty"`
 	Status    string              `json:"status,omitempty"`
-	Operation ApplyPatchOperation `json:"operation,omitempty"`
+	Operation ApplyPatchOperation `json:"operation"`
 }
 
 // InputApplyPatchCallOutput represents the result of an apply_patch call
@@ -872,7 +872,7 @@ type Response struct {
 
 	Output []ResponseOutput `json:"output"`
 
-	Error             *ResponseError `json:"error"`
+	Error             *ResponseError     `json:"error"`
 	IncompleteDetails *IncompleteDetails `json:"incomplete_details"`
 
 	Instructions       *string `json:"instructions"`

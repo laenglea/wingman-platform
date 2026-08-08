@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/adrianliechti/wingman/pkg/policy"
@@ -64,15 +65,12 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		options.ToolOptions.DisableParallelToolCalls = true
 	}
 
-	for _, inc := range req.Include {
-		if inc == "reasoning.encrypted_content" {
-			if options.ReasoningOptions == nil {
-				options.ReasoningOptions = &provider.ReasoningOptions{}
-			}
-
-			options.ReasoningOptions.IncludeSignature = true
-			break
+	if slices.Contains(req.Include, "reasoning.encrypted_content") {
+		if options.ReasoningOptions == nil {
+			options.ReasoningOptions = &provider.ReasoningOptions{}
 		}
+
+		options.ReasoningOptions.IncludeSignature = true
 	}
 
 	if req.Reasoning != nil && req.Reasoning.Summary != nil {
@@ -336,10 +334,8 @@ func responseDefaults(resp *Response, req ResponsesRequest) {
 
 // reasoningRequested returns true if the request explicitly asks for reasoning output.
 func reasoningRequested(req ResponsesRequest) bool {
-	for _, inc := range req.Include {
-		if inc == "reasoning.encrypted_content" {
-			return true
-		}
+	if slices.Contains(req.Include, "reasoning.encrypted_content") {
+		return true
 	}
 
 	if req.Reasoning == nil {
