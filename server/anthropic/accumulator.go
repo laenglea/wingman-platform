@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
@@ -142,13 +143,7 @@ func (s *StreamingAccumulator) isToolBlock(index int) bool {
 }
 
 func (s *StreamingAccumulator) isBlockOpen(index int) bool {
-	for _, open := range s.openBlocks {
-		if open == index {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(s.openBlocks, index)
 }
 
 func (s *StreamingAccumulator) stopBlock(index int) error {
@@ -366,7 +361,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			if s.textIndex < 0 {
 				index, err := s.startBlock(&ContentBlock{
 					Type: "text",
-					Text: ptr(""),
+					Text: new(""),
 				})
 
 				if err != nil {
@@ -454,7 +449,7 @@ func (s *StreamingAccumulator) Complete() error {
 	if !s.hasContent {
 		if _, err := s.startBlock(&ContentBlock{
 			Type: "text",
-			Text: ptr(""),
+			Text: new(""),
 		}); err != nil {
 			return err
 		}

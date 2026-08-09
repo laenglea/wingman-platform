@@ -92,10 +92,7 @@ func WriteSSERetry(w http.ResponseWriter, err error) {
 		return
 	}
 
-	ms := d.Milliseconds()
-	if ms < 1 {
-		ms = 1
-	}
+	ms := max(d.Milliseconds(), 1)
 
 	fmt.Fprintf(w, "retry: %d\n", ms)
 }

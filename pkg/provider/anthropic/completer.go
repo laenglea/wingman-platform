@@ -921,7 +921,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		switch options.ToolOptions.Choice {
 		case provider.ToolChoiceNone:
 			req.ToolChoice = anthropic.BetaToolChoiceUnionParam{
-				OfNone: anthropic.Ptr(anthropic.NewBetaToolChoiceNoneParam()),
+				OfNone: new(anthropic.NewBetaToolChoiceNoneParam()),
 			}
 
 		case provider.ToolChoiceAuto:

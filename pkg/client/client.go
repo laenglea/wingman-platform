@@ -74,10 +74,6 @@ func newRequestConfig(opts ...RequestOption) *RequestConfig {
 	return c
 }
 
-func Ptr[T any](v T) *T {
-	return &v
-}
-
 func endpoint(base, path string) string {
 	return strings.TrimRight(base, "/") + path
 }
