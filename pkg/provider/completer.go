@@ -355,5 +355,6 @@ type Compaction struct {
 }
 
 type CompactionOptions struct {
+	Trigger   bool
 	Threshold int
 }

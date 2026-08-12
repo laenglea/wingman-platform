@@ -172,6 +172,17 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	for _, item := range req.Input.Items {
+		if item.Type == InputItemTypeCompactionTrigger {
+			if options.CompactionOptions == nil {
+				options.CompactionOptions = &provider.CompactionOptions{}
+			}
+
+			options.CompactionOptions.Trigger = true
+			break
+		}
+	}
+
 	if req.Stream {
 		h.handleResponsesStream(w, r, req, completer, messages, options)
 	} else {
@@ -767,12 +778,13 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 					SequenceNumber: nextSeq(),
 					OutputIndex:    event.OutputIndex,
 					Item: &CustomToolCallItem{
-						ID:     "ctc_" + event.ToolCallID,
-						Type:   "custom_tool_call",
-						CallID: event.ToolCallID,
-						Status: "in_progress",
-						Name:   event.ToolCallName,
-						Input:  "",
+						ID:        "ctc_" + event.ToolCallID,
+						Type:      "custom_tool_call",
+						CallID:    event.ToolCallID,
+						Status:    "in_progress",
+						Name:      event.ToolCallName,
+						Namespace: event.ToolCallNamespace,
+						Input:     "",
 					},
 				})
 
@@ -864,7 +876,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 		case StreamEventFunctionCallArgumentsDelta:
 			switch outputOpts.kindOf(event.ToolCallName) {
 			case provider.ToolKindCustom:
-				if isApplyPatchToolCall(provider.ToolCall{Name: event.ToolCallName}) {
+				if isApplyPatchToolCall(provider.ToolCall{Name: event.ToolCallName, Namespace: event.ToolCallNamespace}) {
 					return nil
 				}
 
@@ -895,6 +907,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				call := provider.ToolCall{
 					ID:        event.ToolCallID,
 					Name:      event.ToolCallName,
+					Namespace: event.ToolCallNamespace,
 					Arguments: event.Arguments,
 				}
 				input := toolCallToCustomToolCall(call, "in_progress").Input

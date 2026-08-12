@@ -278,9 +278,16 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 			name := call.Name
 			args := call.Input
 
-			if call.Name == texteditor.NameApplyPatch {
+			// only the top-level Codex patch tool; a namespaced tool that
+			// happens to be called apply_patch is an ordinary custom tool
+			if call.Name == texteditor.NameApplyPatch && call.Namespace == "" {
 				kind = provider.ToolKindTextEditor
-				args = texteditor.ParseEnvelope(call.Input).Args()
+
+				// multi-file envelopes keep their raw form — only the freeform
+				// representation can express them
+				if ops := texteditor.ParseEnvelopeOperations(call.Input); len(ops) == 1 {
+					args = ops[0].Args()
+				}
 			}
 
 			kindByCallID[call.CallID] = kind
@@ -288,6 +295,7 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 				ID:        call.CallID,
 				Kind:      kind,
 				Name:      name,
+				Namespace: call.Namespace,
 				Arguments: args,
 			}))
 
@@ -443,6 +451,9 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 				Execution: output.Execution,
 				Payload:   []byte(output.Tools),
 			}))
+
+		case InputItemTypeCompactionTrigger:
+			// positional marker, surfaced via CompleteOptions.CompactionOptions
 		}
 	}
 
@@ -529,7 +540,10 @@ func toTools(tools []Tool) ([]provider.Tool, error) {
 				Kind:        kind,
 				Deferred:    t.DeferLoading,
 			}
-			if kind == provider.ToolKindCustom && t.Format != nil {
+			// kept for apply_patch too: the format marks the freeform (Codex)
+			// declaration, which providers with a native custom tool pass
+			// through so multi-file envelopes survive verbatim
+			if t.Format != nil {
 				tool.Format = &provider.ToolFormat{
 					Type:       t.Format.Type,
 					Syntax:     t.Format.Syntax,
@@ -692,8 +706,14 @@ func outputKind(name string, tools []Tool) provider.ToolKind {
 	return provider.ToolKindFunction
 }
 
-// isApplyPatchToolCall returns true if the tool call is an apply_patch or text_editor call.
+// isApplyPatchToolCall returns true if the tool call is an apply_patch or
+// text_editor call. Namespaced calls are ordinary custom/function tools that
+// merely share the name.
 func isApplyPatchToolCall(call provider.ToolCall) bool {
+	if call.Namespace != "" {
+		return false
+	}
+
 	return call.Name == texteditor.NameApplyPatch || call.Name == texteditor.NameTextEditor
 }
 
@@ -709,11 +729,18 @@ func toolCallToApplyPatchCall(call provider.ToolCall, status string) *ApplyPatch
 
 	var op texteditor.Operation
 
-	if call.Name == texteditor.NameTextEditor {
+	switch {
+	case call.Name == texteditor.NameTextEditor:
 		// Cross-dialect fallback (e.g. mixed histories): convert text_editor
 		// commands to the closest apply_patch operation
 		op = texteditor.ParseInput(call.Arguments).Operation()
-	} else {
+
+	case texteditor.IsEnvelope(call.Arguments):
+		// Freeform envelope surfacing through a typed apply_patch client —
+		// single-op best effort; the typed item cannot express multiple files
+		op = texteditor.ParseEnvelope(call.Arguments)
+
+	default:
 		// Native OpenAI format: arguments are {type, path, diff}
 		op = texteditor.ParseOperation(call.Arguments)
 	}
@@ -732,24 +759,32 @@ func toolCallToApplyPatchCall(call provider.ToolCall, status string) *ApplyPatch
 // grammar requires; other tools pass their arguments through as raw input.
 func toolCallToCustomToolCall(call provider.ToolCall, status string) *CustomToolCallItem {
 	if isApplyPatchToolCall(call) {
-		op := toolCallToApplyPatchCall(call, status).Operation
+		input := call.Arguments
+
+		// already an envelope when the upstream ran the freeform tool natively
+		if !texteditor.IsEnvelope(input) {
+			op := toolCallToApplyPatchCall(call, status).Operation
+			input = texteditor.Operation{Type: op.Type, Path: op.Path, Diff: op.Diff}.Envelope()
+		}
+
 		return &CustomToolCallItem{
 			ID:     "ctc_" + call.ID,
 			Type:   "custom_tool_call",
 			CallID: call.ID,
 			Status: status,
 			Name:   texteditor.NameApplyPatch,
-			Input:  texteditor.Operation{Type: op.Type, Path: op.Path, Diff: op.Diff}.Envelope(),
+			Input:  input,
 		}
 	}
 
 	return &CustomToolCallItem{
-		ID:     "ctc_" + call.ID,
-		Type:   "custom_tool_call",
-		CallID: call.ID,
-		Status: status,
-		Name:   call.Name,
-		Input:  call.Arguments,
+		ID:        "ctc_" + call.ID,
+		Type:      "custom_tool_call",
+		CallID:    call.ID,
+		Status:    status,
+		Name:      call.Name,
+		Namespace: call.Namespace,
+		Input:     call.Arguments,
 	}
 }
 

@@ -276,3 +276,134 @@ func TestResponderInput_TextEditorReplayAsFunction(t *testing.T) {
 		t.Fatalf("missing function call/output: call=%v output=%v", sawCall, sawOutput)
 	}
 }
+
+// TestResponderRequest_CompactionTrigger verifies an immediate-compaction
+// request appends the compaction_trigger input item.
+func TestResponderRequest_CompactionTrigger(t *testing.T) {
+	responder, _ := NewResponder("https://api.openai.com/v1/", "gpt-test")
+
+	options := &provider.CompleteOptions{
+		CompactionOptions: &provider.CompactionOptions{Trigger: true},
+	}
+
+	body := responsesRequestBody(t, responder, []provider.Message{provider.UserMessage("hi")}, options)
+
+	items, _ := body["input"].([]any)
+	if len(items) == 0 {
+		t.Fatal("input is empty")
+	}
+
+	last := items[len(items)-1].(map[string]any)
+	if last["type"] != "compaction_trigger" {
+		t.Fatalf("last input item = %+v, want compaction_trigger", last)
+	}
+}
+
+const multiFileEnvelope = "*** Begin Patch\n" +
+	"*** Add File: a.go\n" +
+	"+package a\n" +
+	"*** Delete File: b.go\n" +
+	"*** End Patch\n"
+
+// TestResponderTools_ApplyPatchFreeformPassthrough verifies a freeform
+// (grammar) apply_patch declaration passes through as a custom tool, and its
+// calls/results replay as custom_tool_call items with the envelope verbatim —
+// the only representation that can express multi-file patches.
+func TestResponderTools_ApplyPatchFreeformPassthrough(t *testing.T) {
+	responder, _ := NewResponder("https://api.openai.com/v1/", "gpt-test")
+
+	options := &provider.CompleteOptions{
+		Tools: []provider.Tool{{
+			Kind:   provider.ToolKindTextEditor,
+			Name:   texteditor.NameApplyPatch,
+			Format: &provider.ToolFormat{Type: "grammar", Syntax: "lark", Definition: "start: x"},
+		}},
+	}
+
+	messages := []provider.Message{
+		{
+			Role: provider.MessageRoleAssistant,
+			Content: []provider.Content{
+				provider.ToolCallContent(provider.ToolCall{
+					ID:        "call_patch_multi",
+					Kind:      provider.ToolKindTextEditor,
+					Name:      texteditor.NameApplyPatch,
+					Arguments: multiFileEnvelope,
+				}),
+			},
+		},
+		{
+			Role: provider.MessageRoleUser,
+			Content: []provider.Content{
+				provider.ToolResultContent(provider.ToolResult{
+					ID:    "call_patch_multi",
+					Kind:  provider.ToolKindTextEditor,
+					Parts: []provider.Part{{Text: "Done"}},
+				}),
+			},
+		},
+	}
+
+	body := responsesRequestBody(t, responder, messages, options)
+
+	tools := requestTools(t, body)
+	if len(tools) != 1 || tools[0]["type"] != "custom" || tools[0]["name"] != "apply_patch" {
+		t.Fatalf("tools = %+v, want custom apply_patch passthrough", tools)
+	}
+
+	items, _ := body["input"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("input = %+v, want call + output", items)
+	}
+
+	call := items[0].(map[string]any)
+	if call["type"] != "custom_tool_call" || call["input"] != multiFileEnvelope {
+		t.Fatalf("call item = %+v", call)
+	}
+
+	output := items[1].(map[string]any)
+	if output["type"] != "custom_tool_call_output" || output["output"] != "Done" {
+		t.Fatalf("output item = %+v", output)
+	}
+}
+
+// TestResponderTools_ApplyPatchTypedKeepsNative verifies the typed declaration
+// (no format) still uses the native apply_patch tool and item types.
+func TestResponderTools_ApplyPatchTypedKeepsNative(t *testing.T) {
+	responder, _ := NewResponder("https://api.openai.com/v1/", "gpt-test")
+
+	options := &provider.CompleteOptions{
+		Tools: []provider.Tool{{Kind: provider.ToolKindTextEditor, Name: texteditor.NameApplyPatch}},
+	}
+
+	messages := []provider.Message{
+		{
+			Role: provider.MessageRoleAssistant,
+			Content: []provider.Content{
+				provider.ToolCallContent(provider.ToolCall{
+					ID:        "call_patch_typed",
+					Kind:      provider.ToolKindTextEditor,
+					Name:      texteditor.NameApplyPatch,
+					Arguments: `{"type":"delete_file","path":"b.go"}`,
+				}),
+			},
+		},
+	}
+
+	body := responsesRequestBody(t, responder, messages, options)
+
+	tools := requestTools(t, body)
+	if len(tools) != 1 || tools[0]["type"] != "apply_patch" {
+		t.Fatalf("tools = %+v, want native apply_patch", tools)
+	}
+
+	items, _ := body["input"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("input = %+v, want one apply_patch_call", items)
+	}
+
+	call := items[0].(map[string]any)
+	if call["type"] != "apply_patch_call" {
+		t.Fatalf("call item = %+v", call)
+	}
+}

@@ -74,3 +74,36 @@ func TestResponderTools_NamespaceCustomChild(t *testing.T) {
 		t.Fatalf("wait child: %+v", wait)
 	}
 }
+
+// TestResponderInput_CustomToolCallKeepsNamespace verifies a namespaced custom
+// tool call replays with its namespace field intact.
+func TestResponderInput_CustomToolCallKeepsNamespace(t *testing.T) {
+	responder, _ := NewResponder("https://api.openai.com/v1/", "gpt-test")
+
+	messages := []provider.Message{
+		{
+			Role: provider.MessageRoleAssistant,
+			Content: []provider.Content{
+				provider.ToolCallContent(provider.ToolCall{
+					ID:        "call_q1",
+					Kind:      provider.ToolKindCustom,
+					Name:      "run_query",
+					Namespace: "mcp__db__",
+					Arguments: "SELECT 1",
+				}),
+			},
+		},
+	}
+
+	body := responsesRequestBody(t, responder, messages, &provider.CompleteOptions{})
+
+	items, _ := body["input"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("input = %+v, want one custom_tool_call item", items)
+	}
+
+	item := items[0].(map[string]any)
+	if item["type"] != "custom_tool_call" || item["namespace"] != "mcp__db__" || item["input"] != "SELECT 1" {
+		t.Fatalf("custom_tool_call item: %+v", item)
+	}
+}
