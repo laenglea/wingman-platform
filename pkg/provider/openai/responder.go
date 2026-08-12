@@ -541,6 +541,9 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 							CallID: c.ToolResult.ID,
 							Status: "completed",
 						}
+						if c.ToolResult.IsError {
+							output.Status = "failed"
+						}
 
 						var texts []string
 						for _, p := range c.ToolResult.Parts {

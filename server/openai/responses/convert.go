@@ -259,9 +259,10 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 			}
 
 			pendingResults = append(pendingResults, provider.ToolResultContent(provider.ToolResult{
-				ID:    output.CallID,
-				Kind:  provider.ToolKindTextEditor,
-				Parts: parts,
+				ID:      output.CallID,
+				Kind:    provider.ToolKindTextEditor,
+				IsError: output.Status == "failed",
+				Parts:   parts,
 			}))
 
 		case InputItemTypeCustomToolCall:

@@ -166,6 +166,59 @@ func TestResponderInput_ApplyPatchReplay(t *testing.T) {
 	}
 }
 
+// TestResponderInput_ApplyPatchReplayFailed verifies a failed patch result
+// replays with status "failed" so the model knows the edit did not land.
+func TestResponderInput_ApplyPatchReplayFailed(t *testing.T) {
+	responder, _ := NewResponder("https://api.openai.com/v1/", "gpt-test")
+
+	messages := []provider.Message{
+		provider.UserMessage("update main.go"),
+		{
+			Role: provider.MessageRoleAssistant,
+			Content: []provider.Content{
+				provider.ToolCallContent(provider.ToolCall{
+					ID:        "call_1",
+					Kind:      provider.ToolKindTextEditor,
+					Name:      texteditor.NameApplyPatch,
+					Arguments: `{"type":"update_file","path":"main.go","diff":"@@\n-old\n+new\n"}`,
+				}),
+			},
+		},
+		{
+			Role: provider.MessageRoleUser,
+			Content: []provider.Content{
+				provider.ToolResultContent(provider.ToolResult{
+					ID:      "call_1",
+					Kind:    provider.ToolKindTextEditor,
+					IsError: true,
+					Parts:   []provider.Part{{Text: "Could not apply patch to main.go - file not found"}},
+				}),
+			},
+		},
+	}
+
+	options := &provider.CompleteOptions{
+		Tools: []provider.Tool{{Kind: provider.ToolKindTextEditor, Name: texteditor.NameApplyPatch}},
+	}
+
+	body := responsesRequestBody(t, responder, messages, options)
+
+	var output map[string]any
+	for _, item := range body["input"].([]any) {
+		m := item.(map[string]any)
+		if m["type"] == "apply_patch_call_output" {
+			output = m
+		}
+	}
+
+	if output == nil || output["status"] != "failed" {
+		t.Fatalf("apply_patch_call_output: %+v", output)
+	}
+	if output["output"] != "Could not apply patch to main.go - file not found" {
+		t.Fatalf("output text: %v", output["output"])
+	}
+}
+
 // TestResponderInput_TextEditorReplayAsFunction verifies Anthropic-dialect
 // history (emulated function tool) replays as plain function call items.
 func TestResponderInput_TextEditorReplayAsFunction(t *testing.T) {
