@@ -1001,8 +1001,20 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 				Name:        t.Name,
 				Description: t.Description,
 			}
+
+			// the upstream API requires a non-empty namespace description
+			if ns.Description == "" {
+				ns.Description = "Tools in the " + t.Name + " namespace."
+			}
+
 			for _, inner := range t.Tools {
-				if inner.Kind == provider.ToolKindCustom || inner.Name == "" {
+				if inner.Name == "" {
+					continue
+				}
+				if inner.Kind == provider.ToolKindCustom {
+					ns.Tools = append(ns.Tools, responses.NamespaceToolToolUnionParam{
+						OfCustom: customToolParam(inner),
+					})
 					continue
 				}
 				fn := responses.NamespaceToolToolFunctionParam{
@@ -1035,24 +1047,8 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 		}
 
 		if t.Kind == provider.ToolKindCustom {
-			custom := &responses.CustomToolParam{
-				Name: t.Name,
-			}
-
-			if t.Description != "" {
-				custom.Description = openai.String(t.Description)
-			}
-
-			if t.Format != nil && t.Format.Type == "grammar" && t.Format.Definition != "" {
-				custom.Format = shared.CustomToolInputFormatParamOfGrammar(t.Format.Definition, t.Format.Syntax)
-			}
-
-			if t.Deferred != nil && *t.Deferred {
-				custom.DeferLoading = openai.Bool(true)
-			}
-
 			result = append(result, responses.ToolUnionParam{
-				OfCustom: custom,
+				OfCustom: customToolParam(t),
 			})
 			continue
 		}
@@ -1081,6 +1077,26 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 	}
 
 	return result, nil
+}
+
+func customToolParam(t provider.Tool) *responses.CustomToolParam {
+	custom := &responses.CustomToolParam{
+		Name: t.Name,
+	}
+
+	if t.Description != "" {
+		custom.Description = openai.String(t.Description)
+	}
+
+	if t.Format != nil && t.Format.Type == "grammar" && t.Format.Definition != "" {
+		custom.Format = shared.CustomToolInputFormatParamOfGrammar(t.Format.Definition, t.Format.Syntax)
+	}
+
+	if t.Deferred != nil && *t.Deferred {
+		custom.DeferLoading = openai.Bool(true)
+	}
+
+	return custom
 }
 
 func applyPatchOperationUnion(op texteditor.Operation) responses.ResponseInputItemApplyPatchCallOperationUnionParam {
