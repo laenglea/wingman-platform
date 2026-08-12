@@ -65,7 +65,7 @@ func TestResponderTools_NamespaceCustomChild(t *testing.T) {
 		t.Fatalf("exec child: %+v", exec)
 	}
 	format := exec["format"].(map[string]any)
-	if format["type"] != "grammar" || format["syntax"] != "lark" {
+	if format["type"] != "grammar" || format["syntax"] != "lark" || format["definition"] != "start: SOURCE\nSOURCE: /[\\s\\S]+/" {
 		t.Fatalf("exec format: %+v", format)
 	}
 

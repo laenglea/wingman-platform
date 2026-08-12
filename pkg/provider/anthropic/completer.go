@@ -468,7 +468,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		// Claude rejects a thinking-enabled request whose last assistant
 		// message has tool calls but no signed thinking block (e.g. after
 		// signatures were stripped for cross-provider portability).
-		if req.Thinking.OfAdaptive != nil && missingThinkingReplay(input) {
+		if req.Thinking.OfAdaptive != nil && provider.LastAssistantToolCallIsUnsigned(input) {
 			req.Thinking = disabledThinking(c.model)
 		}
 	}
@@ -583,7 +583,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 						}
 
 						result := &anthropic.BetaToolResultBlockParam{
-							ToolUseID: c.ToolResult.ID,
+							ToolUseID: sanitizeToolID(c.ToolResult.ID),
 							Content: []anthropic.BetaToolResultBlockParamContentUnion{
 								{OfText: &anthropic.BetaTextBlockParam{Text: string(c.ToolResult.Payload)}},
 							},
@@ -648,7 +648,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 					}
 
 					result := &anthropic.BetaToolResultBlockParam{
-						ToolUseID: c.ToolResult.ID,
+						ToolUseID: sanitizeToolID(c.ToolResult.ID),
 						Content:   parts,
 					}
 					if c.ToolResult.IsError {
@@ -716,7 +716,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 					blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
 						OfToolUse: &anthropic.BetaToolUseBlockParam{
-							ID:    c.ToolCall.ID,
+							ID:    sanitizeToolID(c.ToolCall.ID),
 							Name:  provider.FlattenToolName(*c.ToolCall),
 							Input: input,
 						},

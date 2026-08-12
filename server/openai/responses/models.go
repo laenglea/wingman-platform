@@ -358,8 +358,6 @@ type InputItem struct {
 }
 
 // InputAdditionalTools makes tools available from this point in the input.
-// Codex Responses Lite sends this as the first input item instead of using the
-// request-level tools field.
 type InputAdditionalTools struct {
 	ID    string      `json:"id,omitempty"`
 	Role  MessageRole `json:"role"`
@@ -986,23 +984,7 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 		}
 	case ResponseOutputTypeFunctionCall:
 		if r.FunctionCallOutputItem != nil {
-			return json.Marshal(struct {
-				Type      ResponseOutputType `json:"type"`
-				ID        string             `json:"id"`
-				Status    string             `json:"status"`
-				Name      string             `json:"name"`
-				Namespace string             `json:"namespace,omitempty"`
-				CallID    string             `json:"call_id"`
-				Arguments string             `json:"arguments"`
-			}{
-				Type:      r.Type,
-				ID:        r.FunctionCallOutputItem.ID,
-				Status:    r.FunctionCallOutputItem.Status,
-				Name:      r.FunctionCallOutputItem.Name,
-				Namespace: r.FunctionCallOutputItem.Namespace,
-				CallID:    r.FunctionCallOutputItem.CallID,
-				Arguments: r.FunctionCallOutputItem.Arguments,
-			})
+			return json.Marshal(r.FunctionCallOutputItem)
 		}
 	case ResponseOutputTypeShellCall, ResponseOutputTypeLocalShellCall:
 		if r.ShellCallItem != nil {

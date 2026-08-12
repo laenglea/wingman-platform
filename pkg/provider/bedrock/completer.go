@@ -114,7 +114,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			InferenceConfig: config,
 		}
 
-		if fields, thinking := c.converseAdditionalFields(options); len(fields) > 0 {
+		if fields, thinking := c.converseAdditionalFields(messages, options); len(fields) > 0 {
 			if thinking {
 				config.Temperature = nil
 			}
@@ -514,7 +514,7 @@ func convertError(err error) error {
 // converseAdditionalFields builds the Anthropic request fields Converse has
 // no native mapping for. The second result reports whether adaptive thinking
 // is enabled — temperature must be cleared in that case.
-func (c *Completer) converseAdditionalFields(options *provider.CompleteOptions) (map[string]any, bool) {
+func (c *Completer) converseAdditionalFields(messages []provider.Message, options *provider.CompleteOptions) (map[string]any, bool) {
 	if matchesModel(c.model, LegacyModels) {
 		return nil, false
 	}
@@ -528,6 +528,14 @@ func (c *Completer) converseAdditionalFields(options *provider.CompleteOptions) 
 
 	enable := !forced && reasoning != nil && reasoning.Type == provider.ReasoningTypeAdaptive
 	disable := forced || (reasoning != nil && reasoning.Type == provider.ReasoningTypeDisabled)
+
+	// Claude rejects a thinking-enabled request whose last assistant
+	// message has tool calls but no signed thinking block (e.g. after
+	// signatures were stripped for cross-provider portability).
+	if enable && provider.LastAssistantToolCallIsUnsigned(messages) {
+		enable = false
+		disable = true
+	}
 
 	fields := map[string]any{}
 
@@ -797,12 +805,15 @@ func convertUserContent(m provider.Message) ([]types.ContentBlock, error) {
 	return content, nil
 }
 
+// Bedrock rejects assistant turns where a text block sits between a toolUse
+// block and its toolResult, so blocks are grouped reasoning -> text -> toolUse
+// (stable within each group).
 func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
-	var content []types.ContentBlock
+	var reasoning, texts, calls []types.ContentBlock
 
 	for _, c := range m.Content {
 		if text := strings.TrimRight(c.Text, " \t\n\r"); text != "" {
-			content = append(content, &types.ContentBlockMemberText{Value: text})
+			texts = append(texts, &types.ContentBlockMemberText{Value: text})
 		}
 
 		if c.Reasoning != nil && c.Reasoning.Signature != "" {
@@ -813,13 +824,13 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 					return nil, err
 				}
 
-				content = append(content, &types.ContentBlockMemberReasoningContent{
+				reasoning = append(reasoning, &types.ContentBlockMemberReasoningContent{
 					Value: &types.ReasoningContentBlockMemberRedactedContent{
 						Value: data,
 					},
 				})
 			} else {
-				content = append(content, &types.ContentBlockMemberReasoningContent{
+				reasoning = append(reasoning, &types.ContentBlockMemberReasoningContent{
 					Value: &types.ReasoningContentBlockMemberReasoningText{
 						Value: types.ReasoningTextBlock{
 							Text:      aws.String(c.Reasoning.Text),
@@ -837,7 +848,7 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 				data = map[string]any{}
 			}
 
-			content = append(content, &types.ContentBlockMemberToolUse{
+			calls = append(calls, &types.ContentBlockMemberToolUse{
 				Value: types.ToolUseBlock{
 					ToolUseId: aws.String(c.ToolCall.ID),
 
@@ -847,6 +858,11 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 			})
 		}
 	}
+
+	content := make([]types.ContentBlock, 0, len(reasoning)+len(texts)+len(calls))
+	content = append(content, reasoning...)
+	content = append(content, texts...)
+	content = append(content, calls...)
 
 	return content, nil
 }

@@ -11,6 +11,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/toolid"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/computeruse"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
@@ -550,13 +551,7 @@ func generateCallID() string {
 }
 
 func StripToolIDSignature(s string) string {
-	id, name, signature := parseToolID(s)
-
-	if signature == nil {
-		return s
-	}
-
-	return id + "::" + name
+	return toolid.StripSignature(s)
 }
 
 // dummyThoughtSignature bypasses thought-signature validation for tool calls

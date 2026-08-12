@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/adrianliechti/wingman/pkg/policy"
@@ -114,6 +115,14 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		if options.ReasoningOptions.Effort != "" {
 			options.ReasoningOptions.Type = provider.ReasoningTypeAdaptive
 		}
+	}
+
+	if req.Reasoning != nil && req.Reasoning.Context != nil {
+		if options.ReasoningOptions == nil {
+			options.ReasoningOptions = &provider.ReasoningOptions{}
+		}
+
+		options.ReasoningOptions.Context = provider.ReasoningContext(*req.Reasoning.Context)
 	}
 
 	// Handle structured output configuration
@@ -267,8 +276,8 @@ func responseDefaults(resp *Response, req ResponsesRequest) {
 		resp.Reasoning.Effort = &effort
 	}
 
-	if resp.Reasoning.Context == nil {
-		resp.Reasoning.Context = new("current_turn")
+	if resp.Reasoning.Context == nil || *resp.Reasoning.Context == "auto" {
+		resp.Reasoning.Context = new(effectiveReasoningContext(resp.Model))
 	}
 
 	if req.Text != nil {
@@ -332,6 +341,17 @@ func responseDefaults(resp *Response, req ResponsesRequest) {
 	}
 }
 
+// effectiveReasoningContext returns the reasoning context mode a model uses
+// when the request omits it or leaves it on "auto": the gpt-5.6 family
+// defaults to "all_turns", earlier models to "current_turn".
+func effectiveReasoningContext(model string) string {
+	if strings.Contains(strings.ToLower(model), "gpt-5.6") {
+		return "all_turns"
+	}
+
+	return "current_turn"
+}
+
 // reasoningRequested returns true if the request explicitly asks for reasoning output.
 func reasoningRequested(req ResponsesRequest) bool {
 	if slices.Contains(req.Include, "reasoning.encrypted_content") {
@@ -362,6 +382,18 @@ type responseOutputOptions struct {
 
 func (o responseOutputOptions) kindOf(name string) provider.ToolKind {
 	return outputKind(name, o.Tools)
+}
+
+func functionCallItem(call provider.ToolCall, status string) *FunctionCallOutputItem {
+	return &FunctionCallOutputItem{
+		ID:        "fc_" + call.ID,
+		Type:      "function_call",
+		Status:    status,
+		Name:      call.Name,
+		Namespace: call.Namespace,
+		CallID:    call.ID,
+		Arguments: call.Arguments,
+	}
 }
 
 func responseOutputs(message *provider.Message, messageID, status string, opts responseOutputOptions) []ResponseOutput {
@@ -498,16 +530,8 @@ func responseOutputs(message *provider.Message, messageID, status string, opts r
 
 			default:
 				output = append(output, ResponseOutput{
-					Type: ResponseOutputTypeFunctionCall,
-					FunctionCallOutputItem: &FunctionCallOutputItem{
-						ID:        "fc_" + call.ID,
-						Type:      "function_call",
-						Status:    status,
-						Name:      call.Name,
-						Namespace: call.Namespace,
-						CallID:    call.ID,
-						Arguments: call.Arguments,
-					},
+					Type:                   ResponseOutputTypeFunctionCall,
+					FunctionCallOutputItem: functionCallItem(call, status),
 				})
 			}
 		}
@@ -824,19 +848,16 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				})
 
 			default:
+				call := provider.ToolCall{
+					ID:        event.ToolCallID,
+					Name:      event.ToolCallName,
+					Namespace: event.ToolCallNamespace,
+				}
 				return writeEvent(w, "response.output_item.added", FunctionCallOutputItemAddedEvent{
 					Type:           "response.output_item.added",
 					SequenceNumber: nextSeq(),
 					OutputIndex:    event.OutputIndex,
-					Item: &FunctionCallOutputItem{
-						ID:        "fc_" + event.ToolCallID,
-						Type:      "function_call",
-						Status:    "in_progress",
-						CallID:    event.ToolCallID,
-						Name:      event.ToolCallName,
-						Namespace: event.ToolCallNamespace,
-						Arguments: "",
-					},
+					Item:           functionCallItem(call, "in_progress"),
 				})
 			}
 
@@ -957,15 +978,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 					Type:           "response.output_item.done",
 					SequenceNumber: nextSeq(),
 					OutputIndex:    event.OutputIndex,
-					Item: &FunctionCallOutputItem{
-						ID:        "fc_" + event.ToolCallID,
-						Type:      "function_call",
-						Status:    status,
-						CallID:    event.ToolCallID,
-						Name:      event.ToolCallName,
-						Namespace: event.ToolCallNamespace,
-						Arguments: event.Arguments,
-					},
+					Item:           functionCallItem(call, status),
 				})
 			}
 

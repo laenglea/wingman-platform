@@ -5,14 +5,16 @@ import (
 	"iter"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/toolid"
 )
 
 var _ provider.Completer = (*Completer)(nil)
 
-// Completer strips provider-bound reasoning and compaction signatures
-// (OpenAI encrypted content, Anthropic thinking signatures) so histories
-// stay portable across providers or projects that cannot verify each
-// other's opaque state.
+// Completer strips provider-bound reasoning state (OpenAI encrypted content,
+// Anthropic thinking signatures, and Gemini signatures embedded in tool IDs)
+// so histories stay portable across providers or projects that cannot verify
+// each other's opaque state. Compaction is disabled because its history cannot
+// be resumed without the opaque continuation blob.
 type Completer struct {
 	completer provider.Completer
 }
@@ -89,6 +91,18 @@ func stripContents(contents []provider.Content) []provider.Content {
 			c.Compaction = &compaction
 		}
 
+		if c.ToolCall != nil {
+			call := *c.ToolCall
+			call.ID = toolid.StripSignature(call.ID)
+			c.ToolCall = &call
+		}
+
+		if c.ToolResult != nil {
+			result := *c.ToolResult
+			result.ID = toolid.StripSignature(result.ID)
+			c.ToolResult = &result
+		}
+
 		result = append(result, c)
 	}
 
@@ -96,15 +110,26 @@ func stripContents(contents []provider.Content) []provider.Content {
 }
 
 func stripOptions(options *provider.CompleteOptions) *provider.CompleteOptions {
-	if options == nil || options.ReasoningOptions == nil || !options.ReasoningOptions.IncludeSignature {
+	if options == nil {
 		return options
 	}
 
-	reasoning := *options.ReasoningOptions
-	reasoning.IncludeSignature = false
+	includeSignature := options.ReasoningOptions != nil && options.ReasoningOptions.IncludeSignature
+	if !includeSignature && options.CompactionOptions == nil {
+		return options
+	}
 
 	copy := *options
-	copy.ReasoningOptions = &reasoning
+
+	if includeSignature {
+		reasoning := *options.ReasoningOptions
+		reasoning.IncludeSignature = false
+		copy.ReasoningOptions = &reasoning
+	}
+
+	// Without the opaque compaction blob, the next turn cannot reconstruct the
+	// compacted history. Prevent creating a continuation that would lose it.
+	copy.CompactionOptions = nil
 
 	return &copy
 }

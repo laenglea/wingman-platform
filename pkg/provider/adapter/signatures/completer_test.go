@@ -30,6 +30,7 @@ func TestCompleterStripsSignatures(t *testing.T) {
 				Role: provider.MessageRoleAssistant,
 				Content: []provider.Content{
 					provider.ReasoningContent(provider.Reasoning{ID: "rs_2", Summary: "thinking", Signature: "fresh-blob"}),
+					provider.ToolCallContent(provider.ToolCall{ID: "call_2::lookup::ZnJlc2gtc2ln", Name: "lookup"}),
 					provider.TextContent("answer"),
 				},
 			},
@@ -46,13 +47,21 @@ func TestCompleterStripsSignatures(t *testing.T) {
 				provider.ReasoningContent(provider.Reasoning{ID: "rs_t", Text: "kept thought", Signature: "signed"}),
 				provider.CompactionContent(provider.Compaction{ID: "cp_1", Signature: "compaction-blob"}),
 				provider.CompactionContent(provider.Compaction{ID: "cp_2", Content: "summary text", Signature: "signed"}),
+				provider.ToolCallContent(provider.ToolCall{ID: "call_1::search::c2ln", Name: "search"}),
 				provider.TextContent("hello"),
+			},
+		},
+		{
+			Role: provider.MessageRoleUser,
+			Content: []provider.Content{
+				provider.ToolResultContent(provider.ToolResult{ID: "call_1::search::c2ln"}),
 			},
 		},
 	}
 
 	options := &provider.CompleteOptions{
-		ReasoningOptions: &provider.ReasoningOptions{IncludeSignature: true, IncludeSummary: true},
+		ReasoningOptions:  &provider.ReasoningOptions{IncludeSignature: true, IncludeSummary: true},
+		CompactionOptions: &provider.CompactionOptions{Threshold: 1000},
 	}
 
 	var got *provider.Completion
@@ -64,7 +73,7 @@ func TestCompleterStripsSignatures(t *testing.T) {
 	}
 
 	assistant := inner.messages[1]
-	if len(assistant.Content) != 3 {
+	if len(assistant.Content) != 4 {
 		t.Fatalf("assistant contents: %+v", assistant.Content)
 	}
 	if r := assistant.Content[0].Reasoning; r == nil || r.Signature != "" || r.Text != "kept thought" {
@@ -73,8 +82,14 @@ func TestCompleterStripsSignatures(t *testing.T) {
 	if c := assistant.Content[1].Compaction; c == nil || c.Signature != "" || c.Content != "summary text" {
 		t.Fatalf("compaction content: %+v", assistant.Content[1].Compaction)
 	}
-	if assistant.Content[2].Text != "hello" {
-		t.Fatalf("text content: %+v", assistant.Content[2])
+	if call := assistant.Content[2].ToolCall; call == nil || call.ID != "call_1::search" {
+		t.Fatalf("tool call: %+v", call)
+	}
+	if assistant.Content[3].Text != "hello" {
+		t.Fatalf("text content: %+v", assistant.Content[3])
+	}
+	if result := inner.messages[2].Content[0].ToolResult; result == nil || result.ID != "call_1::search" {
+		t.Fatalf("tool result: %+v", result)
 	}
 
 	if inner.options.ReasoningOptions.IncludeSignature {
@@ -83,17 +98,46 @@ func TestCompleterStripsSignatures(t *testing.T) {
 	if !inner.options.ReasoningOptions.IncludeSummary {
 		t.Fatal("IncludeSummary must be preserved")
 	}
+	if inner.options.CompactionOptions != nil {
+		t.Fatal("compaction must be disabled when its continuation signature is stripped")
+	}
 	if !options.ReasoningOptions.IncludeSignature {
 		t.Fatal("caller options must not be mutated")
+	}
+	if options.CompactionOptions == nil {
+		t.Fatal("caller compaction options must not be mutated")
 	}
 	if messages[1].Content[0].Reasoning.Signature != "foreign-blob" {
 		t.Fatal("caller messages must not be mutated")
 	}
+	if messages[1].Content[5].ToolCall.ID != "call_1::search::c2ln" {
+		t.Fatal("caller tool id must not be mutated")
+	}
 
-	if len(got.Message.Content) != 2 {
+	if len(got.Message.Content) != 3 {
 		t.Fatalf("reply contents: %+v", got.Message.Content)
 	}
 	if r := got.Message.Content[0].Reasoning; r == nil || r.Signature != "" || r.Summary != "thinking" {
 		t.Fatalf("reply reasoning: %+v", got.Message.Content[0].Reasoning)
+	}
+	if call := got.Message.Content[1].ToolCall; call == nil || call.ID != "call_2::lookup" {
+		t.Fatalf("reply tool call: %+v", call)
+	}
+}
+
+func TestStripOptionsDisablesCompactionWithoutReasoning(t *testing.T) {
+	options := &provider.CompleteOptions{
+		CompactionOptions: &provider.CompactionOptions{Threshold: 1000},
+	}
+
+	got := stripOptions(options)
+	if got == options {
+		t.Fatal("options must be copied before modification")
+	}
+	if got.CompactionOptions != nil {
+		t.Fatal("compaction must be disabled")
+	}
+	if options.CompactionOptions == nil {
+		t.Fatal("caller options must not be mutated")
 	}
 }

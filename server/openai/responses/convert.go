@@ -460,9 +460,9 @@ func requestTools(tools []Tool, items []InputItem) []Tool {
 			continue
 		}
 
-		// The provider abstraction has a request-wide tool list. Codex's
-		// Responses Lite request puts additional_tools first, so promoting its
-		// tools here preserves the effective availability for that request.
+		// The provider abstraction has a request-wide tool list. Promoting an
+		// additional_tools input item's tools preserves their effective
+		// availability for the request.
 		// Hosted tools such as web_search cannot run on BYOK providers like
 		// Azure, so omit those while retaining every portable tool Wingman can
 		// forward.

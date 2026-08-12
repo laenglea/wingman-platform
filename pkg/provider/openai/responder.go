@@ -347,6 +347,10 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 	if options.ReasoningOptions != nil && !isLegacyModel(r.model) {
 		reasoning := options.ReasoningOptions
 
+		if reasoning.Context != "" {
+			req.Reasoning.Context = shared.ReasoningContext(reasoning.Context)
+		}
+
 		if reasoning.IncludeSignature {
 			req.Include = append(req.Include, responses.ResponseIncludableReasoningEncryptedContent)
 		}
@@ -635,8 +639,18 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 			}
 
 		case provider.MessageRoleAssistant:
-			calls := []responses.ResponseInputItemUnionParam{}
 			message := &responses.ResponseOutputMessageParam{}
+
+			// The Responses API pairs each reasoning item with the item that
+			// immediately follows it, so items must replay in encounter order.
+			flushMessage := func() {
+				if len(message.Content) > 0 {
+					result = append(result, responses.ResponseInputItemUnionParam{
+						OfOutputMessage: message,
+					})
+					message = &responses.ResponseOutputMessageParam{}
+				}
+			}
 
 			for _, c := range m.Content {
 				if c.Text != "" {
@@ -678,6 +692,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 						reasoning.Summary = []responses.ResponseReasoningItemSummaryParam{}
 					}
 
+					flushMessage()
 					result = append(result, responses.ResponseInputItemUnionParam{
 						OfReasoning: reasoning,
 					})
@@ -692,17 +707,20 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 						compaction.ID = openai.String(c.Compaction.ID)
 					}
 
+					flushMessage()
 					result = append(result, responses.ResponseInputItemUnionParam{
 						OfCompaction: compaction,
 					})
 				}
 
 				if c.ToolCall != nil {
+					flushMessage()
+
 					switch c.ToolCall.Kind {
 					case provider.ToolKindTextEditor:
 						if c.ToolCall.Name == texteditor.NameTextEditor || !r.isOpenAI() {
 							// emulated function tool — replay as function_call
-							calls = append(calls, responses.ResponseInputItemUnionParam{
+							result = append(result, responses.ResponseInputItemUnionParam{
 								OfFunctionCall: &responses.ResponseFunctionToolCallParam{
 									CallID:    c.ToolCall.ID,
 									Name:      c.ToolCall.Name,
@@ -712,7 +730,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 							continue
 						}
 
-						calls = append(calls, responses.ResponseInputItemUnionParam{
+						result = append(result, responses.ResponseInputItemUnionParam{
 							OfApplyPatchCall: &responses.ResponseInputItemApplyPatchCallParam{
 								CallID:    c.ToolCall.ID,
 								Status:    "completed",
@@ -723,7 +741,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 					case provider.ToolKindComputer:
 						if !r.isOpenAI() {
 							// emulated function tool — replay as function_call
-							calls = append(calls, responses.ResponseInputItemUnionParam{
+							result = append(result, responses.ResponseInputItemUnionParam{
 								OfFunctionCall: &responses.ResponseFunctionToolCallParam{
 									CallID:    c.ToolCall.ID,
 									Name:      c.ToolCall.Name,
@@ -734,16 +752,16 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 						}
 
 						item := computerCallParam(*c.ToolCall)
-						calls = append(calls, responses.ResponseInputItemUnionParam{
+						result = append(result, responses.ResponseInputItemUnionParam{
 							OfComputerCall: &item,
 						})
 
 					case provider.ToolKindShell:
 						if item, ok := shellCallParam(*c.ToolCall, r.isOpenAI()); ok {
-							calls = append(calls, item)
+							result = append(result, item)
 						} else {
 							// emulated function tool — replay as function_call
-							calls = append(calls, responses.ResponseInputItemUnionParam{
+							result = append(result, responses.ResponseInputItemUnionParam{
 								OfFunctionCall: &responses.ResponseFunctionToolCallParam{
 									CallID:    c.ToolCall.ID,
 									Name:      c.ToolCall.Name,
@@ -753,7 +771,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 						}
 
 					case provider.ToolKindCustom:
-						calls = append(calls, responses.ResponseInputItemUnionParam{
+						result = append(result, responses.ResponseInputItemUnionParam{
 							OfCustomToolCall: &responses.ResponseCustomToolCallParam{
 								CallID: c.ToolCall.ID,
 								Name:   c.ToolCall.Name,
@@ -779,7 +797,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 								ts.Arguments = c.ToolCall.Arguments
 							}
 						}
-						calls = append(calls, responses.ResponseInputItemUnionParam{
+						result = append(result, responses.ResponseInputItemUnionParam{
 							OfToolSearchCall: ts,
 						})
 
@@ -792,22 +810,14 @@ func (r *Responder) convertResponsesInput(messages []provider.Message) (response
 						if c.ToolCall.Namespace != "" {
 							fc.Namespace = openai.String(c.ToolCall.Namespace)
 						}
-						calls = append(calls, responses.ResponseInputItemUnionParam{
+						result = append(result, responses.ResponseInputItemUnionParam{
 							OfFunctionCall: fc,
 						})
 					}
 				}
 			}
 
-			if len(message.Content) > 0 {
-				result = append(result, responses.ResponseInputItemUnionParam{
-					OfOutputMessage: message,
-				})
-			}
-
-			if len(calls) > 0 {
-				result = append(result, calls...)
-			}
+			flushMessage()
 		}
 	}
 
