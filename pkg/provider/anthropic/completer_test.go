@@ -322,6 +322,75 @@ func TestConvertRequest_ForcedToolDisablesThinkingAndCapsEffort(t *testing.T) {
 	}
 }
 
+// TestConvertRequest_UnsignedToolHistoryDisablesThinking verifies adaptive
+// thinking is turned off when the last assistant message carries tool calls
+// without a signed thinking block (e.g. signatures stripped for portability):
+// Claude rejects such requests with "Expected thinking or redacted_thinking,
+// but found tool_use".
+func TestConvertRequest_UnsignedToolHistoryDisablesThinking(t *testing.T) {
+	completer, _ := NewCompleter("http://localhost", "claude-opus-5")
+
+	options := &provider.CompleteOptions{
+		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive},
+	}
+
+	stripped := []provider.Message{
+		provider.UserMessage("list files"),
+		{
+			Role: provider.MessageRoleAssistant,
+			Content: []provider.Content{
+				provider.ReasoningContent(provider.Reasoning{Text: "unsigned thought"}),
+				provider.ToolCallContent(provider.ToolCall{ID: "call_1", Name: "ls", Arguments: "{}"}),
+			},
+		},
+		{
+			Role: provider.MessageRoleUser,
+			Content: []provider.Content{
+				provider.ToolResultContent(provider.ToolResult{ID: "call_1", Parts: []provider.Part{{Text: "main.go"}}}),
+			},
+		},
+	}
+
+	body := requestBody(t, completer, stripped, options)
+
+	thinking, _ := body["thinking"].(map[string]any)
+	if thinking["type"] != "disabled" {
+		t.Fatalf("thinking: got %v, want disabled", body["thinking"])
+	}
+
+	signed := append([]provider.Message{}, stripped...)
+	signed[1] = provider.Message{
+		Role: provider.MessageRoleAssistant,
+		Content: []provider.Content{
+			provider.ReasoningContent(provider.Reasoning{Text: "thought", Signature: "SIG"}),
+			provider.ToolCallContent(provider.ToolCall{ID: "call_1", Name: "ls", Arguments: "{}"}),
+		},
+	}
+
+	body = requestBody(t, completer, signed, options)
+
+	thinking, _ = body["thinking"].(map[string]any)
+	if thinking["type"] != "adaptive" {
+		t.Fatalf("signed history thinking: got %v, want adaptive", body["thinking"])
+	}
+
+	noTools := []provider.Message{
+		provider.UserMessage("hi"),
+		{
+			Role:    provider.MessageRoleAssistant,
+			Content: []provider.Content{provider.TextContent("hello")},
+		},
+		provider.UserMessage("continue"),
+	}
+
+	body = requestBody(t, completer, noTools, options)
+
+	thinking, _ = body["thinking"].(map[string]any)
+	if thinking["type"] != "adaptive" {
+		t.Fatalf("text-only history thinking: got %v, want adaptive", body["thinking"])
+	}
+}
+
 // TestConvertRequest_TemperatureDroppedForNoSamplingModel verifies
 // temperature is never forwarded to models that reject sampling parameters
 // outright (Sonnet 5, Opus 4.7/4.8, Fable 5), even when thinking is left at

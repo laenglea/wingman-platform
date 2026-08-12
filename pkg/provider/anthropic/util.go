@@ -150,6 +150,30 @@ func matchesModel(model string, patterns []string) bool {
 // thinking off. Always-thinking models reject `{type: "disabled"}` outright,
 // so for those (and legacy models, which don't take a thinking config at
 // all) the field is left omitted instead.
+func missingThinkingReplay(messages []provider.Message) bool {
+	var lastAssistantHasToolCall bool
+
+	for _, m := range messages {
+		if m.Role != provider.MessageRoleAssistant {
+			continue
+		}
+
+		lastAssistantHasToolCall = false
+
+		for _, c := range m.Content {
+			if c.Reasoning != nil && c.Reasoning.Signature != "" {
+				return false
+			}
+
+			if c.ToolCall != nil {
+				lastAssistantHasToolCall = true
+			}
+		}
+	}
+
+	return lastAssistantHasToolCall
+}
+
 func disabledThinking(model string) anthropic.BetaThinkingConfigParamUnion {
 	if matchesModel(model, LegacyModels) || matchesModel(model, AlwaysThinkingModels) {
 		return anthropic.BetaThinkingConfigParamUnion{}

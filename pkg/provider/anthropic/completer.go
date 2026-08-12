@@ -464,6 +464,13 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				req.OutputConfig.Effort = effort
 			}
 		}
+
+		// Claude rejects a thinking-enabled request whose last assistant
+		// message has tool calls but no signed thinking block (e.g. after
+		// signatures were stripped for cross-provider portability).
+		if req.Thinking.OfAdaptive != nil && missingThinkingReplay(input) {
+			req.Thinking = disabledThinking(c.model)
+		}
 	}
 
 	var system []anthropic.BetaTextBlockParam
