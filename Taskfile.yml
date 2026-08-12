@@ -14,7 +14,7 @@ tasks:
     dotenv: ['.env' ]
     
     cmds:
-      - go run cmd/server/main.go
+      - go run cmd/server/main.go --port 4242
 
   client:
     cmds:
