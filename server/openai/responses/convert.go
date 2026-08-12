@@ -95,7 +95,7 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 
 			role := toMessageRole(m.Role)
 			if role == "" {
-				return nil, &shared.InvalidValueError{
+				return nil, &shared.Error{
 					Param:   fmt.Sprintf("input[%d].role", i),
 					Message: fmt.Sprintf("Invalid value: '%s'. Supported values are: 'system', 'developer', 'user', 'assistant'.", m.Role),
 				}
@@ -503,6 +503,25 @@ func supportedToolType(toolType ToolType) bool {
 	}
 }
 
+// Wire format verified against the OpenAI Responses API (2026-08): nameless
+// function/custom/namespace tools return 400 invalid_request_error with code
+// "missing_required_parameter" and these exact params and messages.
+func missingToolName(index int) error {
+	return &shared.Error{
+		Param:   fmt.Sprintf("tools[%d].name", index),
+		Message: fmt.Sprintf("Missing required parameter: 'tools[%d].name'.", index),
+		Code:    "missing_required_parameter",
+	}
+}
+
+func missingNamespaceToolName(index, inner int) error {
+	return &shared.Error{
+		Param:   fmt.Sprintf("tools[%d].tools[%d].name", index, inner),
+		Message: fmt.Sprintf("Missing required parameter: 'tools[%d].tools[%d].name'.", index, inner),
+		Code:    "missing_required_parameter",
+	}
+}
+
 func toTools(tools []Tool) ([]provider.Tool, error) {
 	var result []provider.Tool
 
@@ -510,7 +529,7 @@ func toTools(tools []Tool) ([]provider.Tool, error) {
 		switch t.Type {
 		case ToolTypeFunction:
 			if t.Name == "" {
-				continue
+				return nil, missingToolName(i)
 			}
 			result = append(result, provider.Tool{
 				Name:        t.Name,
@@ -528,7 +547,7 @@ func toTools(tools []Tool) ([]provider.Tool, error) {
 
 		case ToolTypeCustom:
 			if t.Name == "" {
-				continue
+				return nil, missingToolName(i)
 			}
 			kind := provider.ToolKindCustom
 			if t.Name == "apply_patch" {
@@ -593,14 +612,14 @@ func toTools(tools []Tool) ([]provider.Tool, error) {
 
 		case ToolTypeNamespace:
 			if t.Name == "" {
-				continue
+				return nil, missingToolName(i)
 			}
 			var children []provider.Tool
-			for _, inner := range t.Tools {
+			for j, inner := range t.Tools {
 				switch inner.Type {
 				case ToolTypeFunction, "":
 					if inner.Name == "" {
-						continue
+						return nil, missingNamespaceToolName(i, j)
 					}
 					children = append(children, provider.Tool{
 						Name:        inner.Name,
@@ -611,7 +630,7 @@ func toTools(tools []Tool) ([]provider.Tool, error) {
 					})
 				case ToolTypeCustom:
 					if inner.Name == "" {
-						continue
+						return nil, missingNamespaceToolName(i, j)
 					}
 					custom := provider.Tool{
 						Name:        inner.Name,
@@ -646,7 +665,7 @@ func toTools(tools []Tool) ([]provider.Tool, error) {
 			continue
 
 		default:
-			return nil, &shared.InvalidValueError{
+			return nil, &shared.Error{
 				Param:   fmt.Sprintf("tools[%d].type", i),
 				Message: fmt.Sprintf("Invalid value: '%s'. Supported values are: 'function', 'custom', 'apply_patch', 'computer', 'shell', 'local_shell', 'namespace', 'tool_search'.", t.Type),
 			}

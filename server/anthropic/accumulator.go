@@ -291,7 +291,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			}
 		}
 
-		if s.ThinkingEnabled && content.Reasoning != nil && !content.Reasoning.Redacted && (content.Reasoning.Text != "" || content.Reasoning.Signature != "") {
+		if s.ThinkingEnabled && content.Reasoning != nil && !content.Reasoning.Redacted && (content.Reasoning.Text != "" || content.Reasoning.Summary != "" || content.Reasoning.Signature != "") {
 			reasoning := content.Reasoning
 
 			// A signature ends a thinking block; a new ID starts the next item
@@ -323,13 +323,18 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 				s.thinkingID = reasoning.ID
 			}
 
-			if reasoning.Text != "" {
+			// OpenAI-backed reasoning arrives as Summary deltas with empty Text
+			if thinking := reasoning.Text; thinking != "" || reasoning.Summary != "" {
+				if thinking == "" {
+					thinking = reasoning.Summary
+				}
+
 				if err := s.emitEvent(StreamEvent{
 					Type:  StreamEventContentBlockDelta,
 					Index: s.thinkingIndex,
 					Delta: &Delta{
 						Type:     "thinking_delta",
-						Thinking: reasoning.Text,
+						Thinking: thinking,
 					},
 				}); err != nil {
 					return err

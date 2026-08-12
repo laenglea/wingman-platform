@@ -364,7 +364,7 @@ func TestConvert_CachePointPlacementForClaude(t *testing.T) {
 		t.Errorf("expected trailing cachePoint on last user message, got %T", last[len(last)-1])
 	}
 
-	tc := c.convertToolConfig([]provider.Tool{{Name: "get_weather", Description: "x", Parameters: testSchema}}, nil)
+	tc, _ := c.convertToolConfig([]provider.Tool{{Name: "get_weather", Description: "x", Parameters: testSchema}}, nil)
 	if tc == nil || len(tc.Tools) == 0 {
 		t.Fatal("expected tool config")
 	}
@@ -396,7 +396,7 @@ func TestConvert_NoCachePointForNonClaude(t *testing.T) {
 		}
 	}
 
-	if tc := c.convertToolConfig([]provider.Tool{{Name: "get_weather", Description: "x", Parameters: testSchema}}, nil); tc != nil {
+	if tc, _ := c.convertToolConfig([]provider.Tool{{Name: "get_weather", Description: "x", Parameters: testSchema}}, nil); tc != nil {
 		for _, tl := range tc.Tools {
 			if _, ok := tl.(*types.ToolMemberCachePoint); ok {
 				t.Error("non-Claude model must not get a tool cachePoint")

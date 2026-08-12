@@ -57,11 +57,18 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			return
 		}
 
-		config := convertGenerateConfig(convertInstruction(messages), options)
+		config, err := convertGenerateConfig(convertInstruction(messages), options)
+
+		if err != nil {
+			yield(nil, err)
+			return
+		}
 
 		toolAliases := provider.ToolAliases(options.Tools)
 
 		iter := client.Models.GenerateContentStream(ctx, c.model, contents, config)
+
+		var sawToolCall bool
 
 		for resp, err := range iter {
 			if err != nil {
@@ -83,6 +90,14 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				candidate := resp.Candidates[0]
 
 				delta.Message.Content = toContent(candidate.Content, toolAliases)
+
+				for _, c := range delta.Message.Content {
+					if c.ToolCall != nil {
+						sawToolCall = true
+					}
+				}
+
+				applyFinishReason(delta, candidate.FinishReason, sawToolCall)
 			}
 
 			if !yield(delta, nil) {
@@ -116,7 +131,7 @@ func convertInstruction(messages []provider.Message) *genai.Content {
 	}
 }
 
-func convertGenerateConfig(instruction *genai.Content, options *provider.CompleteOptions) *genai.GenerateContentConfig {
+func convertGenerateConfig(instruction *genai.Content, options *provider.CompleteOptions) (*genai.GenerateContentConfig, error) {
 	config := &genai.GenerateContentConfig{
 		SystemInstruction: instruction,
 	}
@@ -148,7 +163,13 @@ func convertGenerateConfig(instruction *genai.Content, options *provider.Complet
 	flatTools := provider.FlattenTools(options.Tools)
 
 	if len(flatTools) > 0 {
-		config.Tools = convertTools(flatTools)
+		tools, err := convertTools(flatTools)
+
+		if err != nil {
+			return nil, err
+		}
+
+		config.Tools = tools
 
 		fcc := &genai.FunctionCallingConfig{}
 
@@ -197,7 +218,7 @@ func convertGenerateConfig(instruction *genai.Content, options *provider.Complet
 		config.ResponseJsonSchema = options.Schema.Properties
 	}
 
-	return config
+	return config, nil
 }
 
 func convertContent(message provider.Message, toolCallNames map[string]string) (*genai.Content, error) {
@@ -404,7 +425,7 @@ func convertMessages(messages []provider.Message) ([]*genai.Content, error) {
 	return result, nil
 }
 
-func convertTools(tools []provider.Tool) []*genai.Tool {
+func convertTools(tools []provider.Tool) ([]*genai.Tool, error) {
 	var functions []*genai.FunctionDeclaration
 
 	for _, t := range tools {
@@ -421,7 +442,7 @@ func convertTools(tools []provider.Tool) []*genai.Tool {
 		}
 
 		if t.Kind != provider.ToolKindFunction {
-			continue
+			return nil, provider.UnsupportedToolError(t)
 		}
 
 		function := &genai.FunctionDeclaration{
@@ -435,14 +456,14 @@ func convertTools(tools []provider.Tool) []*genai.Tool {
 	}
 
 	if len(functions) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	return []*genai.Tool{
 		{
 			FunctionDeclarations: functions,
 		},
-	}
+	}, nil
 }
 
 func toContent(content *genai.Content, toolAliases map[string]provider.Tool) []provider.Content {
@@ -511,6 +532,50 @@ func toContent(content *genai.Content, toolAliases map[string]provider.Tool) []p
 	}
 
 	return parts
+}
+
+// Gemini reports STOP for tool-call turns and may deliver the finish reason in
+// a later functionCall-less chunk, so tool use is derived from the streamed
+// content instead of the finish reason.
+func applyFinishReason(delta *provider.Completion, reason genai.FinishReason, sawToolCall bool) {
+	switch reason {
+	case genai.FinishReasonStop:
+		delta.StopReason = provider.StopReasonEndTurn
+
+		if sawToolCall {
+			delta.StopReason = provider.StopReasonToolUse
+		}
+
+	case genai.FinishReasonMaxTokens:
+		delta.StopReason = provider.StopReasonMaxTokens
+		delta.Status = provider.CompletionStatusIncomplete
+
+	case genai.FinishReasonSafety,
+		genai.FinishReasonRecitation,
+		genai.FinishReasonBlocklist,
+		genai.FinishReasonProhibitedContent,
+		genai.FinishReasonSPII,
+		genai.FinishReasonImageSafety,
+		genai.FinishReasonImageProhibitedContent,
+		genai.FinishReasonImageRecitation:
+		delta.StopReason = provider.StopReasonRefusal
+		delta.Status = provider.CompletionStatusRefused
+		delta.StopDetails = &provider.StopDetails{
+			Type:     "refusal",
+			Category: string(reason),
+		}
+
+	case genai.FinishReasonLanguage,
+		genai.FinishReasonMalformedFunctionCall,
+		genai.FinishReasonUnexpectedToolCall,
+		genai.FinishReasonNoImage,
+		genai.FinishReasonOther,
+		genai.FinishReasonImageOther:
+		delta.Status = provider.CompletionStatusFailed
+		delta.StopDetails = &provider.StopDetails{
+			Type: string(reason),
+		}
+	}
 }
 
 func toCompletionUsage(metadata *genai.GenerateContentResponseUsageMetadata) *provider.Usage {

@@ -146,29 +146,6 @@ func matchesModel(model string, patterns []string) bool {
 	return false
 }
 
-// Anthropic requires tool ids to match ^[a-zA-Z0-9_-]{1,128}$. Cross-provider
-// histories can carry ids like "functions.Bash:0" or Gemini signature-packed
-// "id::name::sig" composites.
-func sanitizeToolID(id string) string {
-	if index := strings.Index(id, "::"); index > 0 {
-		id = id[:index]
-	}
-
-	id = strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
-			return r
-		}
-		return '_'
-	}, id)
-
-	if len(id) > 128 {
-		id = id[:128]
-	}
-
-	return id
-}
-
 // disabledThinking returns the thinking config that explicitly turns
 // thinking off. Always-thinking models reject `{type: "disabled"}` outright,
 // so for those (and legacy models, which don't take a thinking config at

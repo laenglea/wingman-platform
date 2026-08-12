@@ -245,12 +245,10 @@ web-search-preview, and apply-patch.
 
 | Tool type | Wingman behavior |
 |---|---|
-| `function` | Supported; nameless definitions are silently dropped. |
-| `custom` | Supported; nameless definitions are silently dropped. |
 | `apply_patch` | Supported through the provider text-editor abstraction. |
 | `computer` | Supported through the provider computer abstraction. |
 | `shell`, `local_shell` | Supported through the provider shell abstraction. |
-| `namespace` | Supported for nested function/custom tools, with lossy nested validation. |
+| `namespace` | Supported for nested function/custom tools; `description` is not required (OpenAI rejects namespaces without one). |
 | `tool_search` | Supported through the provider abstraction. |
 | `web_search` | **Accepted and silently removed** before provider completion. |
 | `file_search`, `mcp`, `code_interpreter`, `programmatic_tool_calling`, `image_generation`, `computer_use_preview`, `web_search_preview` | Rejected as invalid tool types. |

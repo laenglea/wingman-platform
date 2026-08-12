@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/toolid"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/computeruse"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
@@ -582,7 +583,11 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 		toolOptions = nil
 	}
 
-	config := c.convertToolConfig(provider.FlattenTools(options.Tools), toolOptions)
+	config, err := c.convertToolConfig(provider.FlattenTools(options.Tools), toolOptions)
+
+	if err != nil {
+		return nil, err
+	}
 
 	// Schema mode: expose the schema as a tool and force its use. Anthropic
 	// models reject native Converse structured output (output_config.format),
@@ -794,7 +799,7 @@ func convertUserContent(m provider.Message) ([]types.ContentBlock, error) {
 				Value: types.ToolResultBlock{
 					Status: status,
 
-					ToolUseId: aws.String(c.ToolResult.ID),
+					ToolUseId: aws.String(toolid.Sanitize(c.ToolResult.ID, 64)),
 
 					Content: blocks,
 				},
@@ -850,7 +855,7 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 
 			calls = append(calls, &types.ContentBlockMemberToolUse{
 				Value: types.ToolUseBlock{
-					ToolUseId: aws.String(c.ToolCall.ID),
+					ToolUseId: aws.String(toolid.Sanitize(c.ToolCall.ID, 64)),
 
 					Name:  aws.String(provider.FlattenToolName(*c.ToolCall)),
 					Input: document.NewLazyDocument(data),
@@ -867,9 +872,9 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 	return content, nil
 }
 
-func (c *Completer) convertToolConfig(tools []provider.Tool, options *provider.ToolOptions) *types.ToolConfiguration {
+func (c *Completer) convertToolConfig(tools []provider.Tool, options *provider.ToolOptions) (*types.ToolConfiguration, error) {
 	if len(tools) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	result := &types.ToolConfiguration{}
@@ -888,7 +893,7 @@ func (c *Completer) convertToolConfig(tools []provider.Tool, options *provider.T
 		}
 
 		if t.Kind != provider.ToolKindFunction {
-			continue
+			return nil, provider.UnsupportedToolError(t)
 		}
 
 		tool := types.ToolSpecification{
@@ -931,7 +936,7 @@ func (c *Completer) convertToolConfig(tools []provider.Tool, options *provider.T
 	if options != nil {
 		switch options.Choice {
 		case provider.ToolChoiceNone:
-			return nil
+			return nil, nil
 
 		case provider.ToolChoiceAuto:
 			result.ToolChoice = &types.ToolChoiceMemberAuto{
@@ -953,7 +958,7 @@ func (c *Completer) convertToolConfig(tools []provider.Tool, options *provider.T
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 func inputHasToolBlocks(messages []provider.Message) bool {
