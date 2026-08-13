@@ -71,10 +71,17 @@ func WriteError(w http.ResponseWriter, code int, err error) {
 		},
 	}
 
-	var invalidValue *InvalidValueError
-	if errors.As(err, &invalidValue) {
-		resp.Error.Code = "invalid_value"
-		resp.Error.Param = invalidValue.Param
+	var apiErr *Error
+	if errors.As(err, &apiErr) {
+		resp.Error = *apiErr
+
+		if resp.Error.Type == "" {
+			resp.Error.Type = errorType
+		}
+
+		if resp.Error.Code == "" {
+			resp.Error.Code = "invalid_value"
+		}
 	}
 
 	enc := json.NewEncoder(w)
