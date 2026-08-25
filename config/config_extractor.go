@@ -8,6 +8,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/extractor/azure"
 	"github.com/adrianliechti/wingman/pkg/extractor/custom"
 	"github.com/adrianliechti/wingman/pkg/extractor/docling"
+	"github.com/adrianliechti/wingman/pkg/extractor/kernel"
 	"github.com/adrianliechti/wingman/pkg/extractor/kreuzberg"
 	"github.com/adrianliechti/wingman/pkg/extractor/mistral"
 	"github.com/adrianliechti/wingman/pkg/extractor/multi"
@@ -34,6 +35,10 @@ func (cfg *Config) Extractor(id string) (extractor.Provider, error) {
 		if c, ok := cfg.extractor[id]; ok {
 			return c, nil
 		}
+	}
+
+	if id == "" {
+		return defaultExtractor()
 	}
 
 	return nil, errors.New("extractor not found: " + id)
@@ -105,6 +110,9 @@ func (cfg *Config) registerExtractors(f *configFile) error {
 
 func createExtractor(cfg extractorConfig, context extractorContext) (extractor.Provider, error) {
 	switch strings.ToLower(cfg.Type) {
+	case "", "default", "kernel":
+		return defaultExtractor()
+
 	case "llm":
 		return llmExtractor(cfg, context)
 
@@ -181,6 +189,22 @@ func mistralExtractor(cfg extractorConfig) (extractor.Provider, error) {
 
 func textExtractor(cfg extractorConfig) (extractor.Provider, error) {
 	return text.New()
+}
+
+func defaultExtractor() (extractor.Provider, error) {
+	k, err := kernel.New()
+
+	if err != nil {
+		return nil, err
+	}
+
+	t, err := text.New()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return multi.New(k, t), nil
 }
 
 func customExtractor(cfg extractorConfig) (extractor.Provider, error) {
