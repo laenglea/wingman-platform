@@ -7,7 +7,7 @@ exclude github.com/gobwas/glob v1.0.0
 
 require (
 	github.com/abemedia/go-cfb v0.2.0
-	github.com/adrianliechti/go-kernel v0.0.0-20260826171614-5d85ef129006
+	github.com/adrianliechti/go-extract v0.0.0-20260906123702-488d5cedbae8
 	github.com/anthropics/anthropic-sdk-go v1.71.0
 	github.com/aws/aws-sdk-go-v2 v1.46.0
 	github.com/aws/aws-sdk-go-v2/config v1.33.3

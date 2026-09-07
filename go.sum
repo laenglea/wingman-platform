@@ -18,8 +18,8 @@ github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2 h1:XFJZFWESIWlUEHHjzBuv8R
 github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2/go.mod h1:BHWO8lJzttJLqwuV8Rb1B3OG2OSzLbssZDI1FRg2eAA=
 github.com/abemedia/go-cfb v0.2.0 h1:amLvu7/DX65XtcmMuc0an/t09W36gMOrnYwLxGGmwX8=
 github.com/abemedia/go-cfb v0.2.0/go.mod h1:ytSRuNKf2VMDQDs8TSZ/VmkVfS4giAdc4xl5XOnpKKA=
-github.com/adrianliechti/go-kernel v0.0.0-20260826171614-5d85ef129006 h1:dWpuPl+sdsel/JHUrOzxgzxt1LZefepI5cVn/RA2AvQ=
-github.com/adrianliechti/go-kernel v0.0.0-20260826171614-5d85ef129006/go.mod h1:owCFp0F+9qURnTvPsVE/r/Le3Y2oxxyRNvtaLHAmgsU=
+github.com/adrianliechti/go-extract v0.0.0-20260906123702-488d5cedbae8 h1:Cm4Lm8auGmqFZyW9HEqHQDYhLHWsJt4PUBgH6tyONW8=
+github.com/adrianliechti/go-extract v0.0.0-20260906123702-488d5cedbae8/go.mod h1:ofKHn/KIiB5DqF/gKOtEqXXJR1s71rZ+tQvBJhLTQf8=
 github.com/agnivade/levenshtein v1.2.1 h1:EHBY3UOn1gwdy/VbFwgo4cxecRznFk7fKWN1KOX7eoM=
 github.com/agnivade/levenshtein v1.2.1/go.mod h1:QVVI16kDrtSuwcpd0p1+xMC6Z/VfhtCyDIjcwga4/DU=
 github.com/anthropics/anthropic-sdk-go v1.71.0 h1:DK9xG3s5t+xUIOp+R+1LIRjkU/wG57YyQO3630+gYOE=
