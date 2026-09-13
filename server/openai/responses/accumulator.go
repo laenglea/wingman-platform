@@ -81,8 +81,8 @@ type StreamEvent struct {
 	MessagePhase      provider.MessagePhase
 	MessageIndex      int
 
-	// Incomplete marks a tool call that was finalized without complete
-	// arguments (e.g. truncated by max_tokens or a cancelled stream).
+	// Incomplete marks an item or summary part finalized before generation
+	// finished (e.g. truncated by max_tokens or a cancelled stream).
 	Incomplete bool
 
 	// For reasoning events
@@ -537,6 +537,7 @@ func (s *StreamingAccumulator) closeReasoning() error {
 
 	reasoningText := s.streamedReasoningText.String()
 	reasoningSummary := s.streamedReasoningSummary.String()
+	incomplete := s.status == provider.CompletionStatusIncomplete
 
 	if s.streamedReasoningText.Len() > 0 {
 		if err := s.emitEvent(StreamEvent{
@@ -577,6 +578,7 @@ func (s *StreamingAccumulator) closeReasoning() error {
 			ReasoningSummary: reasoningSummary,
 			OutputIndex:      s.reasoningOutputIndex,
 			SummaryIndex:     0,
+			Incomplete:       incomplete,
 		}); err != nil {
 			return err
 		}
@@ -589,7 +591,7 @@ func (s *StreamingAccumulator) closeReasoning() error {
 		ReasoningSummary:   reasoningSummary,
 		ReasoningSignature: s.reasoningSignature,
 		OutputIndex:        s.reasoningOutputIndex,
-		Incomplete:         s.status == provider.CompletionStatusIncomplete,
+		Incomplete:         incomplete,
 	}); err != nil {
 		return err
 	}

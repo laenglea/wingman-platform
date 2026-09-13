@@ -10,9 +10,8 @@ import (
 // These tests pin Responses API properties observed in Codex TUI HAR captures
 // and the corresponding reference event shape.
 
-// Reference reasoning item in response.completed.output[] carries
-// {id, type, summary, encrypted_content, optionally content} — but NOT
-// `status`. Status only appears on streaming output_item.added/done.
+// Reasoning items retain their completion status in the final response,
+// alongside the reasoning content and encrypted payload.
 func TestReasoningOutputInResponseCompletedShape(t *testing.T) {
 	outputs := responseOutputs(&provider.Message{
 		Content: []provider.Content{
@@ -38,8 +37,8 @@ func TestReasoningOutputInResponseCompletedShape(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if _, ok := got["status"]; ok {
-		t.Fatalf("reasoning in response.completed.output[] must NOT carry `status`, got %s", data)
+	if got["status"] != "completed" {
+		t.Fatalf("reasoning status = %v, want completed (raw: %s)", got["status"], data)
 	}
 
 	content, ok := got["content"].([]any)
