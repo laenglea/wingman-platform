@@ -1256,12 +1256,18 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				return nil
 			}
 
+			status := ""
+			if event.Incomplete {
+				status = "incomplete"
+			}
+
 			return writeEvent(w, "response.reasoning_summary_part.done", ReasoningSummaryPartDoneEvent{
 				Type:           "response.reasoning_summary_part.done",
 				SequenceNumber: nextSeq(),
 				ItemID:         event.ReasoningID,
 				OutputIndex:    event.OutputIndex,
 				SummaryIndex:   event.SummaryIndex,
+				Status:         status,
 				Part: &ReasoningOutputSummary{
 					Type: "summary_text",
 					Text: event.ReasoningSummary,

@@ -81,8 +81,8 @@ type StreamEvent struct {
 	MessagePhase      provider.MessagePhase
 	MessageIndex      int
 
-	// Incomplete marks a tool call that was finalized without complete
-	// arguments (e.g. truncated by max_tokens or a cancelled stream).
+	// Incomplete marks an item or summary part finalized before generation
+	// finished (e.g. truncated by max_tokens or a cancelled stream).
 	Incomplete bool
 
 	// For reasoning events
@@ -435,11 +435,9 @@ func (s *StreamingAccumulator) closeToolCall(callID string) error {
 	})
 }
 
-// toolCallIncomplete reports whether a call is being finalized without complete
-// arguments. It only applies to a response that was itself cut short (truncated
-// by max_tokens): such a call either never received arguments or accumulated
-// JSON fragments that don't parse. A normally-completed response never marks a
-// call incomplete — including custom/grammar tools whose input isn't JSON.
+// toolCallIncomplete reports a filtered call or missing/incomplete arguments
+// in a truncated response. A normally completed response never marks a call
+// incomplete, including custom tools whose input isn't JSON.
 func (s *StreamingAccumulator) toolCallIncomplete(callID string) bool {
 	if s.status != provider.CompletionStatusIncomplete {
 		return false
@@ -537,6 +535,7 @@ func (s *StreamingAccumulator) closeReasoning() error {
 
 	reasoningText := s.streamedReasoningText.String()
 	reasoningSummary := s.streamedReasoningSummary.String()
+	incomplete := s.status == provider.CompletionStatusIncomplete
 
 	if s.streamedReasoningText.Len() > 0 {
 		if err := s.emitEvent(StreamEvent{
@@ -577,6 +576,7 @@ func (s *StreamingAccumulator) closeReasoning() error {
 			ReasoningSummary: reasoningSummary,
 			OutputIndex:      s.reasoningOutputIndex,
 			SummaryIndex:     0,
+			Incomplete:       incomplete,
 		}); err != nil {
 			return err
 		}
@@ -589,7 +589,7 @@ func (s *StreamingAccumulator) closeReasoning() error {
 		ReasoningSummary:   reasoningSummary,
 		ReasoningSignature: s.reasoningSignature,
 		OutputIndex:        s.reasoningOutputIndex,
-		Incomplete:         s.status == provider.CompletionStatusIncomplete,
+		Incomplete:         incomplete,
 	}); err != nil {
 		return err
 	}

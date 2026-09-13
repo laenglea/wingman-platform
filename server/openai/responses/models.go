@@ -1150,12 +1150,14 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 			return json.Marshal(struct {
 				Type             ResponseOutputType           `json:"type"`
 				ID               string                       `json:"id"`
+				Status           string                       `json:"status"`
 				Summary          []ReasoningOutputSummary     `json:"summary"`
 				Content          []ReasoningOutputContentPart `json:"content"`
 				EncryptedContent string                       `json:"encrypted_content,omitempty"`
 			}{
 				Type:             r.Type,
 				ID:               r.ReasoningOutputItem.ID,
+				Status:           r.ReasoningOutputItem.Status,
 				Summary:          r.ReasoningOutputItem.Summary,
 				Content:          r.ReasoningOutputItem.Content,
 				EncryptedContent: r.ReasoningOutputItem.EncryptedContent,
@@ -1457,7 +1459,7 @@ type CompactionOutputItemDoneEvent struct {
 type ReasoningOutputItem struct {
 	ID     string `json:"id"`
 	Type   string `json:"type"`   // reasoning
-	Status string `json:"status"` // in_progress, completed
+	Status string `json:"status"` // in_progress, completed, incomplete
 
 	Summary []ReasoningOutputSummary     `json:"summary"`
 	Content []ReasoningOutputContentPart `json:"content,omitempty"`
@@ -1511,6 +1513,7 @@ type ReasoningSummaryPartDoneEvent struct {
 	OutputIndex    int                     `json:"output_index"`
 	SummaryIndex   int                     `json:"summary_index"`
 	Part           *ReasoningOutputSummary `json:"part"`
+	Status         string                  `json:"status,omitempty"` // incomplete when interrupted
 }
 
 // ReasoningSummaryTextDeltaEvent is emitted when reasoning summary text delta is received
