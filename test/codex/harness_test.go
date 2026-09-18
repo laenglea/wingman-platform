@@ -42,6 +42,12 @@ type outcome struct {
 	Edited bool
 }
 
+type codexRunOptions struct {
+	setup       func(*testing.T, string)
+	timeout     time.Duration
+	maxRequests int
+}
+
 func codexEnv(configDir string) []string {
 	var env []string
 	// Do not inherit provider credentials, Codex configuration, or telemetry.
@@ -141,6 +147,12 @@ func codexCatalog(t *testing.T, model string) []byte {
 
 func runCodex(t *testing.T, binary string, endpoint harness.Endpoint, model, prompt, input string) (outcome, []harness.Exchange, string) {
 	t.Helper()
+	result, exchanges, fixture, _ := runCodexWithOptions(t, binary, endpoint, model, prompt, input, codexRunOptions{})
+	return result, exchanges, fixture
+}
+
+func runCodexWithOptions(t *testing.T, binary string, endpoint harness.Endpoint, model, prompt, input string, options codexRunOptions) (outcome, []harness.Exchange, string, []cliEvent) {
+	t.Helper()
 	dir := t.TempDir()
 	if root := os.Getenv("CODEX_ARTIFACTS"); root != "" {
 		if err := os.MkdirAll(root, 0700); err != nil {
@@ -172,11 +184,21 @@ func runCodex(t *testing.T, binary string, endpoint harness.Endpoint, model, pro
 		writeArtifact(t, filepath.Join(fixture, "output.txt"), []byte("REPLACE_ME\n"))
 		prompt += fmt.Sprintf("\nThe files are %q and %q. Use the current directory and do not access other paths.", filepath.Join(fixture, "input.txt"), filepath.Join(fixture, "output.txt"))
 	}
-	r := harness.NewRecorder(t, strings.TrimRight(endpoint.BaseURL, "/"), http.Header{"Authorization": {"Bearer " + endpoint.APIKey}}, 8)
+	if options.setup != nil {
+		options.setup(t, fixture)
+		prompt += fmt.Sprintf("\nThe project directory is %q, which is already the current working directory. Use that directory for every command and patch. Do not access other paths.", fixture)
+	}
+	if options.maxRequests == 0 {
+		options.maxRequests = 8
+	}
+	if options.timeout == 0 {
+		options.timeout = 2 * time.Minute
+	}
+	r := harness.NewRecorder(t, strings.TrimRight(endpoint.BaseURL, "/"), http.Header{"Authorization": {"Bearer " + endpoint.APIKey}}, options.maxRequests)
 	catalog := filepath.Join(configDir, "models.json")
 	writeArtifact(t, catalog, codexCatalog(t, model))
-	writeArtifact(t, filepath.Join(configDir, "config.toml"), []byte(codexConfig(r.URL, model, catalog, input != "")))
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	writeArtifact(t, filepath.Join(configDir, "config.toml"), []byte(codexConfig(r.URL, model, catalog, input != "" || options.setup != nil)))
+	ctx, cancel := context.WithTimeout(t.Context(), options.timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binary, "exec", "--strict-config", "--json", "--ephemeral", "--ignore-rules", "--skip-git-repo-check", "--color", "never", "--", prompt)
 	cmd.Dir, cmd.Env, cmd.WaitDelay = fixture, codexEnv(configDir), 5*time.Second
@@ -198,6 +220,7 @@ func runCodex(t *testing.T, binary string, endpoint harness.Endpoint, model, pro
 	}
 	decoder := json.NewDecoder(&stdout)
 	var result outcome
+	var events []cliEvent
 	completed := false
 	for {
 		var event cliEvent
@@ -206,6 +229,7 @@ func runCodex(t *testing.T, binary string, endpoint harness.Endpoint, model, pro
 		} else if err != nil {
 			t.Fatalf("invalid Codex JSON output: %v", err)
 		}
+		events = append(events, event)
 		switch event.Type {
 		case "turn.completed":
 			if completed {
@@ -228,7 +252,7 @@ func runCodex(t *testing.T, binary string, endpoint harness.Endpoint, model, pro
 			case "file_change":
 				if event.Item.Status == "completed" {
 					for _, change := range event.Item.Changes {
-						if change.Path == filepath.Join(fixture, "output.txt") || change.Path == "output.txt" {
+						if options.setup != nil || change.Path == filepath.Join(fixture, "output.txt") || change.Path == "output.txt" {
 							result.Edited = true
 						}
 					}
@@ -239,7 +263,7 @@ func runCodex(t *testing.T, binary string, endpoint harness.Endpoint, model, pro
 	if !completed || result.Answer == "" {
 		t.Fatalf("Codex did not complete with a final answer; stderr: %s", stderr.String())
 	}
-	return result, exchanges, fixture
+	return result, exchanges, fixture, events
 }
 
 func writeArtifact(t *testing.T, path string, data []byte) {

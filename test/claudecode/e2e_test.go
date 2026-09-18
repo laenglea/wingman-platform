@@ -62,7 +62,7 @@ func TestClaudeCode(t *testing.T) {
 			input:  input,
 			want:   input,
 		},
-		projectScenario(),
+		projectScenario(t),
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			run := func(t *testing.T, endpoint harness.Endpoint, model string) outcome {

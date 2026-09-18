@@ -23,16 +23,25 @@ func TestCodex(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("Codex version: %s", version)
+	models := openai.DefaultModels()
+	if os.Getenv("TEST_OPENAI_MODELS") == "" {
+		models = append(models, openai.Model{Name: "claude-opus-5"})
+	} else if configured := harness.ConfiguredModels(h.Wingman.BaseURL, h.Wingman.APIKey); configured != nil {
+		for _, model := range models {
+			if !configured[model.Name] {
+				t.Fatalf("explicitly requested model %q is not configured in Wingman", model.Name)
+			}
+		}
+	}
 	input := fmt.Sprintf("fixture-%s\n", rand.Text())
-	for _, scenario := range []struct {
-		name, prompt, input, want string
-	}{
-		{"text", "Reply with exactly WINGMAN_E2E_OK and nothing else. Do not use tools.", "", "WINGMAN_E2E_OK"},
-		{"read_edit", "Use one shell call with `cat input.txt output.txt` to read both files. Then call the apply_patch tool directly to replace REPLACE_ME in output.txt with the text from input.txt. Use a V4A patch with a hunk header containing only @@, without line numbers. Preserve the final newline so both files contain exactly the same bytes. Do not write files using shell commands. Do not use other tools. Reply with DONE after editing the file.", input, input},
+	for _, scenario := range []codexScenario{
+		{name: "text", prompt: "Reply with exactly WINGMAN_E2E_OK and nothing else. Do not use tools.", want: "WINGMAN_E2E_OK"},
+		{name: "read_edit", prompt: "Use one shell call with `cat input.txt output.txt` to read both files. Then call the apply_patch tool directly to replace REPLACE_ME in output.txt with the text from input.txt. Use a V4A patch with a hunk header containing only @@, without line numbers. Preserve the final newline so both files contain exactly the same bytes. Do not write files using shell commands. Do not use other tools. Reply with DONE after editing the file.", input: input, want: input},
+		projectScenario(t),
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			run := func(t *testing.T, endpoint harness.Endpoint, model string) outcome {
-				actual, exchanges, fixture := runCodex(t, binary, endpoint, model, scenario.prompt, scenario.input)
+				actual, exchanges, fixture, events := runCodexWithOptions(t, binary, endpoint, model, scenario.prompt, scenario.input, scenario.options)
 				tools := checkExchanges(t, exchanges, model)
 				if scenario.input != "" {
 					data, err := os.ReadFile(filepath.Join(fixture, "output.txt"))
@@ -40,11 +49,16 @@ func TestCodex(t *testing.T) {
 						t.Fatal(err)
 					}
 					actual.Answer = string(data)
+				}
+				if scenario.input != "" || scenario.verify != nil {
 					if !actual.Read || !actual.Edited || !tools["apply_patch"] || !(tools["exec_command"] || tools["shell_command"] || tools["shell"]) {
 						t.Errorf("expected a completed shell read and apply_patch edit: %+v, calls: %v", actual, tools)
 					}
 				} else if actual.Read || actual.Edited || len(tools) > 0 {
 					t.Errorf("text-only scenario unexpectedly used tools: %v", tools)
+				}
+				if scenario.verify != nil {
+					scenario.verify(t, exchanges, events, fixture)
 				}
 				if actual.Answer != scenario.want {
 					t.Errorf("outcome %q, want %q", actual.Answer, scenario.want)
@@ -52,20 +66,28 @@ func TestCodex(t *testing.T) {
 				return actual
 			}
 			var reference outcome
+			referenceRan := false
 			if !t.Run("openai", func(t *testing.T) {
 				reference = run(t, h.OpenAI, h.ReferenceModel)
+				referenceRan = true
 			}) {
 				t.Fatal("OpenAI reference failed; cannot compare Wingman")
 			}
-			for _, model := range openai.DefaultModels() {
+			for _, model := range models {
 				t.Run("wingman/"+model.Name, func(t *testing.T) {
 					h.SkipUnlessConfigured(t, model.Name)
 					actual := run(t, h.Wingman, model.Name)
-					if actual != reference {
+					if referenceRan && actual != reference {
 						t.Errorf("outcome differs from OpenAI: got %+v, want %+v", actual, reference)
 					}
 				})
 			}
 		})
 	}
+}
+
+type codexScenario struct {
+	name, prompt, input, want string
+	options                   codexRunOptions
+	verify                    func(*testing.T, []harness.Exchange, []cliEvent, string)
 }

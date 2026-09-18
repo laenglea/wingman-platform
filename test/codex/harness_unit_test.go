@@ -35,21 +35,25 @@ func textStream() string {
 }
 
 func toolStream(kind, name, input string) string {
+	return toolStreamWithID(kind, name, name, input)
+}
+
+func toolStreamWithID(kind, name, callID, input string) string {
 	field, deltaEvent, doneEvent := "arguments", "response.function_call_arguments.delta", "response.function_call_arguments.done"
 	if kind == "custom_tool_call" {
 		field, deltaEvent, doneEvent = "input", "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done"
 	}
-	id := "item_" + name
-	item := map[string]any{"id": id, "type": kind, "call_id": "call_" + name, "name": name, field: input, "status": "completed"}
-	added := map[string]any{"id": id, "type": kind, "call_id": "call_" + name, "name": name, field: "", "status": "in_progress"}
+	id := "item_" + callID
+	item := map[string]any{"id": id, "type": kind, "call_id": "call_" + callID, "name": name, field: input, "status": "completed"}
+	added := map[string]any{"id": id, "type": kind, "call_id": "call_" + callID, "name": name, field: "", "status": "in_progress"}
 	var out strings.Builder
 	for _, event := range []map[string]any{
-		{"type": "response.created", "response": map[string]any{"id": "resp_" + name, "status": "in_progress", "output": []any{}}},
+		{"type": "response.created", "response": map[string]any{"id": "resp_" + callID, "status": "in_progress", "output": []any{}}},
 		{"type": "response.output_item.added", "output_index": 0, "item": added},
 		{"type": deltaEvent, "output_index": 0, "item_id": id, "delta": input},
 		{"type": doneEvent, "output_index": 0, "item_id": id, field: input},
 		{"type": "response.output_item.done", "output_index": 0, "item": item},
-		{"type": "response.completed", "response": map[string]any{"id": "resp_" + name, "status": "completed", "output": []any{item}, "usage": map[string]any{"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}}},
+		{"type": "response.completed", "response": map[string]any{"id": "resp_" + callID, "status": "completed", "output": []any{item}, "usage": map[string]any{"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}}},
 	} {
 		data, _ := json.Marshal(event)
 		fmt.Fprintf(&out, "event: %s\ndata: %s\n\n", event["type"], data)

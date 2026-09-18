@@ -1,29 +1,21 @@
 package claudecode
 
 import (
-	"context"
-	"crypto/rand"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/adrianliechti/wingman/test/harness"
 )
 
-//go:embed testdata/project/*
-var projectFixture embed.FS
+const projectTestCommand = harness.ProjectTestCommand
 
-const projectTestCommand = "python3 -m unittest -v"
-
-func projectScenario() claudeScenario {
-	orderID := "order-" + rand.Text()
-	order := fmt.Sprintf(`{"order_id":%q,"items":[{"quantity":3,"unit_price_cents":250,"discount_cents":25},{"quantity":2,"unit_price_cents":125},{"quantity":9,"unit_price_cents":900,"cancelled":true}]}`, orderID)
-	expected := fmt.Sprintf(`{"order_id":%q,"item_count":5,"subtotal_cents":925}`, orderID)
+func projectScenario(t *testing.T) claudeScenario {
+	project := harness.NewProjectFixture(t)
 	return claudeScenario{
 		name:  "project_repair",
 		tools: "Read,Edit,Bash",
@@ -37,32 +29,9 @@ Do not edit test_invoice.py, order.json or expected.json. After your edits, reru
 			maxTurns:     12,
 			timeout:      3 * time.Minute,
 			allowedTools: "Read,Edit,Bash(" + projectTestCommand + ")",
-			setup: func(t *testing.T, dir string) {
-				if _, err := exec.LookPath("python3"); err != nil {
-					t.Fatal("python3 is required for the project repair scenario")
-				}
-				for _, name := range []string{"pricing.py", "invoice.py", "test_invoice.py"} {
-					data, err := projectFixture.ReadFile("testdata/project/" + name)
-					if err != nil {
-						t.Fatal(err)
-					}
-					writeArtifact(t, filepath.Join(dir, name), data)
-				}
-				writeArtifact(t, filepath.Join(dir, "order.json"), []byte(order))
-				writeArtifact(t, filepath.Join(dir, "expected.json"), []byte(expected))
-			},
+			setup:        project.Setup,
 		},
 		verify: func(t *testing.T, exchanges []exchange, dir string) {
-			tests, err := projectFixture.ReadFile("testdata/project/test_invoice.py")
-			if err != nil {
-				t.Fatal(err)
-			}
-			for name, want := range map[string]string{"test_invoice.py": string(tests), "order.json": order, "expected.json": expected} {
-				got, err := os.ReadFile(filepath.Join(dir, name))
-				if err != nil || string(got) != want {
-					t.Fatalf("protected fixture %s changed: %v", name, err)
-				}
-			}
 			steps, err := projectSteps(exchanges)
 			if err != nil {
 				t.Fatal(err)
@@ -70,17 +39,7 @@ Do not edit test_invoice.py, order.json or expected.json. After your edits, reru
 			if err := validateProjectWorkflow(steps, dir); err != nil {
 				t.Error(err)
 			}
-			// Check the resulting project independently of the CLI's claims.
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-			defer cancel()
-			cmd := exec.CommandContext(ctx, "python3", "-m", "unittest", "-v")
-			cmd.Dir = dir
-			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "PYTHONDONTWRITEBYTECODE=1"}
-			output, runErr := cmd.CombinedOutput()
-			writeArtifact(t, filepath.Join(filepath.Dir(dir), "verification.log"), output)
-			if runErr != nil || !strings.Contains(string(output), "Ran 7 tests") || !strings.Contains(string(output), "\nOK") {
-				t.Fatalf("independent project tests failed: %v\n%s", runErr, output)
-			}
+			project.Verify(t, dir)
 			t.Logf("verified %d completed tool calls, failure before edits, repairs in both modules, and seven passing Python tests", len(steps))
 		},
 	}
