@@ -67,6 +67,30 @@ func supportsStrictTools(model string) bool {
 	return !isClaudeModel(model) || matchesModel(model, StrictToolModels)
 }
 
+// Native JSON-schema output (outputConfig.textFormat) is the same structured
+// outputs feature as strict tools, so it follows the Claude allowlist. Other
+// model families keep the forced-tool emulation, which needs no structured
+// outputs support and therefore cannot fail the request.
+func supportsOutputFormat(model string) bool {
+	return matchesModel(model, StrictToolModels)
+}
+
+// MidSystemModels accept role "system" messages inside the conversation —
+// the same Claude models as on the native API (4.8 and 5.x, not Sonnet 5).
+// Other models get their later instructions hoisted into the top-level
+// system prompt.
+var MidSystemModels = []string{
+	"fable-5",
+	"mythos-5",
+
+	"opus-4-8",
+	"opus-5",
+}
+
+func (c *Completer) supportsMidSystem() bool {
+	return matchesModel(c.model, MidSystemModels)
+}
+
 func matchesModel(model string, patterns []string) bool {
 	model = strings.ToLower(model)
 
@@ -137,6 +161,38 @@ func (c *Completer) resolveThinking(messages []provider.Message, options *provid
 	}
 
 	return t
+}
+
+// Check schema nodes, not annotations or property names: a property named
+// "additionalProperties" is unrelated to the keyword on its containing schema.
+func schemaAllowsAdditionalProperties(schema map[string]any) bool {
+	if additional, ok := schema["additionalProperties"]; ok && additional != false {
+		return true
+	}
+	for _, key := range []string{"properties", "$defs", "definitions", "patternProperties", "dependentSchemas"} {
+		if children, ok := schema[key].(map[string]any); ok {
+			for _, child := range children {
+				if nested, ok := child.(map[string]any); ok && schemaAllowsAdditionalProperties(nested) {
+					return true
+				}
+			}
+		}
+	}
+	for _, key := range []string{"items", "contains", "propertyNames", "not", "if", "then", "else", "additionalItems", "unevaluatedItems", "unevaluatedProperties"} {
+		if nested, ok := schema[key].(map[string]any); ok && schemaAllowsAdditionalProperties(nested) {
+			return true
+		}
+	}
+	for _, key := range []string{"anyOf", "allOf", "oneOf", "prefixItems", "items"} {
+		if children, ok := schema[key].([]any); ok {
+			for _, child := range children {
+				if nested, ok := child.(map[string]any); ok && schemaAllowsAdditionalProperties(nested) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func ensureAdditionalPropertiesFalse(schema map[string]any) map[string]any {

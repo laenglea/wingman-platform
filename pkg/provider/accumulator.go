@@ -3,8 +3,9 @@ package provider
 import "strings"
 
 type CompletionAccumulator struct {
-	id    string
-	model string
+	id               string
+	model            string
+	reasoningContext ReasoningContext
 
 	status       CompletionStatus
 	stopReason   StopReason
@@ -20,6 +21,7 @@ type CompletionAccumulator struct {
 	compactions []Compaction
 
 	toolCalls      []ToolCall
+	toolResults    []ToolResult
 	lastToolCallID string
 
 	usage *Usage
@@ -54,6 +56,7 @@ const (
 	accumulatedContentText
 	accumulatedContentRefusal
 	accumulatedContentToolCall
+	accumulatedContentToolResult
 )
 
 type accumulatedContentRef struct {
@@ -68,6 +71,9 @@ func (a *CompletionAccumulator) Add(c Completion) {
 
 	if c.Model != "" {
 		a.model = c.Model
+	}
+	if c.Reasoning != "" {
+		a.reasoningContext = c.Reasoning
 	}
 
 	if c.Status != "" {
@@ -136,6 +142,10 @@ func (a *CompletionAccumulator) Add(c Completion) {
 			if c.ToolCall != nil {
 				a.addToolCall(c.ToolCall)
 			}
+			if c.ToolResult != nil {
+				a.contentOrder = append(a.contentOrder, accumulatedContentRef{kind: accumulatedContentToolResult, index: len(a.toolResults)})
+				a.toolResults = append(a.toolResults, *c.ToolResult)
+			}
 		}
 	}
 
@@ -150,8 +160,8 @@ func (a *CompletionAccumulator) Add(c Completion) {
 		if c.Usage.OutputTokens > a.usage.OutputTokens {
 			a.usage.OutputTokens = c.Usage.OutputTokens
 		}
-		if c.Usage.ReasoningTokens > a.usage.ReasoningTokens {
-			a.usage.ReasoningTokens = c.Usage.ReasoningTokens
+		if tokens := c.Usage.ReasoningTokens; tokens != nil && (a.usage.ReasoningTokens == nil || *tokens > *a.usage.ReasoningTokens) {
+			a.usage.ReasoningTokens = new(*tokens)
 		}
 		if c.Usage.CacheReadInputTokens > a.usage.CacheReadInputTokens {
 			a.usage.CacheReadInputTokens = c.Usage.CacheReadInputTokens
@@ -362,12 +372,15 @@ func (a *CompletionAccumulator) Result() *Completion {
 			}
 
 			content = append(content, ToolCallContent(call))
+		case accumulatedContentToolResult:
+			content = append(content, ToolResultContent(a.toolResults[ref.index]))
 		}
 	}
 
 	return &Completion{
-		ID:    a.id,
-		Model: a.model,
+		ID:        a.id,
+		Model:     a.model,
+		Reasoning: a.reasoningContext,
 
 		Status:       a.status,
 		StopReason:   a.stopReason,

@@ -13,6 +13,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider/tools/custom"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/toolsearch"
 
 	"github.com/google/uuid"
 
@@ -193,6 +194,9 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 }
 
 func (c *Completer) convertCompletionRequest(input []provider.Message, options *provider.CompleteOptions) (*openai.ChatCompletionNewParams, error) {
+	input = provider.ResolveInstructions(input)
+	input, options = provider.ResolveConfigurationUpdates(input, options)
+	input, options = toolsearch.Inline(input, options)
 	tools, err := convertTools(provider.FlattenTools(options.Tools))
 
 	if err != nil {
@@ -575,7 +579,12 @@ func toCompletionStatus(finishReason string) provider.CompletionStatus {
 }
 
 func toUsage(metadata openai.CompletionUsage) *provider.Usage {
-	if metadata.TotalTokens == 0 && metadata.PromptTokensDetails.CachedTokens == 0 {
+	var reasoningTokens *int
+	if metadata.CompletionTokensDetails.JSON.ReasoningTokens.Valid() || metadata.CompletionTokensDetails.ReasoningTokens > 0 {
+		reasoningTokens = new(int(metadata.CompletionTokensDetails.ReasoningTokens))
+	}
+
+	if metadata.TotalTokens == 0 && metadata.PromptTokensDetails.CachedTokens == 0 && reasoningTokens == nil {
 		return nil
 	}
 
@@ -583,7 +592,7 @@ func toUsage(metadata openai.CompletionUsage) *provider.Usage {
 		InputTokens:  int(metadata.PromptTokens),
 		OutputTokens: int(metadata.CompletionTokens),
 
-		ReasoningTokens: int(metadata.CompletionTokensDetails.ReasoningTokens),
+		ReasoningTokens: reasoningTokens,
 
 		CacheReadInputTokens:     int(metadata.PromptTokensDetails.CachedTokens),
 		CacheCreationInputTokens: int(metadata.PromptTokensDetails.CacheWriteTokens),

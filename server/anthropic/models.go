@@ -1,7 +1,9 @@
 package anthropic
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 )
 
 // Request types
@@ -9,20 +11,23 @@ import (
 type MessageRequest struct {
 	Model             string             `json:"model"`
 	Messages          []MessageParam     `json:"messages"`
-	System            any                `json:"system,omitempty"` // string or []SystemBlock
+	System            any                `json:"system,omitempty"` // string or text blocks
 	MaxTokens         *int               `json:"max_tokens"`
 	Stream            bool               `json:"stream,omitempty"`
 	Temperature       *float32           `json:"temperature,omitempty"`
-	TopP              *float32           `json:"top_p,omitempty"`
-	TopK              *int               `json:"top_k,omitempty"`
 	StopSequences     []string           `json:"stop_sequences,omitempty"`
 	Tools             []ToolParam        `json:"tools,omitempty"`
 	ToolChoice        *ToolChoice        `json:"tool_choice,omitempty"`
-	Metadata          *Metadata          `json:"metadata,omitempty"`
 	OutputFormat      *OutputFormat      `json:"output_format,omitempty"`
 	OutputConfig      *OutputConfig      `json:"output_config,omitempty"`
 	Thinking          *ThinkingConfig    `json:"thinking,omitempty"`
 	ContextManagement *ContextManagement `json:"context_management,omitempty"`
+	Compaction        *CompactionConfig  `json:"compaction,omitempty"`
+}
+
+type CompactionConfig struct {
+	Type         string `json:"type"`
+	Instructions string `json:"instructions,omitempty"`
 }
 
 type ContextManagement struct {
@@ -30,22 +35,27 @@ type ContextManagement struct {
 }
 
 type ContextManagementEdit struct {
-	Type    string `json:"type"` // "compact_20260112"
-	Trigger *struct {
+	Keep                 json.RawMessage `json:"keep,omitempty"`
+	Instructions         string          `json:"instructions,omitempty"`
+	PauseAfterCompaction bool            `json:"pause_after_compaction,omitempty"`
+	Type                 string          `json:"type"` // "compact_20260112"
+	Trigger              *struct {
 		Type  string `json:"type"` // "input_tokens"
 		Value int    `json:"value"`
 	} `json:"trigger,omitempty"`
 }
 
 type ThinkingConfig struct {
-	Type         string `json:"type"`                    // "enabled", "adaptive", or "disabled"
-	BudgetTokens int    `json:"budget_tokens,omitempty"` // required when type is "enabled"
-	Display      string `json:"display,omitempty"`       // "summarized" or "omitted"
+	Type         string          `json:"type"`                    // "enabled", "adaptive", or "disabled"
+	BudgetTokens int             `json:"budget_tokens,omitempty"` // required when type is "enabled"
+	Display      string          `json:"display,omitempty"`       // "summarized" or "omitted"
+	BlockBinding json.RawMessage `json:"block_binding,omitempty"`
 }
 
 type OutputConfig struct {
-	Effort string        `json:"effort,omitempty"` // "low", "medium", "high", "xhigh", "max"
-	Format *OutputFormat `json:"format,omitempty"`
+	Effort     string          `json:"effort,omitempty"` // "low", "medium", "high", "xhigh", "max"
+	Format     *OutputFormat   `json:"format,omitempty"`
+	TaskBudget json.RawMessage `json:"task_budget,omitempty"`
 }
 
 type OutputFormat struct {
@@ -56,8 +66,10 @@ type OutputFormat struct {
 }
 
 type MessageParam struct {
-	Role    MessageRole `json:"role"`
-	Content any         `json:"content"` // string or []ContentBlockParam
+	Role         MessageRole   `json:"role"`
+	Content      any           `json:"content"` // string or []ContentBlockParam
+	OutputConfig *OutputConfig `json:"output_config,omitempty"`
+	ClearAt      string        `json:"clear_at,omitempty"`
 }
 
 type MessageRole string
@@ -78,9 +90,10 @@ type ContentBlockParam struct {
 	Source *BlockSource `json:"source,omitempty"`
 
 	// For tool_use blocks (in assistant messages)
-	ID    string `json:"id,omitempty"`
-	Name  string `json:"name,omitempty"`
-	Input any    `json:"input,omitempty"`
+	ID     string       `json:"id,omitempty"`
+	Name   string       `json:"name,omitempty"`
+	Input  any          `json:"input,omitempty"`
+	Caller *BlockCaller `json:"caller,omitempty"`
 
 	// For tool_result blocks (in user messages)
 	ToolUseID string `json:"tool_use_id,omitempty"`
@@ -109,21 +122,12 @@ type BlockSource struct {
 	Content   any    `json:"content,omitempty"` // for type=content: string or []ContentBlockParam
 }
 
-type SystemBlock struct {
-	Type         string        `json:"type"` // "text"
-	Text         string        `json:"text,omitempty"`
-	CacheControl *CacheControl `json:"cache_control,omitempty"`
-}
-
-type CacheControl struct {
-	Type string `json:"type"` // "ephemeral"
-}
-
 type ToolParam struct {
 	Type        string         `json:"type,omitempty"` // "custom" for regular tools
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	InputSchema map[string]any `json:"input_schema,omitempty"`
+	Strict      *bool          `json:"strict,omitempty"`
 
 	DeferLoading bool `json:"defer_loading,omitempty"`
 
@@ -142,16 +146,12 @@ type ToolChoice struct {
 	DisableParallelToolUse bool `json:"disable_parallel_tool_use,omitempty"`
 }
 
-type Metadata struct {
-	UserID string `json:"user_id,omitempty"`
-}
-
 // Count tokens types
 
 type CountTokensRequest struct {
 	Model    string         `json:"model"`
 	Messages []MessageParam `json:"messages"`
-	System   any            `json:"system,omitempty"` // string or []SystemBlock
+	System   any            `json:"system,omitempty"` // string or text blocks
 	Tools    []ToolParam    `json:"tools,omitempty"`
 }
 
@@ -187,8 +187,9 @@ type ContentBlock struct {
 	Data string `json:"data,omitempty"`
 
 	// For compaction blocks
-	Content          string `json:"content,omitempty"`
+	Content          any    `json:"content,omitempty"`
 	EncryptedContent string `json:"encrypted_content,omitempty"`
+	ToolUseID        string `json:"tool_use_id,omitempty"`
 
 	// For tool_use blocks
 	ID     string       `json:"id,omitempty"`
@@ -199,6 +200,24 @@ type ContentBlock struct {
 
 type BlockCaller struct {
 	Type string `json:"type"` // "direct"
+}
+
+// Thinking blocks must carry an empty thinking string when only the opaque
+// continuation signature is visible, including in content_block_start events.
+func (b ContentBlock) MarshalJSON() ([]byte, error) {
+	type block ContentBlock
+	var thinking, signature *string
+	if b.Signature != "" {
+		signature = &b.Signature
+	}
+	if b.Type == "thinking" {
+		thinking, signature = &b.Thinking, &b.Signature
+	}
+	return json.Marshal(struct {
+		block
+		Thinking  *string `json:"thinking,omitempty"`
+		Signature *string `json:"signature,omitempty"`
+	}{block: block(b), Thinking: thinking, Signature: signature})
 }
 
 type StopReason string
@@ -337,7 +356,7 @@ func parseContentBlocks(content any) ([]ContentBlockParam, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal(data, &blocks); err != nil {
+		if err := decodeRequest(bytes.NewReader(data), &blocks); err != nil {
 			return nil, err
 		}
 		return blocks, nil
@@ -348,10 +367,10 @@ func parseContentBlocks(content any) ([]ContentBlockParam, error) {
 			return nil, err
 		}
 		var blocks []ContentBlockParam
-		if err := json.Unmarshal(data, &blocks); err != nil {
+		if err := decodeRequest(bytes.NewReader(data), &blocks); err != nil {
 			// Try as single block
 			var block ContentBlockParam
-			if err := json.Unmarshal(data, &block); err != nil {
+			if err := decodeRequest(bytes.NewReader(data), &block); err != nil {
 				return nil, err
 			}
 			return []ContentBlockParam{block}, nil
@@ -361,34 +380,19 @@ func parseContentBlocks(content any) ([]ContentBlockParam, error) {
 }
 
 func parseSystemContent(system any) (string, error) {
-	if system == nil {
-		return "", nil
+	blocks, err := parseContentBlocks(system)
+	if err != nil {
+		return "", fmt.Errorf("system: %w", err)
 	}
-
-	switch v := system.(type) {
-	case string:
-		return v, nil
-	case []any:
-		// Array of system blocks
-		var result string
-		for _, item := range v {
-			data, err := json.Marshal(item)
-			if err != nil {
-				return "", err
-			}
-			var block SystemBlock
-			if err := json.Unmarshal(data, &block); err != nil {
-				return "", err
-			}
-			if block.Type == "text" {
-				if result != "" {
-					result += "\n"
-				}
-				result += block.Text
-			}
+	var result string
+	for _, block := range blocks {
+		if block.Type != "text" {
+			return "", fmt.Errorf("system: only text blocks are supported")
 		}
-		return result, nil
-	default:
-		return "", nil
+		if result != "" {
+			result += "\n"
+		}
+		result += block.Text
 	}
+	return result, nil
 }

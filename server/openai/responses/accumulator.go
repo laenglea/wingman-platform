@@ -36,6 +36,7 @@ const (
 	StreamEventFunctionCallArgumentsDelta StreamEventType = "function_call_arguments.delta"
 	StreamEventFunctionCallArgumentsDone  StreamEventType = "function_call_arguments.done"
 	StreamEventFunctionCallDone           StreamEventType = "function_call.done"
+	StreamEventToolSearchResult           StreamEventType = "tool_search.result"
 
 	StreamEventCustomToolCallInputDelta StreamEventType = "custom_tool_call_input.delta"
 	StreamEventCustomToolCallInputDone  StreamEventType = "custom_tool_call_input.done"
@@ -76,6 +77,7 @@ type StreamEvent struct {
 	ToolCallNamespace string
 	ToolCallExecution string
 	ToolCallAsync     bool
+	ToolResult        *provider.ToolResult
 	Arguments         string
 	OutputIndex       int
 	MessageID         string
@@ -137,16 +139,18 @@ type StreamingAccumulator struct {
 	SuppressReasoning bool
 
 	// Completion metadata (captured from chunks)
-	id       string
-	model    string
-	status   provider.CompletionStatus
-	usage    *provider.Usage
-	started  bool
-	message  *streamMessage
-	messages []*streamMessage
+	id               string
+	model            string
+	reasoningContext provider.ReasoningContext
+	status           provider.CompletionStatus
+	usage            *provider.Usage
+	started          bool
+	message          *streamMessage
+	messages         []*streamMessage
 
 	// Tool call state — single source of truth
 	toolCalls      []accumulatedToolCall
+	toolResults    []provider.ToolResult
 	toolCallByID   map[string]int // effective call ID → index in toolCalls
 	lastToolCallID string
 
@@ -197,6 +201,7 @@ const (
 	streamItemReasoning
 	streamItemCompaction
 	streamItemToolCall
+	streamItemToolResult
 )
 
 type streamItemRef struct {
@@ -224,8 +229,8 @@ func mergeUsage(dst **provider.Usage, src *provider.Usage) {
 	if src.OutputTokens > (*dst).OutputTokens {
 		(*dst).OutputTokens = src.OutputTokens
 	}
-	if src.ReasoningTokens > (*dst).ReasoningTokens {
-		(*dst).ReasoningTokens = src.ReasoningTokens
+	if tokens := src.ReasoningTokens; tokens != nil && ((*dst).ReasoningTokens == nil || *tokens > *(*dst).ReasoningTokens) {
+		(*dst).ReasoningTokens = new(*tokens)
 	}
 	if src.CacheReadInputTokens > (*dst).CacheReadInputTokens {
 		(*dst).CacheReadInputTokens = src.CacheReadInputTokens
@@ -734,6 +739,9 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 	if c.Model != "" {
 		s.model = c.Model
 	}
+	if c.Reasoning != "" {
+		s.reasoningContext = c.Reasoning
+	}
 	if c.Status != "" {
 		s.status = c.Status
 	}
@@ -953,6 +961,20 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 				}); err != nil {
 					return err
 				}
+			}
+		}
+
+		if content.ToolResult != nil && content.ToolResult.Kind == provider.ToolKindToolSearch {
+			if err := s.closePendingItems(); err != nil {
+				return err
+			}
+			if err := s.closeToolCall(content.ToolResult.ID); err != nil {
+				return err
+			}
+			index := s.reserveOutputIndex(streamItemToolResult, len(s.toolResults))
+			s.toolResults = append(s.toolResults, *content.ToolResult)
+			if err := s.emitEvent(StreamEvent{Type: StreamEventToolSearchResult, OutputIndex: index, ToolResult: content.ToolResult}); err != nil {
+				return err
 			}
 		}
 
@@ -1256,6 +1278,8 @@ func (s *StreamingAccumulator) Result() *provider.Completion {
 			}
 
 			content = append(content, provider.ToolCallContent(call))
+		case streamItemToolResult:
+			content = append(content, provider.ToolResultContent(s.toolResults[ref.index]))
 		}
 	}
 
@@ -1266,10 +1290,11 @@ func (s *StreamingAccumulator) Result() *provider.Completion {
 	}
 
 	return &provider.Completion{
-		ID:     s.id,
-		Model:  s.model,
-		Status: s.status,
-		Usage:  s.usage,
+		ID:        s.id,
+		Model:     s.model,
+		Status:    s.status,
+		Usage:     s.usage,
+		Reasoning: s.reasoningContext,
 
 		Message: &provider.Message{
 			Role:    provider.MessageRoleAssistant,

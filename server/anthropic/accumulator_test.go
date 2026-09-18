@@ -6,6 +6,55 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
+func TestStreamingAccumulatorTrailingSignaturePreservesFinalText(t *testing.T) {
+	var events []StreamEvent
+	acc := NewStreamingAccumulator("msg_fixture", "gemini-test", func(event StreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	for _, content := range []provider.Content{
+		provider.TextContent("hello "),
+		provider.TextContent("world"),
+		provider.ReasoningContent(provider.Reasoning{ID: "gemsig_fixture", Signature: "opaque-state"}),
+	} {
+		if err := acc.Add(provider.Completion{Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{content}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := acc.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	open := map[int]bool{}
+	text, signature := "", ""
+	textIndex, lastClosed := -1, -1
+	for _, event := range events {
+		switch event.Type {
+		case StreamEventContentBlockStart:
+			open[event.Index] = true
+			if event.ContentBlock.Type == "text" {
+				if textIndex != -1 {
+					t.Fatal("answer was split across text blocks")
+				}
+				textIndex = event.Index
+			}
+		case StreamEventContentBlockDelta:
+			if !open[event.Index] {
+				t.Fatal("delta outside an open block")
+			}
+			text += event.Delta.Text
+			if event.Delta.Type == "signature_delta" {
+				_, signature = decodeSignature(event.Delta.Signature)
+			}
+		case StreamEventContentBlockStop:
+			delete(open, event.Index)
+			lastClosed = event.Index
+		}
+	}
+	if len(open) != 0 || lastClosed != textIndex || text != "hello world" || signature != "opaque-state" {
+		t.Fatalf("lost final answer or signature: last=%d textIndex=%d text=%q signature=%q open=%v", lastClosed, textIndex, text, signature, open)
+	}
+}
+
 func TestStreamingAccumulatorEmitsCacheUsage(t *testing.T) {
 	var events []StreamEvent
 	acc := NewStreamingAccumulator("msg_123", "claude-test", func(event StreamEvent) error {
@@ -152,7 +201,6 @@ func TestStreamingAccumulatorSplitsThinkingBlocks(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	acc.ThinkingEnabled = true
 
 	add := func(content provider.Content) {
 		t.Helper()
@@ -203,7 +251,6 @@ func TestStreamingAccumulatorRedactedThinking(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	acc.ThinkingEnabled = true
 
 	add := func(content provider.Content) {
 		t.Helper()
@@ -296,14 +343,13 @@ func TestStreamingAccumulatorEmitsThinkingUsage(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	acc.ThinkingEnabled = true
 
 	err := acc.Add(provider.Completion{
 		Usage: &provider.Usage{
 			// Cache-inclusive intermediate total: 10 fresh + 40 read + 50 write.
 			InputTokens:              100,
 			OutputTokens:             30,
-			ReasoningTokens:          12,
+			ReasoningTokens:          new(12),
 			CacheReadInputTokens:     40,
 			CacheCreationInputTokens: 50,
 		},
@@ -345,7 +391,6 @@ func TestStreamingAccumulatorSummaryReasoning(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	acc.ThinkingEnabled = true
 
 	add := func(content provider.Content) {
 		t.Helper()

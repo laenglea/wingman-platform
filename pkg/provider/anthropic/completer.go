@@ -78,7 +78,13 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					if delta.Usage != nil {
 						delta.Usage.InputTokens += previousUsage.InputTokens
 						delta.Usage.OutputTokens += previousUsage.OutputTokens
-						delta.Usage.ReasoningTokens += previousUsage.ReasoningTokens
+						if previousUsage.ReasoningTokens != nil {
+							tokens := *previousUsage.ReasoningTokens
+							if delta.Usage.ReasoningTokens != nil {
+								tokens += *delta.Usage.ReasoningTokens
+							}
+							delta.Usage.ReasoningTokens = new(tokens)
+						}
 						delta.Usage.CacheReadInputTokens += previousUsage.CacheReadInputTokens
 						delta.Usage.CacheCreationInputTokens += previousUsage.CacheCreationInputTokens
 						usage = *delta.Usage
@@ -118,6 +124,8 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 		messageStopped := false
 
 		toolArgsSeen := map[int64]bool{}
+		textBlockIDs := map[int64]string{}
+		textBlocks := 0
 
 		// Emulated custom tools stream JSON-wrapped arguments. Their fragments
 		// cannot be unwrapped one at a time, so buffer them per block and emit
@@ -137,6 +145,13 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 				}
 
 				block := &message.Content[event.Index]
+				if block.Type == "server_tool_use" && strings.HasPrefix(block.Name, "tool_search_tool_") {
+					if !yield(&provider.Completion{ID: message.ID, Model: c.model, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{
+						provider.ToolCallContent(provider.ToolCall{ID: block.ID, Name: block.Name, Kind: provider.ToolKindToolSearch, Execution: "server", Arguments: string(block.Input)}),
+					}}}, nil) {
+						return
+					}
+				}
 
 				if block.Type == "tool_use" && !toolArgsSeen[event.Index] {
 					if len(block.Input) == 0 {
@@ -172,6 +187,8 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 
 			switch event := event.AsAny().(type) {
 			case anthropic.BetaRawMessageStartEvent:
+				textBlockIDs = map[int64]string{}
+				textBlocks = 0
 				// A continuation is a new native message within the same
 				// completion. Keep its boundary even when it has no phase.
 				if !yield(&provider.Completion{
@@ -190,6 +207,15 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 				startIndex := event.Index
 
 				switch event := event.ContentBlock.AsAny().(type) {
+				case anthropic.BetaToolSearchToolResultBlock:
+					result, err := ParseToolSearchResult(event.ToolUseID, []byte(event.Content.RawJSON()), options.Tools)
+					if err != nil {
+						yield(nil, err)
+						return
+					}
+					if !yield(&provider.Completion{ID: message.ID, Model: c.model, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ToolResultContent(result)}}}, nil) {
+						return
+					}
 				case anthropic.BetaThinkingBlock:
 					delta := &provider.Completion{
 						ID:    message.ID,
@@ -214,6 +240,12 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 					}
 
 				case anthropic.BetaTextBlock:
+					textID := message.ID
+					if textBlocks > 0 {
+						textID = fmt.Sprintf("%s_%d", message.ID, startIndex)
+					}
+					textBlockIDs[startIndex] = textID
+					textBlocks++
 					delta := &provider.Completion{
 						ID:    message.ID,
 						Model: c.model,
@@ -222,7 +254,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 							Role: provider.MessageRoleAssistant,
 
 							Content: []provider.Content{
-								provider.TextContent(event.Text),
+								{MessageID: textID, Text: event.Text},
 							},
 						},
 
@@ -266,10 +298,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 							Role: provider.MessageRoleAssistant,
 
 							Content: []provider.Content{
-								provider.CompactionContent(provider.Compaction{
-									Content:   event.Content,
-									Signature: event.EncryptedContent,
-								}),
+								provider.CompactionContent(compactionFromBlock(message.ID, startIndex, event.Content, event.EncryptedContent, event.RawJSON())),
 							},
 						},
 					}
@@ -362,10 +391,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 							Role: provider.MessageRoleAssistant,
 
 							Content: []provider.Content{
-								provider.CompactionContent(provider.Compaction{
-									Content:   event.Content,
-									Signature: event.EncryptedContent,
-								}),
+								provider.CompactionContent(compactionFromBlock(message.ID, blockIndex, event.Content, event.EncryptedContent, event.RawJSON())),
 							},
 						},
 					}
@@ -383,7 +409,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 							Role: provider.MessageRoleAssistant,
 
 							Content: []provider.Content{
-								provider.TextContent(event.Text),
+								{MessageID: textBlockIDs[blockIndex], Text: event.Text},
 							},
 						},
 					}
@@ -572,8 +598,31 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 }
 
 func (c *Completer) convertMessageRequest(input []provider.Message, options *provider.CompleteOptions) (*anthropic.BetaMessageNewParams, error) {
+	midSystem := matchesModel(c.model, []string{"fable-5", "mythos-5", "opus-4-8", "opus-5"})
+	if !midSystem {
+		input = provider.ResolveInstructions(input)
+	}
+	if !matchesModel(c.model, []string{"fable-5-1", "mythos-5-1", "opus-5"}) {
+		input, options = provider.ResolveConfigurationUpdates(input, options)
+	}
 	if options == nil {
 		options = new(provider.CompleteOptions)
+	}
+	// A compaction_trigger input item and the explicit option are equivalent.
+	for i, message := range input {
+		for j, content := range message.Content {
+			if content.CompactionTrigger {
+				if i != len(input)-1 || j != len(message.Content)-1 {
+					return nil, fmt.Errorf("anthropic: compaction_trigger must be the final input item")
+				}
+				cloned := *options
+				cloned.CompactionOptions = &provider.CompactionOptions{Trigger: true}
+				options = &cloned
+			}
+		}
+	}
+	if options.CompactionOptions != nil && matchesModel(c.model, LegacyModels) {
+		return nil, fmt.Errorf("anthropic: model %s does not support compaction", c.model)
 	}
 
 	req := &anthropic.BetaMessageNewParams{
@@ -592,7 +641,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	var tools []anthropic.BetaToolUnionParam
 	var messages []anthropic.BetaMessageParam
 
-	var hasCompaction bool
+	var hasCompaction, hasSignedCompaction bool
 
 	if options.Stop != nil {
 		req.StopSequences = options.Stop
@@ -613,26 +662,59 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	// Tools a client-executed tool_search returned in prior turns — they must
 	// be available (non-deferred) so the model can call them.
 	var discovered []provider.Tool
-
-	// Tools already called in the conversation stay loaded as well.
-	usedNames := map[string]bool{}
+	discoveredNames := map[string]bool{}
 
 	for _, m := range input {
-		for _, c := range m.Content {
-			if c.ToolCall != nil {
-				usedNames[provider.FlattenToolName(*c.ToolCall)] = true
+		for _, content := range m.Content {
+			if result := content.ToolResult; result != nil && result.Kind == provider.ToolKindToolSearch {
+				found := toolsearch.Resolve(toolsearch.Tools(result.Payload), options.Tools)
+				discovered = append(discovered, found...)
+				if result.Execution == "client" {
+					for _, tool := range provider.FlattenTools(found) {
+						discoveredNames[tool.Name] = true
+					}
+				}
 			}
 		}
-	}
-
-	for _, m := range input {
+		var effort provider.Effort
+		for _, content := range m.Content {
+			if content.ConfigurationUpdate != nil {
+				effort = content.ConfigurationUpdate.ReasoningEffort
+			}
+		}
+		if effort != "" {
+			if !slices.Contains(req.Betas, "mid-conversation-output-config-2026-07-01") {
+				req.Betas = append(req.Betas, "mid-conversation-output-config-2026-07-01")
+			}
+			var blocks []anthropic.BetaContentBlockParamUnion
+			for _, content := range m.Content {
+				if content.Text != "" {
+					blocks = append(blocks, anthropic.NewBetaTextBlock(content.Text))
+				}
+				if content.Instructions != nil {
+					blocks = append(blocks, anthropic.NewBetaTextBlock(content.Instructions.Text))
+				}
+			}
+			if blocks == nil {
+				blocks = []anthropic.BetaContentBlockParamUnion{}
+			}
+			update := anthropic.BetaMessageParam{Role: anthropic.BetaMessageParamRoleSystem, Content: blocks}
+			update.SetExtraFields(map[string]any{"output_config": map[string]any{"effort": outputEffort(effort)}})
+			messages = append(messages, update)
+			continue
+		}
 		switch m.Role {
 		case provider.MessageRoleSystem:
 			var texts []anthropic.BetaTextBlockParam
+			var turnScoped bool
 
 			for _, c := range m.Content {
 				if c.Text != "" {
 					texts = append(texts, anthropic.BetaTextBlockParam{Text: c.Text})
+				}
+				if c.Instructions != nil {
+					texts = append(texts, anthropic.BetaTextBlockParam{Text: c.Instructions.Text})
+					turnScoped = turnScoped || c.Instructions.Scope == provider.InstructionScopeTurn
 				}
 			}
 
@@ -640,7 +722,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				break
 			}
 
-			if len(messages) == 0 || matchesModel(c.model, LegacyModels) {
+			if (len(messages) == 0 && !turnScoped) || !midSystem {
 				system = append(system, texts...)
 				break
 			}
@@ -650,10 +732,17 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				blocks[i] = anthropic.BetaContentBlockParamUnion{OfText: &texts[i]}
 			}
 
-			messages = append(messages, anthropic.BetaMessageParam{
+			message := anthropic.BetaMessageParam{
 				Role:    anthropic.BetaMessageParamRoleSystem,
 				Content: blocks,
-			})
+			}
+			if turnScoped {
+				message.SetExtraFields(map[string]any{"clear_at": "next_user_message"})
+				if !slices.Contains(req.Betas, "mid-conversation-system-clear-at-2026-08-21") {
+					req.Betas = append(req.Betas, "mid-conversation-system-clear-at-2026-08-21")
+				}
+			}
+			messages = append(messages, message)
 
 		case provider.MessageRoleUser:
 			// tool_result blocks must precede other content in a user message
@@ -661,6 +750,12 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			var contentBlocks []anthropic.BetaContentBlockParamUnion
 
 			for _, c := range m.Content {
+				if c.Compaction != nil {
+					block, signed := compactionParam(c.Compaction)
+					contentBlocks = append(contentBlocks, block)
+					hasCompaction = true
+					hasSignedCompaction = hasSignedCompaction || signed
+				}
 				if text := strings.TrimRight(c.Text, " \t\n\r"); text != "" {
 					contentBlocks = append(contentBlocks, anthropic.NewBetaTextBlock(text))
 				}
@@ -688,11 +783,15 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 				if c.ToolResult != nil {
 					if c.ToolResult.Kind == provider.ToolKindToolSearch {
-						discovered = append(discovered, toolsearch.Tools(c.ToolResult.Payload)...)
-
 						if c.ToolResult.Execution != "client" {
-							// server-side search happened inside another
-							// backend's turn — only the discovered tools matter
+							// Responses represents hosted results as separate input
+							// items; Claude keeps them in the assistant's turn.
+							block := toolSearchResultBlock(*c.ToolResult)
+							if len(messages) > 0 && messages[len(messages)-1].Role == anthropic.BetaMessageParamRoleAssistant {
+								messages[len(messages)-1].Content = append(messages[len(messages)-1].Content, block)
+							} else {
+								messages = append(messages, anthropic.BetaMessageParam{Role: anthropic.BetaMessageParamRoleAssistant, Content: []anthropic.BetaContentBlockParamUnion{block}})
+							}
 							continue
 						}
 
@@ -776,6 +875,9 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			}
 
 			blocks = append(blocks, contentBlocks...)
+			if len(blocks) == 0 {
+				break
+			}
 
 			message := anthropic.NewBetaUserMessage(blocks...)
 			messages = append(messages, message)
@@ -809,23 +911,20 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				if c.Compaction != nil && (c.Compaction.Content != "" || c.Compaction.Signature != "") {
 					hasCompaction = true
 
-					compaction := &anthropic.BetaCompactionBlockParam{}
-
-					if c.Compaction.Content != "" {
-						compaction.Content = anthropic.String(c.Compaction.Content)
-					}
-
-					if c.Compaction.Signature != "" {
-						compaction.EncryptedContent = anthropic.String(c.Compaction.Signature)
-					}
-
-					blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
-						OfCompaction: compaction,
-					})
+					block, signed := compactionParam(c.Compaction)
+					hasSignedCompaction = hasSignedCompaction || signed
+					blocks = append(blocks, block)
 				}
 
 				if c.ToolCall != nil {
 					if c.ToolCall.Kind == provider.ToolKindToolSearch && c.ToolCall.Execution != "client" {
+						arguments := json.RawMessage(c.ToolCall.Arguments)
+						if len(arguments) == 0 {
+							arguments = json.RawMessage("{}")
+						}
+						blocks = append(blocks, anthropic.BetaContentBlockParamUnion{OfServerToolUse: &anthropic.BetaServerToolUseBlockParam{
+							ID: toolSearchID(c.ToolCall.ID), Name: anthropic.BetaServerToolUseBlockParamName(toolSearchCallName(*c.ToolCall, options.Tools)), Input: arguments,
+						}})
 						continue
 					}
 
@@ -851,6 +950,9 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 						},
 					})
 				}
+				if c.ToolResult != nil && c.ToolResult.Kind == provider.ToolKindToolSearch && c.ToolResult.Execution != "client" {
+					blocks = append(blocks, toolSearchResultBlock(*c.ToolResult))
+				}
 			}
 
 			message := anthropic.BetaMessageParam{
@@ -858,7 +960,11 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				Content: blocks,
 			}
 
-			messages = append(messages, message)
+			if len(messages) > 0 && messages[len(messages)-1].Role == message.Role {
+				messages[len(messages)-1].Content = append(messages[len(messages)-1].Content, message.Content...)
+			} else {
+				messages = append(messages, message)
+			}
 		}
 	}
 
@@ -869,9 +975,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		defined[t.Name] = true
 	}
 
-	discoveredNames := map[string]bool{}
 	for _, t := range provider.FlattenTools(discovered) {
-		discoveredNames[t.Name] = true
 
 		if !defined[t.Name] {
 			defined[t.Name] = true
@@ -1012,9 +1116,9 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			tool.Strict = anthropic.Bool(*t.Strict)
 		}
 
-		// deferring requires a search tool to discover the definition, and
-		// tools already discovered or called in prior turns must stay loaded
-		if t.Deferred != nil && *t.Deferred && hasToolSearch && !discoveredNames[t.Name] && !usedNames[t.Name] {
+		// Hosted results keep references in history. Keeping definitions
+		// deferred also preserves the prefix covered by thinking signatures.
+		if t.Deferred != nil && *t.Deferred && hasToolSearch && !discoveredNames[t.Name] {
 			tool.DeferLoading = anthropic.Bool(true)
 		}
 
@@ -1032,12 +1136,16 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		system = append(system, anthropic.BetaTextBlockParam{Text: jsonModeInstruction})
 	}
 
-	if options.CompactionOptions != nil && !matchesModel(c.model, LegacyModels) {
+	triggerCompaction := options.CompactionOptions != nil && options.CompactionOptions.Trigger
+	if !triggerCompaction && (options.CompactionOptions != nil || hasCompaction && !hasSignedCompaction) {
+		if hasSignedCompaction {
+			return nil, fmt.Errorf("anthropic: threshold compaction cannot be combined with a signed compaction block")
+		}
 		hasCompaction = true
 
 		edit := &anthropic.BetaCompact20260112EditParam{}
 
-		if options.CompactionOptions.Threshold > 0 {
+		if options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 {
 			edit.Trigger = anthropic.BetaInputTokensTriggerParam{
 				Value: int64(options.CompactionOptions.Threshold),
 			}
@@ -1050,7 +1158,9 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		}
 	}
 
-	if hasCompaction {
+	if hasSignedCompaction || triggerCompaction {
+		req.Betas = append(req.Betas, "compact-2026-09-04")
+	} else if hasCompaction {
 		req.Betas = append(req.Betas, "compact-2026-01-12")
 	}
 
@@ -1081,11 +1191,8 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			req.ToolChoice = anthropic.BetaToolChoiceUnionParam{OfAuto: p}
 
 		case provider.ToolChoiceAny:
-			// Fable/Mythos 5.1 reject forced tool use. Omitting tool_choice
-			// retains the API default (auto), while leaving every supplied tool
-			// available for the model to choose.
 			if matchesModel(c.model, NoForcedToolChoiceModels) {
-				break
+				return nil, fmt.Errorf("anthropic: model %s does not support forced tool_choice; use auto or none", c.model)
 			}
 
 			forcesTool = true
@@ -1128,6 +1235,24 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			OfDisabled: &anthropic.BetaThinkingConfigDisabledParam{},
 		}
 	}
+	// Retention is meaningful only with active thinking. Tool continuations
+	// without signed thinking and forced tool calls can disable it above.
+	if options.ReasoningOptions != nil && (thinking.Enabled || matchesModel(c.model, AlwaysThinkingModels)) {
+		var keep anthropic.BetaClearThinking20251015EditKeepUnionParam
+		switch options.ReasoningOptions.Context {
+		case provider.ReasoningContextAllTurns:
+			keep.OfAll = "all"
+		case provider.ReasoningContextCurrentTurn:
+			keep.OfThinkingTurns = &anthropic.BetaThinkingTurnsParam{Value: 1}
+		}
+		if keep.OfAll != "" || keep.OfThinkingTurns != nil {
+			// Thinking retention precedes compaction when both are requested.
+			req.ContextManagement.Edits = append([]anthropic.BetaContextManagementConfigEditUnionParam{
+				{OfClearThinking20251015: &anthropic.BetaClearThinking20251015EditParam{Keep: keep}},
+			}, req.ContextManagement.Edits...)
+			req.Betas = append(req.Betas, "context-management-2025-06-27")
+		}
+	}
 
 	if thinking.Effort != "" {
 		req.OutputConfig.Effort = thinking.Effort
@@ -1140,31 +1265,69 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	if len(messages) > 0 {
 		req.Messages = messages
 	}
+	if triggerCompaction {
+		if len(options.Stop) > 0 || options.Schema != nil || forcesTool {
+			return nil, fmt.Errorf("anthropic: compaction cannot be combined with stop sequences, output format, or forced tools")
+		}
+		compaction := map[string]any{"type": "summarize"}
+		req.SetExtraFields(map[string]any{"compaction": compaction})
+	}
 
 	return req, nil
 }
 
 func toUsage(usage anthropic.BetaUsage) *provider.Usage {
+	var reasoningTokens *int
+	if usage.OutputTokensDetails.JSON.ThinkingTokens.Valid() || usage.OutputTokensDetails.ThinkingTokens > 0 {
+		reasoningTokens = new(int(usage.OutputTokensDetails.ThinkingTokens))
+	}
+
 	if usage.InputTokens == 0 &&
 		usage.OutputTokens == 0 &&
 		usage.CacheReadInputTokens == 0 &&
-		usage.CacheCreationInputTokens == 0 {
+		usage.CacheCreationInputTokens == 0 && len(usage.Iterations) == 0 && reasoningTokens == nil {
 		return nil
 	}
 
 	cacheReadInputTokens := int(usage.CacheReadInputTokens)
 	cacheCreationInputTokens := int(usage.CacheCreationInputTokens)
 
-	return &provider.Usage{
+	result := &provider.Usage{
 		// Anthropic reports input_tokens excluding cached tokens. Normalize to a
 		// cache-inclusive total so the intermediate Usage has one consistent
 		// meaning across providers (cache fields are the cached subset of it).
 		InputTokens:  int(usage.InputTokens) + cacheReadInputTokens + cacheCreationInputTokens,
 		OutputTokens: int(usage.OutputTokens),
 
-		ReasoningTokens: int(usage.OutputTokensDetails.ThinkingTokens),
+		ReasoningTokens: reasoningTokens,
 
 		CacheReadInputTokens:     cacheReadInputTokens,
 		CacheCreationInputTokens: cacheCreationInputTokens,
 	}
+	if len(usage.Iterations) > 0 {
+		// Top-level usage excludes compaction. Keep the shared usage contract:
+		// total billed tokens, with cached tokens included in the input total.
+		result.InputTokens, result.OutputTokens = 0, 0
+		result.CacheReadInputTokens, result.CacheCreationInputTokens = 0, 0
+		for _, iteration := range usage.Iterations {
+			input := int(iteration.InputTokens + iteration.CacheReadInputTokens + iteration.CacheCreationInputTokens)
+			result.InputTokens += input
+			result.OutputTokens += int(iteration.OutputTokens)
+			result.CacheReadInputTokens += int(iteration.CacheReadInputTokens)
+			result.CacheCreationInputTokens += int(iteration.CacheCreationInputTokens)
+		}
+	}
+	return result
+}
+
+func compactionFromBlock(messageID string, index int64, content, encrypted, raw string) provider.Compaction {
+	var block struct {
+		Signature string `json:"signature"`
+	}
+	_ = json.Unmarshal([]byte(raw), &block)
+	result := provider.Compaction{ID: fmt.Sprintf("%s_compaction_%d", messageID, index), Content: content, Signature: encrypted}
+	if block.Signature != "" {
+		result.Signature = WrapCompactionSignature(block.Signature)
+	}
+	return result
 }

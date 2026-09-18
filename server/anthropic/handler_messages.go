@@ -1,7 +1,6 @@
 package anthropic
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,21 +9,14 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
-func thinkingEnabled(options *provider.CompleteOptions) bool {
-	reasoning := options.ReasoningOptions
-
-	if reasoning == nil || reasoning.Type == provider.ReasoningTypeDisabled {
-		return false
-	}
-
-	return reasoning.Type == provider.ReasoningTypeAdaptive || reasoning.Effort != ""
-}
-
 func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 	var req MessageRequest
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeRequest(r.Body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.Model == "" || len(req.Messages) == 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("model and non-empty messages are required"))
 		return
 	}
 
@@ -74,6 +66,9 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func toCompleteOptions(req MessageRequest) (*provider.CompleteOptions, error) {
+	if err := validateCompactionRequest(req); err != nil {
+		return nil, err
+	}
 	tools, err := toTools(req.Tools)
 
 	if err != nil {
@@ -184,10 +179,17 @@ func toCompleteOptions(req MessageRequest) (*provider.CompleteOptions, error) {
 			IncludeSummary:   summary,
 			IncludeSignature: true,
 		}
+	} else {
+		// Request replayable state without overriding the model's thinking
+		// defaults. Providers that always return signatures need no extra flag.
+		options.ReasoningOptions = &provider.ReasoningOptions{IncludeSignature: true}
 	}
 
 	if req.ContextManagement != nil {
 		for _, edit := range req.ContextManagement.Edits {
+			if edit.Type == "clear_thinking_20251015" {
+				options.ReasoningOptions.Context, _ = edit.reasoningContext() // Validated above.
+			}
 			if strings.HasPrefix(edit.Type, "compact") {
 				options.CompactionOptions = &provider.CompactionOptions{}
 
@@ -200,11 +202,97 @@ func toCompleteOptions(req MessageRequest) (*provider.CompleteOptions, error) {
 			}
 		}
 	}
+	if req.Compaction != nil {
+		options.CompactionOptions = &provider.CompactionOptions{
+			Trigger: true,
+		}
+	}
 
 	return options, nil
 }
 
+func validateCompactionRequest(req MessageRequest) error {
+	if req.Compaction != nil {
+		if req.Compaction.Instructions != "" {
+			return fmt.Errorf("compaction.instructions: custom compaction instructions are not supported")
+		}
+		if req.Compaction.Type != "summarize" {
+			return fmt.Errorf("compaction.type: must be summarize")
+		}
+		if req.ContextManagement != nil {
+			return fmt.Errorf("compaction cannot be combined with context_management")
+		}
+		if len(req.StopSequences) > 0 || req.OutputFormat != nil || (req.OutputConfig != nil && req.OutputConfig.Format != nil) ||
+			(req.ToolChoice != nil && (req.ToolChoice.Type == "any" || req.ToolChoice.Type == "tool")) {
+			return fmt.Errorf("compaction cannot be combined with stop_sequences, output format, or forced tool_choice")
+		}
+	}
+	if req.ContextManagement != nil {
+		seen := map[string]bool{}
+		for i, edit := range req.ContextManagement.Edits {
+			if seen[edit.Type] {
+				return fmt.Errorf("context_management.edits: duplicate edit %q", edit.Type)
+			}
+			seen[edit.Type] = true
+			if edit.Type == "clear_thinking_20251015" {
+				if i != 0 || edit.Trigger != nil || edit.Instructions != "" || edit.PauseAfterCompaction {
+					return fmt.Errorf("context_management: thinking retention must be first and may only configure keep")
+				}
+				if _, err := edit.reasoningContext(); err != nil {
+					return err
+				}
+				continue
+			}
+			if edit.Type != "compact_20260112" {
+				return fmt.Errorf("context_management.edits: unsupported edit %q", edit.Type)
+			}
+			if edit.Instructions != "" || edit.PauseAfterCompaction {
+				return fmt.Errorf("context_management: custom compaction instructions and pause_after_compaction are not supported; use compaction.type=summarize for explicit compaction")
+			}
+			if len(edit.Keep) > 0 {
+				return fmt.Errorf("context_management: compaction does not support keep")
+			}
+			if edit.Type == "compact_20260112" && edit.Trigger != nil && (edit.Trigger.Type != "input_tokens" || edit.Trigger.Value < 50000) {
+				return fmt.Errorf("context_management: compaction trigger must be input_tokens with value at least 50000")
+			}
+		}
+	}
+	return nil
+}
+
 func validateMessageRequest(req MessageRequest) error {
+	if req.OutputConfig != nil && len(req.OutputConfig.TaskBudget) > 0 && string(req.OutputConfig.TaskBudget) != "null" {
+		return fmt.Errorf("output_config.task_budget: task-wide budgets are not supported")
+	}
+	if req.OutputConfig != nil && req.OutputConfig.Effort != "" && !validEffort(req.OutputConfig.Effort) {
+		return fmt.Errorf("output_config.effort: unsupported effort %q", req.OutputConfig.Effort)
+	}
+	if req.Thinking != nil {
+		if len(req.Thinking.BlockBinding) > 0 && string(req.Thinking.BlockBinding) != "null" {
+			return fmt.Errorf("thinking.block_binding: binding controls are not supported")
+		}
+		switch req.Thinking.Type {
+		case "enabled", "adaptive", "disabled":
+		default:
+			return fmt.Errorf("thinking.type: must be enabled, adaptive, or disabled")
+		}
+		switch req.Thinking.Display {
+		case "", "summarized", "omitted":
+		default:
+			return fmt.Errorf("thinking.display: only summarized and omitted are supported")
+		}
+	}
+	if req.ToolChoice != nil {
+		switch req.ToolChoice.Type {
+		case "auto", "any", "none":
+		case "tool":
+			if req.ToolChoice.Name == "" {
+				return fmt.Errorf("tool_choice.name: required for type tool")
+			}
+		default:
+			return fmt.Errorf("tool_choice.type: must be auto, any, tool, or none")
+		}
+	}
 	if req.MaxTokens == nil {
 		return fmt.Errorf("max_tokens: Field required")
 	}
@@ -277,17 +365,15 @@ func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request,
 			CacheCreationInputTokens: completion.Usage.CacheCreationInputTokens,
 		}
 
-		// Anthropic only reports thinking tokens when thinking was requested;
-		// a backend that thinks on its own still counts them in output_tokens.
-		if thinkingEnabled(options) {
+		if completion.Usage.ReasoningTokens != nil {
 			result.Usage.OutputTokensDetails = &OutputTokensDetails{
-				ThinkingTokens: completion.Usage.ReasoningTokens,
+				ThinkingTokens: *completion.Usage.ReasoningTokens,
 			}
 		}
 	}
 
 	if completion.Message != nil {
-		result.Content = toContentBlocks(completion.Message.Content, thinkingEnabled(options))
+		result.Content = toContentBlocks(completion.Message.Content)
 		reason := toStopReason(completion)
 		result.StopReason = &reason
 
@@ -385,8 +471,6 @@ func (h *Handler) handleMessagesStream(w http.ResponseWriter, r *http.Request, r
 
 		return nil
 	})
-
-	accumulator.ThinkingEnabled = thinkingEnabled(options)
 
 	for completion, err := range completer.Complete(r.Context(), messages, options) {
 		if err != nil {
