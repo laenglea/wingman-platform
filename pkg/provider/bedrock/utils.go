@@ -75,20 +75,23 @@ func supportsOutputFormat(model string) bool {
 	return matchesModel(model, StrictToolModels)
 }
 
-// MidSystemModels accept role "system" messages inside the conversation —
-// the same Claude models as on the native API (4.8 and 5.x, not Sonnet 5).
-// Other models get their later instructions hoisted into the top-level
-// system prompt.
-var MidSystemModels = []string{
+// PreservedThinkingModels retain all prior thinking by default, so accepting
+// reasoning.context=all_turns requires no unsupported Converse parameter.
+// Earlier Sonnet/Opus models and Haiku retain only the last turn by default.
+// https://platform.claude.com/docs/en/build-with-claude/context-editing
+var PreservedThinkingModels = []string{
 	"fable-5",
 	"mythos-5",
+	"mythos-preview",
 
+	"opus-4-5",
+	"opus-4-6",
+	"opus-4-7",
 	"opus-4-8",
 	"opus-5",
-}
 
-func (c *Completer) supportsMidSystem() bool {
-	return matchesModel(c.model, MidSystemModels)
+	"sonnet-4-6",
+	"sonnet-5",
 }
 
 func matchesModel(model string, patterns []string) bool {

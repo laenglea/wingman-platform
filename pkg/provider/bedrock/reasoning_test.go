@@ -37,23 +37,39 @@ func TestReplaySignedThinkingFromResponsesSummary(t *testing.T) {
 	}
 }
 
-func TestConverseRejectsUnsupportedReasoningContext(t *testing.T) {
-	c := &Completer{Config: &Config{model: "anthropic.claude-sonnet-4-6-v1:0"}}
-	for _, mode := range []provider.ReasoningContext{"", provider.ReasoningContextAuto, provider.ReasoningContextCurrentTurn, provider.ReasoningContextAllTurns} {
-		t.Run(string(mode), func(t *testing.T) {
-			_, err := c.convertConverseInput([]provider.Message{provider.UserMessage("Hello")}, &provider.CompleteOptions{
-				ReasoningOptions: &provider.ReasoningOptions{Context: mode},
-			})
-			if mode == "" || mode == provider.ReasoningContextAuto {
-				if err != nil {
-					t.Fatal(err)
+func TestConverseReasoningContext(t *testing.T) {
+	for _, tc := range []struct {
+		model   string
+		keepAll bool
+	}{
+		{"anthropic.claude-sonnet-4-6-v1:0", true},
+		{"eu.anthropic.claude-opus-5", true},
+		{"eu.anthropic.claude-sonnet-5", true},
+		{"eu.anthropic.claude-opus-4-5-20251101-v1:0", true},
+		{"eu.anthropic.claude-fable-5", true},
+		{"anthropic.claude-sonnet-4-5", false},
+		{"anthropic.claude-haiku-4-5", false},
+		{"anthropic.claude-opus-4-1", false},
+		{"anthropic.claude-unknown", false},
+		{"amazon.nova-pro-v1:0", false},
+	} {
+		for _, mode := range []provider.ReasoningContext{"", provider.ReasoningContextAuto, provider.ReasoningContextCurrentTurn, provider.ReasoningContextAllTurns, "unknown"} {
+			t.Run(tc.model+"/"+string(mode), func(t *testing.T) {
+				c := &Completer{Config: &Config{model: tc.model}}
+				_, err := c.convertConverseInput([]provider.Message{provider.UserMessage("Hello")}, &provider.CompleteOptions{
+					ReasoningOptions: &provider.ReasoningOptions{Context: mode},
+				})
+				if mode == "" || mode == provider.ReasoningContextAuto || (mode == provider.ReasoningContextAllTurns && tc.keepAll) {
+					if err != nil {
+						t.Fatal(err)
+					}
+					return
 				}
-				return
-			}
-			var providerErr *provider.ProviderError
-			if !errors.As(err, &providerErr) || providerErr.Code != 400 || providerErr.Type != "invalid_request_error" {
-				t.Fatalf("error = %v, want invalid_request_error", err)
-			}
-		})
+				var providerErr *provider.ProviderError
+				if !errors.As(err, &providerErr) || providerErr.Code != 400 || providerErr.Type != "invalid_request_error" {
+					t.Fatalf("error = %v, want invalid_request_error", err)
+				}
+			})
+		}
 	}
 }

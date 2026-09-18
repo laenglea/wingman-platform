@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,27 @@ func claudeEnv(configDir, baseURL, model string) []string {
 
 func runClaude(t *testing.T, binary string, endpoint harness.Endpoint, model, prompt, tools, input string) (string, []exchange, string) {
 	t.Helper()
+	return runClaudeWithOptions(t, binary, endpoint, model, prompt, tools, input, claudeRunOptions{})
+}
+
+type claudeRunOptions struct {
+	setup        func(*testing.T, string)
+	maxTurns     int
+	timeout      time.Duration
+	allowedTools string
+}
+
+func runClaudeWithOptions(t *testing.T, binary string, endpoint harness.Endpoint, model, prompt, tools, input string, options claudeRunOptions) (string, []exchange, string) {
+	t.Helper()
+	if options.maxTurns == 0 {
+		options.maxTurns = 6
+	}
+	if options.timeout == 0 {
+		options.timeout = 2 * time.Minute
+	}
+	if options.allowedTools == "" {
+		options.allowedTools = tools
+	}
 	dir := t.TempDir()
 	if root := os.Getenv("CLAUDE_CODE_ARTIFACTS"); root != "" {
 		if err := os.MkdirAll(root, 0700); err != nil {
@@ -91,14 +113,18 @@ func runClaude(t *testing.T, binary string, endpoint harness.Endpoint, model, pr
 		writeArtifact(t, filepath.Join(fixture, "output.txt"), []byte("REPLACE_ME\n"))
 		prompt += fmt.Sprintf("\nUse the absolute paths %q and %q. For Read, pass only file_path; these are plain text files.", filepath.Join(fixture, "input.txt"), filepath.Join(fixture, "output.txt"))
 	}
+	if options.setup != nil {
+		options.setup(t, fixture)
+		prompt += fmt.Sprintf("\nYour working directory is %q. Use absolute file paths within this directory for Read and Edit.", fixture)
+	}
 	r := newRecorder(t, endpoint)
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), options.timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binary,
 		"--bare", "--print", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
 		"--no-session-persistence", "--setting-sources", "", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
-		"--disable-slash-commands", "--permission-mode", "dontAsk", "--tools", tools, "--allowedTools", tools,
-		"--model", model, "--effort", "low", "--max-turns", "6", "--max-budget-usd", "1",
+		"--disable-slash-commands", "--permission-mode", "dontAsk", "--tools", tools, "--allowedTools", options.allowedTools,
+		"--model", model, "--effort", "low", "--max-turns", strconv.Itoa(options.maxTurns), "--max-budget-usd", "1",
 		"--", prompt,
 	)
 	cmd.Dir, cmd.Env, cmd.WaitDelay = fixture, claudeEnv(configDir, r.URL, model), 5*time.Second

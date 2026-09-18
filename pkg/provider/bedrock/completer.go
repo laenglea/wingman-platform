@@ -678,19 +678,20 @@ func (c *Completer) resolveInput(messages []provider.Message, options *provider.
 func (c *Completer) convertConverseInput(input []provider.Message, options *provider.CompleteOptions) (*bedrockruntime.ConverseInput, error) {
 	if options != nil && options.ReasoningOptions != nil {
 		mode := options.ReasoningOptions.Context
-		if mode != "" && mode != provider.ReasoningContextAuto {
+		// Converse cannot configure retention. Claude Code's keep-all request
+		// is already satisfied by models that preserve all thinking by default.
+		keepAll := mode == provider.ReasoningContextAllTurns && matchesModel(c.model, PreservedThinkingModels)
+		if mode != "" && mode != provider.ReasoningContextAuto && !keepAll {
 			return nil, &provider.ProviderError{
 				Code:    400,
 				Type:    "invalid_request_error",
-				Message: "Bedrock Converse does not support explicit reasoning.context; omit it or use auto",
+				Message: "Bedrock Converse cannot change this model's reasoning.context; omit it or use auto",
 			}
 		}
 	}
 	input, options = c.resolveInput(input, options)
 
-	midSystem := c.supportsMidSystem()
-
-	messages, err := c.convertMessages(input, midSystem)
+	messages, err := c.convertMessages(input)
 
 	if err != nil {
 		return nil, err
@@ -812,7 +813,7 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 
 		Messages: messages,
 
-		System:     c.convertSystem(input, midSystem),
+		System:     c.convertSystem(input),
 		ToolConfig: config,
 
 		InferenceConfig: inference,
@@ -832,18 +833,15 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 	return req, nil
 }
 
-// convertSystem collects the top-level system prompt: every system message
-// when the model takes none inside the conversation, otherwise only those
-// ahead of the first turn — later ones stay in place (see convertMessages).
-func (c *Completer) convertSystem(messages []provider.Message, midSystem bool) []types.SystemContentBlock {
+// Converse only supports the top-level system field. Mid-conversation system
+// messages require InvokeModel, even on newer Claude models. Collect the
+// resolved instructions here so a trailing system message cannot make an
+// otherwise valid user/tool-result turn fail Bedrock's last-turn validation.
+func (c *Completer) convertSystem(messages []provider.Message) []types.SystemContentBlock {
 	var result []types.SystemContentBlock
 
 	for _, m := range messages {
 		if m.Role != provider.MessageRoleSystem {
-			if midSystem {
-				break
-			}
-
 			continue
 		}
 
@@ -876,45 +874,33 @@ func (c *Completer) convertSystem(messages []provider.Message, midSystem bool) [
 	return result
 }
 
-// convertMessages builds the conversation. System messages ahead of the
-// first turn always belong to the top-level system prompt. Later ones are
-// kept in place as role "system" messages on models that accept them; other
-// models had their text hoisted by convertSystem.
-func (c *Completer) convertMessages(messages []provider.Message, midSystem bool) ([]types.Message, error) {
+// convertMessages builds the conversation without system messages, whose
+// resolved instructions are collected by convertSystem.
+func (c *Completer) convertMessages(messages []provider.Message) ([]types.Message, error) {
 	var result []types.Message
 
-	// Pre-process: merge consecutive messages with the same role (required by Bedrock API)
+	// Merge consecutive turns after hoisting system instructions.
 	var merged []provider.Message
 	for _, m := range messages {
+		if m.Role == provider.MessageRoleSystem {
+			continue
+		}
 		if len(merged) > 0 && merged[len(merged)-1].Role == m.Role {
 			last := &merged[len(merged)-1]
 			last.Content = append(last.Content, m.Content...)
 		} else {
+			m.Content = slices.Clone(m.Content)
 			merged = append(merged, m)
 		}
 	}
 
-	started := false
-
 	for _, m := range merged {
-		if m.Role == provider.MessageRoleSystem {
-			if !midSystem || !started {
-				continue
-			}
-		} else {
-			started = true
-		}
-
 		var err error
 
 		var role types.ConversationRole
 		var content []types.ContentBlock
 
 		switch m.Role {
-		case provider.MessageRoleSystem:
-			role = types.ConversationRoleSystem
-			content = convertSystemContent(m)
-
 		case provider.MessageRoleUser:
 			role = types.ConversationRoleUser
 			content, err = convertUserContent(m)
@@ -956,20 +942,6 @@ func (c *Completer) convertMessages(messages []provider.Message, midSystem bool)
 	}
 
 	return result, nil
-}
-
-// convertSystemContent builds a mid-conversation system message from the
-// resolved instructions.
-func convertSystemContent(m provider.Message) []types.ContentBlock {
-	var content []types.ContentBlock
-
-	for _, c := range m.Content {
-		if text := strings.TrimRight(c.Text, " \t\n\r"); text != "" {
-			content = append(content, &types.ContentBlockMemberText{Value: text})
-		}
-	}
-
-	return content
 }
 
 func convertUserContent(m provider.Message) ([]types.ContentBlock, error) {

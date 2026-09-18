@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/adrianliechti/wingman/test/anthropic"
@@ -35,10 +37,19 @@ func TestClaudeCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("Claude Code version: %s", version)
+	models := anthropic.DefaultModels()
+	if os.Getenv("TEST_ANTHROPIC_MODELS") == "" {
+		// Opus makes the CLI exercise mid-conversation system messages.
+		models = append(models, anthropic.Model{Name: "claude-opus-5"})
+	} else if configured := harness.ConfiguredModels(h.Wingman.BaseURL, h.Wingman.APIKey); configured != nil {
+		for _, model := range models {
+			if !configured[model.Name] {
+				t.Fatalf("explicitly requested model %q is not configured in Wingman", model.Name)
+			}
+		}
+	}
 	input := fmt.Sprintf("fixture-%s\n", rand.Text())
-	for _, scenario := range []struct {
-		name, prompt, tools, input, want string
-	}{
+	for _, scenario := range []claudeScenario{
 		{
 			name:   "text",
 			prompt: "Reply with exactly WINGMAN_E2E_OK and nothing else.",
@@ -51,22 +62,29 @@ func TestClaudeCode(t *testing.T) {
 			input:  input,
 			want:   input,
 		},
+		projectScenario(),
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			run := func(t *testing.T, endpoint harness.Endpoint, model string) outcome {
-				answer, exchanges, fixture := runClaude(t, binary, endpoint, model, scenario.prompt, scenario.tools, scenario.input)
+				answer, exchanges, fixture := runClaudeWithOptions(t, binary, endpoint, model, scenario.prompt, scenario.tools, scenario.input, scenario.options)
 				tools := checkExchanges(t, exchanges, model)
+				var wantTools []string
+				if scenario.tools != "" {
+					wantTools = strings.Split(scenario.tools, ",")
+					slices.Sort(wantTools)
+				}
+				if !slices.Equal(tools, wantTools) {
+					t.Errorf("expected completed tools %v, got %v", wantTools, tools)
+				}
 				if scenario.input != "" {
 					data, err := os.ReadFile(filepath.Join(fixture, "output.txt"))
 					if err != nil {
 						t.Fatalf("Claude Code did not write output.txt: %v", err)
 					}
 					answer = string(data)
-					if !reflect.DeepEqual(tools, []string{"Edit", "Read"}) {
-						t.Errorf("expected completed Read and Edit tool calls, got %v", tools)
-					}
-				} else if len(tools) > 0 {
-					t.Errorf("text-only scenario unexpectedly called tools: %v", tools)
+				}
+				if scenario.verify != nil {
+					scenario.verify(t, exchanges, fixture)
 				}
 				if answer != scenario.want {
 					t.Errorf("outcome %q, want %q", answer, scenario.want)
@@ -81,7 +99,7 @@ func TestClaudeCode(t *testing.T) {
 			}) {
 				t.Fatal("Anthropic reference failed; cannot compare Wingman")
 			}
-			for _, model := range anthropic.DefaultModels() {
+			for _, model := range models {
 				t.Run("wingman/"+model.Name, func(t *testing.T) {
 					h.SkipUnlessConfigured(t, model.Name)
 					actual := run(t, h.Wingman, model.Name)
@@ -92,6 +110,12 @@ func TestClaudeCode(t *testing.T) {
 			}
 		})
 	}
+}
+
+type claudeScenario struct {
+	name, prompt, tools, input, want string
+	options                          claudeRunOptions
+	verify                           func(*testing.T, []exchange, string)
 }
 
 // Compare task results and completed tool names, not generated prose, IDs,

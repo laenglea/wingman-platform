@@ -2,6 +2,7 @@ package bedrock
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -153,58 +154,40 @@ func messageRoles(messages []types.Message) []types.ConversationRole {
 	return roles
 }
 
-// TestConvertConverseInput_MidConversationSystem verifies system messages
-// ahead of the first turn form the top-level prompt while later ones stay in
-// place on models that accept them, and are hoisted elsewhere.
+// Converse requires system instructions in the top-level field, even for
+// models that accept mid-conversation system messages through InvokeModel.
 func TestConvertConverseInput_MidConversationSystem(t *testing.T) {
 	history := []provider.Message{
 		provider.SystemMessage("Be brief."),
 		provider.UserMessage("Start"),
 		{Role: provider.MessageRoleSystem, Content: []provider.Content{
 			provider.InstructionsContent(provider.Instructions{Text: "Answer in German.", Scope: provider.InstructionScopeConversation}),
+			provider.InstructionsContent(provider.Instructions{Text: "Expired instruction.", Scope: provider.InstructionScopeTurn}),
 		}},
 		provider.AssistantMessage("Erste Antwort"),
 		provider.UserMessage("Continue"),
+		{Role: provider.MessageRoleSystem, Content: []provider.Content{
+			provider.InstructionsContent(provider.Instructions{Text: "Keep this answer short.", Scope: provider.InstructionScopeTurn}),
+		}},
 	}
 
-	t.Run("native", func(t *testing.T) {
-		c := &Completer{Config: &Config{model: "eu.anthropic.claude-opus-5"}}
-
-		req, err := c.convertConverseInput(history, &provider.CompleteOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if texts := systemTexts(req.System); len(texts) != 1 || texts[0] != "Be brief." {
-			t.Fatalf("top-level system = %v", texts)
-		}
-		want := []types.ConversationRole{types.ConversationRoleUser, types.ConversationRoleSystem, types.ConversationRoleAssistant, types.ConversationRoleUser}
-		if got := messageRoles(req.Messages); len(got) != len(want) || got[1] != want[1] || got[3] != want[3] {
-			t.Fatalf("roles = %v, want %v", got, want)
-		}
-		text, ok := req.Messages[1].Content[0].(*types.ContentBlockMemberText)
-		if !ok || text.Value != "Answer in German." {
-			t.Fatalf("mid-conversation system content = %+v", req.Messages[1].Content)
-		}
-	})
-
-	t.Run("hoisted", func(t *testing.T) {
-		c := &Completer{Config: &Config{model: "anthropic.claude-sonnet-4-6"}}
-
-		req, err := c.convertConverseInput(history, &provider.CompleteOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if texts := systemTexts(req.System); len(texts) != 2 || texts[1] != "Answer in German." {
-			t.Fatalf("top-level system = %v", texts)
-		}
-		for _, role := range messageRoles(req.Messages) {
-			if role == types.ConversationRoleSystem {
-				t.Fatal("system message placed on a model without mid-conversation support")
+	for _, model := range []string{"eu.anthropic.claude-opus-5", "eu.anthropic.claude-opus-4-8", "eu.anthropic.claude-fable-5", "anthropic.claude-sonnet-4-6"} {
+		t.Run(model, func(t *testing.T) {
+			c := &Completer{Config: &Config{model: model}}
+			req, err := c.convertConverseInput(history, &provider.CompleteOptions{})
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-	})
+			wantRoles := []types.ConversationRole{types.ConversationRoleUser, types.ConversationRoleAssistant, types.ConversationRoleUser}
+			if got := messageRoles(req.Messages); !slices.Equal(got, wantRoles) {
+				t.Fatalf("roles = %v, want %v", got, wantRoles)
+			}
+			wantSystem := []string{"Be brief.", "Answer in German.", "Keep this answer short."}
+			if got := systemTexts(req.System); !slices.Equal(got, wantSystem) {
+				t.Fatalf("system = %v, want %v", got, wantSystem)
+			}
+		})
+	}
 }
 
 func TestConvertFormats_AddedTypes(t *testing.T) {
