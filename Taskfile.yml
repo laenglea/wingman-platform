@@ -50,6 +50,22 @@ tasks:
       - go test -v -timeout 30m ./test/openai/responses/hard/...
       - go test -v -timeout 30m ./test/anthropic/hard/...
       - go test -v -timeout 30m ./test/gemini/hard/...
+
+  test:claudecode:
+    desc: Run paid Claude Code comparisons against Anthropic and Wingman
+    dotenv: ['.env']
+    env:
+      CLAUDE_CODE_LIVE: '1'
+    cmds:
+      - go test -v -count=1 -timeout 30m ./test/claudecode
+
+  test:codex:
+    desc: Run paid Codex CLI comparisons against OpenAI and Wingman
+    dotenv: ['.env']
+    env:
+      CODEX_LIVE: '1'
+    cmds:
+      - go test -v -count=1 -timeout 30m ./test/codex
   
   lgtm:
     cmds:

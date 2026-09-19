@@ -69,7 +69,7 @@ func TestConverseAdditionalFields_SchemaDisablesThinking(t *testing.T) {
 		Schema: &provider.Schema{Name: "classify", Properties: testSchema},
 	})
 
-	if thinking {
+	if thinking.Enabled {
 		t.Error("expected thinking not enabled")
 	}
 
@@ -147,7 +147,7 @@ func TestConverseAdditionalFields_UnsignedToolHistoryDisablesThinking(t *testing
 
 	fields, thinking := c.converseAdditionalFields(stripped, options)
 
-	if thinking {
+	if thinking.Enabled {
 		t.Error("expected thinking not enabled")
 	}
 	got, _ := fields["thinking"].(map[string]any)
@@ -166,7 +166,7 @@ func TestConverseAdditionalFields_UnsignedToolHistoryDisablesThinking(t *testing
 
 	fields, thinking = c.converseAdditionalFields(signed, options)
 
-	if !thinking {
+	if !thinking.Enabled {
 		t.Error("expected thinking enabled for signed history")
 	}
 	got, _ = fields["thinking"].(map[string]any)

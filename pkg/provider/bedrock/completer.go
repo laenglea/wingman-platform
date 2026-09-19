@@ -18,6 +18,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider/tools/custom"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/toolsearch"
 
 	"github.com/google/uuid"
 
@@ -83,29 +84,13 @@ func NewCompleter(model string, options ...Option) (*Completer, error) {
 
 func (c *Completer) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	return func(yield func(*provider.Completion, error) bool) {
-		if options == nil {
-			options = new(provider.CompleteOptions)
-		}
+		messages, options = c.resolveInput(messages, options)
 
 		req, err := c.convertConverseInput(messages, options)
 
 		if err != nil {
 			yield(nil, err)
 			return
-		}
-
-		config := &types.InferenceConfiguration{}
-
-		if options.MaxTokens != nil {
-			config.MaxTokens = aws.Int32(int32(*options.MaxTokens))
-		}
-
-		if options.Temperature != nil && !matchesModel(c.model, NoSamplingModels) {
-			config.Temperature = options.Temperature
-		}
-
-		if len(options.Stop) > 0 {
-			config.StopSequences = options.Stop
 		}
 
 		params := &bedrockruntime.ConverseStreamInput{
@@ -116,15 +101,10 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			System:     req.System,
 			ToolConfig: req.ToolConfig,
 
-			InferenceConfig: config,
-		}
+			InferenceConfig: req.InferenceConfig,
+			OutputConfig:    req.OutputConfig,
 
-		if fields, thinking := c.converseAdditionalFields(messages, options); len(fields) > 0 {
-			if thinking {
-				config.Temperature = nil
-			}
-
-			params.AdditionalModelRequestFields = document.NewLazyDocument(fields)
+			AdditionalModelRequestFields: req.AdditionalModelRequestFields,
 		}
 
 		resp, err := c.client.ConverseStream(ctx, params)
@@ -176,7 +156,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 					// The schema tool's call surfaces as text via the argument
 					// deltas, so there is nothing to emit at block start.
-					if options.Schema != nil && aws.ToString(b.Value.Name) == options.Schema.Name {
+					if c.schemaAsTool(options) && aws.ToString(b.Value.Name) == options.Schema.Name {
 						schemaBlocks[aws.ToInt32(v.Value.ContentBlockIndex)] = true
 						continue
 					}
@@ -635,12 +615,15 @@ func isBedrockContentFilterMessage(message string) bool {
 }
 
 // converseAdditionalFields builds the Anthropic request fields Converse has
-// no native mapping for. The second result reports whether adaptive thinking
-// is enabled — temperature must be cleared in that case.
-func (c *Completer) converseAdditionalFields(messages []provider.Message, options *provider.CompleteOptions) (map[string]any, bool) {
-	// Forced tool calls (schema mode, tool choice "any") are incompatible
-	// with thinking on Anthropic models over Bedrock.
-	forced := options.Schema != nil ||
+// no native mapping for. The effort stays here as well: the typed
+// outputConfig.effort field is rejected by Claude 4.6 ("This model doesn't
+// support the effort field"), while output_config.effort in the additional
+// fields is accepted. The resolved thinking configuration is returned too,
+// since temperature must be cleared while thinking is enabled.
+func (c *Completer) converseAdditionalFields(messages []provider.Message, options *provider.CompleteOptions) (map[string]any, thinking) {
+	// Forced tool calls (emulated schema mode, tool choice "any") are
+	// incompatible with thinking on Anthropic models over Bedrock.
+	forced := c.schemaAsTool(options) ||
 		(options.ToolOptions != nil && options.ToolOptions.Choice == provider.ToolChoiceAny)
 
 	thinking := c.resolveThinking(messages, options, forced)
@@ -664,10 +647,50 @@ func (c *Completer) converseAdditionalFields(messages []provider.Message, option
 		fields["output_config"] = map[string]any{"effort": thinking.Effort}
 	}
 
-	return fields, thinking.Enabled
+	return fields, thinking
+}
+
+// schemaAsTool reports whether schema mode is emulated with a forced tool
+// call: the model has no native JSON-schema output, the request asks for JSON
+// without a schema, or a non-strict schema allows arbitrary object keys.
+func (c *Completer) schemaAsTool(options *provider.CompleteOptions) bool {
+	if options.Schema == nil {
+		return false
+	}
+	if options.Schema.Properties == nil || !supportsOutputFormat(c.model) {
+		return true
+	}
+	// Native grammars reject dictionaries. Preserve their schema with the
+	// existing non-strict tool emulation instead of closing or rejecting them.
+	return (options.Schema.Strict == nil || !*options.Schema.Strict) && schemaAllowsAdditionalProperties(options.Schema.Properties)
+}
+
+// resolveInput lowers the shared conversation features Converse has no
+// positional form for: instruction lifetimes, effort updates, and hosted
+// tool search all fall back to the request level.
+func (c *Completer) resolveInput(messages []provider.Message, options *provider.CompleteOptions) ([]provider.Message, *provider.CompleteOptions) {
+	messages = provider.ResolveInstructions(messages)
+	messages, options = provider.ResolveConfigurationUpdates(messages, options)
+
+	return toolsearch.Inline(messages, options)
 }
 
 func (c *Completer) convertConverseInput(input []provider.Message, options *provider.CompleteOptions) (*bedrockruntime.ConverseInput, error) {
+	if options != nil && options.ReasoningOptions != nil {
+		mode := options.ReasoningOptions.Context
+		// Converse cannot configure retention. Claude Code's keep-all request
+		// is already satisfied by models that preserve all thinking by default.
+		keepAll := mode == provider.ReasoningContextAllTurns && matchesModel(c.model, PreservedThinkingModels)
+		if mode != "" && mode != provider.ReasoningContextAuto && !keepAll {
+			return nil, &provider.ProviderError{
+				Code:    400,
+				Type:    "invalid_request_error",
+				Message: "Bedrock Converse cannot change this model's reasoning.context; omit it or use auto",
+			}
+		}
+	}
+	input, options = c.resolveInput(input, options)
+
 	messages, err := c.convertMessages(input)
 
 	if err != nil {
@@ -688,10 +711,43 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 		return nil, err
 	}
 
-	// Schema mode: expose the schema as a tool and force its use. Anthropic
-	// models reject native Converse structured output (output_config.format),
-	// so a forced tool call is the reliable way to get structured JSON.
-	if options.Schema != nil {
+	var output *types.OutputConfig
+
+	// Schema mode: models with structured outputs take the schema natively
+	// as outputConfig.textFormat; the grammar is enforced, so the schema must
+	// meet the strict-mode subset like a strict tool does. Everything else
+	// exposes the schema as a tool and forces its use.
+	if options.Schema != nil && !c.schemaAsTool(options) {
+		schema := ensureAdditionalPropertiesFalse(sanitizeStrictSchema(options.Schema.Properties))
+
+		data, err := json.Marshal(schema)
+
+		if err != nil {
+			return nil, err
+		}
+
+		definition := types.JsonSchemaDefinition{
+			Schema: aws.String(string(data)),
+		}
+
+		if options.Schema.Name != "" {
+			definition.Name = aws.String(options.Schema.Name)
+		}
+
+		if options.Schema.Description != "" {
+			definition.Description = aws.String(options.Schema.Description)
+		}
+
+		output = &types.OutputConfig{
+			TextFormat: &types.OutputFormat{
+				Type: types.OutputFormatTypeJsonSchema,
+
+				Structure: &types.OutputFormatStructureMemberJsonSchema{
+					Value: definition,
+				},
+			},
+		}
+	} else if options.Schema != nil {
 		if config == nil {
 			config = &types.ToolConfiguration{}
 		}
@@ -738,16 +794,49 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 		}
 	}
 
-	return &bedrockruntime.ConverseInput{
+	inference := &types.InferenceConfiguration{}
+
+	if options.MaxTokens != nil {
+		inference.MaxTokens = aws.Int32(int32(*options.MaxTokens))
+	}
+
+	if options.Temperature != nil && !matchesModel(c.model, NoSamplingModels) {
+		inference.Temperature = options.Temperature
+	}
+
+	if len(options.Stop) > 0 {
+		inference.StopSequences = options.Stop
+	}
+
+	req := &bedrockruntime.ConverseInput{
 		ModelId: aws.String(c.model),
 
 		Messages: messages,
 
 		System:     c.convertSystem(input),
 		ToolConfig: config,
-	}, nil
+
+		InferenceConfig: inference,
+		OutputConfig:    output,
+	}
+
+	fields, thinking := c.converseAdditionalFields(input, options)
+
+	if thinking.Enabled {
+		inference.Temperature = nil
+	}
+
+	if len(fields) > 0 {
+		req.AdditionalModelRequestFields = document.NewLazyDocument(fields)
+	}
+
+	return req, nil
 }
 
+// Converse only supports the top-level system field. Mid-conversation system
+// messages require InvokeModel, even on newer Claude models. Collect the
+// resolved instructions here so a trailing system message cannot make an
+// otherwise valid user/tool-result turn fail Bedrock's last-turn validation.
 func (c *Completer) convertSystem(messages []provider.Message) []types.SystemContentBlock {
 	var result []types.SystemContentBlock
 
@@ -785,25 +874,27 @@ func (c *Completer) convertSystem(messages []provider.Message) []types.SystemCon
 	return result
 }
 
+// convertMessages builds the conversation without system messages, whose
+// resolved instructions are collected by convertSystem.
 func (c *Completer) convertMessages(messages []provider.Message) ([]types.Message, error) {
 	var result []types.Message
 
-	// Pre-process: merge consecutive messages with the same role (required by Bedrock API)
+	// Merge consecutive turns after hoisting system instructions.
 	var merged []provider.Message
 	for _, m := range messages {
+		if m.Role == provider.MessageRoleSystem {
+			continue
+		}
 		if len(merged) > 0 && merged[len(merged)-1].Role == m.Role {
 			last := &merged[len(merged)-1]
 			last.Content = append(last.Content, m.Content...)
 		} else {
+			m.Content = slices.Clone(m.Content)
 			merged = append(merged, m)
 		}
 	}
 
 	for _, m := range merged {
-		if m.Role == provider.MessageRoleSystem {
-			continue
-		}
-
 		var err error
 
 		var role types.ConversationRole
@@ -941,10 +1032,16 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 					},
 				})
 			} else {
+				// The Responses API presents signed thinking text as a summary.
+				// Restore it exactly, as the native Anthropic adapter does.
+				text := c.Reasoning.Text
+				if text == "" {
+					text = c.Reasoning.Summary
+				}
 				reasoning = append(reasoning, &types.ContentBlockMemberReasoningContent{
 					Value: &types.ReasoningContentBlockMemberReasoningText{
 						Value: types.ReasoningTextBlock{
-							Text:      aws.String(c.Reasoning.Text),
+							Text:      aws.String(text),
 							Signature: aws.String(c.Reasoning.Signature),
 						},
 					},
@@ -1118,6 +1215,18 @@ func convertToolResultFile(val *provider.File) (types.ToolResultContentBlock, er
 		}, nil
 	}
 
+	if format, ok := convertVideoFormat(val.ContentType); ok {
+		return &types.ToolResultContentBlockMemberVideo{
+			Value: types.VideoBlock{
+				Format: format,
+
+				Source: &types.VideoSourceMemberBytes{
+					Value: val.Content,
+				},
+			},
+		}, nil
+	}
+
 	return nil, fmt.Errorf("unsupported content type: %s", val.ContentType)
 }
 
@@ -1163,9 +1272,12 @@ func convertFile(val *provider.File) (types.ContentBlock, error) {
 }
 
 var documentFormats = map[string]types.DocumentFormat{
-	"application/pdf": types.DocumentFormatPdf,
+	"application/pdf":    types.DocumentFormatPdf,
+	"application/msword": types.DocumentFormatDoc,
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": types.DocumentFormatDocx,
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       types.DocumentFormatXlsx,
+	"application/vnd.ms-excel": types.DocumentFormatXls,
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": types.DocumentFormatXlsx,
+	"text/html":     types.DocumentFormatHtml,
 	"text/plain":    types.DocumentFormatTxt,
 	"text/csv":      types.DocumentFormatCsv,
 	"text/markdown": types.DocumentFormatMd,
@@ -1183,6 +1295,10 @@ var videoFormats = map[string]types.VideoFormat{
 	"video/quicktime": types.VideoFormatMov,
 	"video/mp4":       types.VideoFormatMp4,
 	"video/webm":      types.VideoFormatWebm,
+	"video/x-flv":     types.VideoFormatFlv,
+	"video/mpeg":      types.VideoFormatMpeg,
+	"video/x-ms-wmv":  types.VideoFormatWmv,
+	"video/3gpp":      types.VideoFormatThreeGp,
 }
 
 func convertDocumentFormat(mime string) (types.DocumentFormat, bool) {

@@ -67,6 +67,33 @@ func supportsStrictTools(model string) bool {
 	return !isClaudeModel(model) || matchesModel(model, StrictToolModels)
 }
 
+// Native JSON-schema output (outputConfig.textFormat) is the same structured
+// outputs feature as strict tools, so it follows the Claude allowlist. Other
+// model families keep the forced-tool emulation, which needs no structured
+// outputs support and therefore cannot fail the request.
+func supportsOutputFormat(model string) bool {
+	return matchesModel(model, StrictToolModels)
+}
+
+// PreservedThinkingModels retain all prior thinking by default, so accepting
+// reasoning.context=all_turns requires no unsupported Converse parameter.
+// Earlier Sonnet/Opus models and Haiku retain only the last turn by default.
+// https://platform.claude.com/docs/en/build-with-claude/context-editing
+var PreservedThinkingModels = []string{
+	"fable-5",
+	"mythos-5",
+	"mythos-preview",
+
+	"opus-4-5",
+	"opus-4-6",
+	"opus-4-7",
+	"opus-4-8",
+	"opus-5",
+
+	"sonnet-4-6",
+	"sonnet-5",
+}
+
 func matchesModel(model string, patterns []string) bool {
 	model = strings.ToLower(model)
 
@@ -137,6 +164,38 @@ func (c *Completer) resolveThinking(messages []provider.Message, options *provid
 	}
 
 	return t
+}
+
+// Check schema nodes, not annotations or property names: a property named
+// "additionalProperties" is unrelated to the keyword on its containing schema.
+func schemaAllowsAdditionalProperties(schema map[string]any) bool {
+	if additional, ok := schema["additionalProperties"]; ok && additional != false {
+		return true
+	}
+	for _, key := range []string{"properties", "$defs", "definitions", "patternProperties", "dependentSchemas"} {
+		if children, ok := schema[key].(map[string]any); ok {
+			for _, child := range children {
+				if nested, ok := child.(map[string]any); ok && schemaAllowsAdditionalProperties(nested) {
+					return true
+				}
+			}
+		}
+	}
+	for _, key := range []string{"items", "contains", "propertyNames", "not", "if", "then", "else", "additionalItems", "unevaluatedItems", "unevaluatedProperties"} {
+		if nested, ok := schema[key].(map[string]any); ok && schemaAllowsAdditionalProperties(nested) {
+			return true
+		}
+	}
+	for _, key := range []string{"anyOf", "allOf", "oneOf", "prefixItems", "items"} {
+		if children, ok := schema[key].([]any); ok {
+			for _, child := range children {
+				if nested, ok := child.(map[string]any); ok && schemaAllowsAdditionalProperties(nested) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func ensureAdditionalPropertiesFalse(schema map[string]any) map[string]any {

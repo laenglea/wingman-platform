@@ -10,7 +10,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/tool"
-	"github.com/adrianliechti/wingman/server/openai/shared"
+	"github.com/adrianliechti/wingman/server/files"
 )
 
 func toMessages(systemInstruction *Content, contents []*Content) ([]provider.Message, error) {
@@ -108,7 +108,7 @@ func toMessage(c Content, pendingCallIDs map[string][]string) (*provider.Message
 				return nil, fmt.Errorf("fileData.fileUri %q is not supported: only http(s) URLs can be fetched", uri)
 			}
 
-			file, err := shared.ToFile(uri)
+			file, err := files.FromURL(uri)
 			if err != nil {
 				return nil, err
 			}
@@ -388,6 +388,10 @@ func toUsageMetadata(u *provider.Usage) *UsageMetadata {
 
 	cached := u.CacheReadInputTokens
 	total := u.InputTokens + u.OutputTokens
+	var reasoningTokens int
+	if u.ReasoningTokens != nil {
+		reasoningTokens = *u.ReasoningTokens
+	}
 
 	// The intermediate OutputTokens is reasoning-inclusive, while Gemini's
 	// CandidatesTokenCount counts only the visible response and reports thinking
@@ -395,7 +399,7 @@ func toUsageMetadata(u *provider.Usage) *UsageMetadata {
 	return &UsageMetadata{
 		PromptTokenCount:        u.InputTokens,
 		CachedContentTokenCount: cached,
-		CandidatesTokenCount:    u.OutputTokens - u.ReasoningTokens,
+		CandidatesTokenCount:    u.OutputTokens - reasoningTokens,
 		ThoughtsTokenCount:      u.ReasoningTokens,
 		TotalTokenCount:         total,
 	}

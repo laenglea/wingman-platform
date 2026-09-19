@@ -9,11 +9,12 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/anthropic"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/computeruse"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
 	"github.com/adrianliechti/wingman/pkg/tool"
-	"github.com/adrianliechti/wingman/server/openai/shared"
+	"github.com/adrianliechti/wingman/server/files"
 )
 
 func toMessages(system string, messages []MessageParam) ([]provider.Message, error) {
@@ -37,10 +38,16 @@ func toMessages(system string, messages []MessageParam) ([]provider.Message, err
 }
 
 func toMessage(index int, m MessageParam) (*provider.Message, error) {
+	if m.ClearAt != "" && (m.Role != MessageRoleSystem || (m.ClearAt != "never" && m.ClearAt != "next_user_message")) {
+		return nil, fmt.Errorf("messages.%d.clear_at: requires a system message and either never or next_user_message", index)
+	}
+	if m.ClearAt == "next_user_message" && m.OutputConfig != nil {
+		return nil, fmt.Errorf("messages.%d.output_config: turn-scoped instructions support only text", index)
+	}
 	blocks, err := parseContentBlocks(m.Content)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("messages.%d.content: %w", index, err)
 	}
 
 	var role provider.MessageRole
@@ -63,13 +70,33 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 	}
 
 	var content []provider.Content
+	if m.OutputConfig != nil {
+		if m.Role != MessageRoleSystem || m.OutputConfig.Format != nil || len(m.OutputConfig.TaskBudget) > 0 || !validEffort(m.OutputConfig.Effort) {
+			return nil, fmt.Errorf("messages.%d.output_config: requires a system message and a valid effort", index)
+		}
+		content = append(content, provider.ConfigurationUpdateContent(provider.ConfigurationUpdate{ReasoningEffort: provider.Effort(m.OutputConfig.Effort)}))
+	}
 
 	for j, block := range blocks {
 		path := fmt.Sprintf("messages.%d.content.%d", index, j)
+		if m.Role == MessageRoleSystem && block.Type != "text" {
+			return nil, fmt.Errorf("%s: system messages support only text and output_config.effort", path)
+		}
+		if block.Caller != nil && block.Caller.Type != "direct" {
+			return nil, fmt.Errorf("%s.caller: only direct tool calls are supported", path)
+		}
 
 		switch block.Type {
 		case "text":
-			content = append(content, provider.TextContent(block.Text))
+			if m.Role == MessageRoleSystem {
+				scope := provider.InstructionScopeConversation
+				if m.ClearAt == "next_user_message" {
+					scope = provider.InstructionScopeTurn
+				}
+				content = append(content, provider.InstructionsContent(provider.Instructions{Text: block.Text, Scope: scope}))
+			} else {
+				content = append(content, provider.TextContent(block.Text))
+			}
 
 		case "image":
 			if block.Source != nil {
@@ -161,6 +188,9 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 			compaction := provider.Compaction{
 				Signature: block.EncryptedContent,
 			}
+			if block.Signature != "" {
+				compaction.Signature = anthropic.WrapCompactionSignature(block.Signature)
+			}
 
 			if compactionContent, ok := block.Content.(string); ok {
 				compaction.Content = compactionContent
@@ -171,9 +201,27 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 			}
 
 		case "server_tool_use":
+			if strings.HasPrefix(block.Name, "tool_search_tool_") {
+				args, err := toJSONString(block.Input)
+				if err != nil {
+					return nil, err
+				}
+				content = append(content, provider.ToolCallContent(provider.ToolCall{ID: block.ID, Name: block.Name, Kind: provider.ToolKindToolSearch, Execution: "server", Arguments: args}))
+				break
+			}
 			if marker := serverToolUseMarker(block); marker != "" {
 				content = append(content, provider.TextContent(marker))
 			}
+		case "tool_search_tool_result":
+			data, err := json.Marshal(block.Content)
+			if err != nil {
+				return nil, err
+			}
+			result, err := anthropic.ParseToolSearchResult(block.ToolUseID, data, nil)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
+			content = append(content, provider.ToolResultContent(result))
 
 		case "web_search_tool_result":
 			if marker := webSearchResultMarker(block); marker != "" {
@@ -221,7 +269,7 @@ func toFile(source *BlockSource) (*provider.File, error) {
 	case "url":
 		// No provider consumes raw URLs — fetch the content here so URL
 		// sources work across all backends.
-		fetched, err := shared.ToFile(source.URL)
+		fetched, err := files.FromURL(source.URL)
 
 		if err != nil {
 			return nil, err
@@ -351,8 +399,8 @@ func toTools(tools []ToolParam) ([]provider.Tool, error) {
 	for i, t := range tools {
 		switch {
 		case strings.Contains(t.Type, "_toolset_"):
-			// The pinned SDK has no toolset types; matching the family prefix
-			// would silently serve the legacy single tool instead.
+			// Tool collections require shared member identities and result types.
+			// Other backends cannot emulate this protocol as a legacy tool.
 			return nil, fmt.Errorf(
 				"tools.%d: Tool type '%s' is not supported; use the single-tool 'computer_*', 'bash_*' or 'text_editor_*' types",
 				i, t.Type,
@@ -394,6 +442,7 @@ func toTools(tools []ToolParam) ([]provider.Tool, error) {
 				Name:        t.Name,
 				Description: t.Description,
 				Parameters:  tool.NormalizeSchema(t.InputSchema),
+				Strict:      t.Strict,
 			}
 
 			if t.DeferLoading {
@@ -414,11 +463,11 @@ func toTools(tools []ToolParam) ([]provider.Tool, error) {
 	return result, nil
 }
 
-func toContentBlocks(content []provider.Content, includeThinking bool) []ContentBlock {
-	var result []ContentBlock
+func toContentBlocks(content []provider.Content) []ContentBlock {
+	result := make([]ContentBlock, 0, len(content))
 
 	for _, c := range content {
-		if includeThinking && c.Reasoning != nil && (c.Reasoning.Text != "" || c.Reasoning.Summary != "" || c.Reasoning.Signature != "") {
+		if c.Reasoning != nil && (c.Reasoning.Text != "" || c.Reasoning.Summary != "" || c.Reasoning.Signature != "") {
 			if c.Reasoning.Redacted {
 				result = append(result, ContentBlock{
 					Type: "redacted_thinking",
@@ -439,11 +488,15 @@ func toContentBlocks(content []provider.Content, includeThinking bool) []Content
 		}
 
 		if c.Compaction != nil && (c.Compaction.Content != "" || c.Compaction.Signature != "") {
-			result = append(result, ContentBlock{
+			block := ContentBlock{
 				Type:             "compaction",
 				Content:          c.Compaction.Content,
 				EncryptedContent: c.Compaction.Signature,
-			})
+			}
+			if signature, signed := anthropic.UnwrapCompactionSignature(c.Compaction.Signature); signed {
+				block.Signature, block.EncryptedContent = signature, ""
+			}
+			result = append(result, block)
 		}
 
 		if c.Text != "" {
@@ -473,10 +526,14 @@ func toContentBlocks(content []provider.Content, includeThinking bool) []Content
 					input = map[string]any{}
 				}
 
+				name := c.ToolCall.Name
+				if !strings.HasPrefix(name, "tool_search_tool_") {
+					name = "tool_search_tool_regex"
+				}
 				result = append(result, ContentBlock{
 					Type:  "server_tool_use",
 					ID:    c.ToolCall.ID,
-					Name:  "tool_search_tool_regex",
+					Name:  name,
 					Input: input,
 				})
 				continue
@@ -518,6 +575,9 @@ func toContentBlocks(content []provider.Content, includeThinking bool) []Content
 
 				Caller: &BlockCaller{Type: "direct"},
 			})
+		}
+		if c.ToolResult != nil && c.ToolResult.Kind == provider.ToolKindToolSearch && c.ToolResult.Execution != "client" {
+			result = append(result, ContentBlock{Type: "tool_search_tool_result", ToolUseID: c.ToolResult.ID, Content: anthropic.ToolSearchResultContent(*c.ToolResult)})
 		}
 	}
 

@@ -58,11 +58,8 @@ type StreamingAccumulator struct {
 	messageID string
 	model     string
 
-	ThinkingEnabled bool
-
 	// State tracking
-	started    bool
-	hasContent bool
+	started bool
 
 	// Content blocks may interleave; deltas are routed to stable indexes
 	// and open blocks are closed on Complete
@@ -104,12 +101,15 @@ func NewStreamingAccumulator(messageID, model string, handler StreamEventHandler
 	}
 }
 
-func (s *StreamingAccumulator) startBlock(block *ContentBlock) (int, error) {
+func (s *StreamingAccumulator) startBlock(block *ContentBlock, preserve ...int) (int, error) {
 	// Anthropic-facing tool calls may arrive interleaved from another provider.
 	// Keep existing tool blocks open while another tool starts so later argument
 	// deltas remain enclosed by that block's start/stop events.
 	openBlocks := append([]int(nil), s.openBlocks...)
 	for _, open := range openBlocks {
+		if slices.Contains(preserve, open) {
+			continue
+		}
 		if block.Type == "tool_use" && s.isToolBlock(open) {
 			continue
 		}
@@ -122,7 +122,6 @@ func (s *StreamingAccumulator) startBlock(block *ContentBlock) (int, error) {
 	index := s.nextBlockIndex
 	s.nextBlockIndex++
 
-	s.hasContent = true
 	s.openBlocks = append(s.openBlocks, index)
 
 	return index, s.emitEvent(StreamEvent{
@@ -242,6 +241,18 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 	// Process content
 	for _, content := range c.Message.Content {
 		if content.Compaction != nil && (content.Compaction.Content != "" || content.Compaction.Signature != "") {
+			block := toContentBlocks([]provider.Content{content})[0]
+			if block.Signature != "" {
+				// On-demand compaction arrives whole in content_block_start.
+				index, err := s.startBlock(&block)
+				if err != nil {
+					return err
+				}
+				if err := s.stopBlock(index); err != nil {
+					return err
+				}
+				continue
+			}
 			if s.compactionIndex >= 0 && content.Compaction.ID != "" && s.compactionID != "" && content.Compaction.ID != s.compactionID {
 				if err := s.stopBlock(s.compactionIndex); err != nil {
 					return err
@@ -276,7 +287,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			}
 		}
 
-		if s.ThinkingEnabled && content.Reasoning != nil && content.Reasoning.Redacted && content.Reasoning.Signature != "" {
+		if content.Reasoning != nil && content.Reasoning.Redacted && content.Reasoning.Signature != "" {
 			index, err := s.startBlock(&ContentBlock{
 				Type: "redacted_thinking",
 				Data: content.Reasoning.Signature,
@@ -291,8 +302,16 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			}
 		}
 
-		if s.ThinkingEnabled && content.Reasoning != nil && !content.Reasoning.Redacted && (content.Reasoning.Text != "" || content.Reasoning.Summary != "" || content.Reasoning.Signature != "") {
+		if content.Reasoning != nil && !content.Reasoning.Redacted && (content.Reasoning.Text != "" || content.Reasoning.Summary != "" || content.Reasoning.Signature != "") {
 			reasoning := content.Reasoning
+			// Gemini can deliver an opaque signature after the answer text.
+			// Keep that text open until the signature block is complete so
+			// block-oriented clients finish on the answer, not empty thinking.
+			lateSignature := s.thinkingIndex < 0 && s.textIndex >= 0 && reasoning.Text == "" && reasoning.Summary == "" && reasoning.Signature != ""
+			preserveText := -1
+			if lateSignature {
+				preserveText = s.textIndex
+			}
 
 			// A signature ends a thinking block; a new ID starts the next item
 			if s.thinkingIndex >= 0 && (s.thinkingSigned || (reasoning.ID != "" && s.thinkingID != "" && reasoning.ID != s.thinkingID)) {
@@ -308,7 +327,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 					Type:      "thinking",
 					Thinking:  "",
 					Signature: "",
-				})
+				}, preserveText)
 
 				if err != nil {
 					return err
@@ -360,6 +379,11 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 					return err
 				}
 			}
+			if lateSignature {
+				if err := s.stopBlock(s.thinkingIndex); err != nil {
+					return err
+				}
+			}
 		}
 
 		// Refusal text has no Anthropic block type; stream it as text
@@ -390,7 +414,10 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 		}
 
 		if content.ToolCall != nil {
-			s.stopReason = StopReasonToolUse
+			hosted := content.ToolCall.Kind == provider.ToolKindToolSearch && content.ToolCall.Execution != "client"
+			if !hosted {
+				s.stopReason = StopReasonToolUse
+			}
 
 			id := content.ToolCall.ID
 
@@ -406,14 +433,18 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 
 			if !found {
 				var err error
-
-				index, err = s.startBlock(&ContentBlock{
+				block := &ContentBlock{
 					Type:   "tool_use",
 					ID:     id,
 					Name:   content.ToolCall.Name,
 					Input:  map[string]any{},
 					Caller: &BlockCaller{Type: "direct"},
-				})
+				}
+				if hosted {
+					block = &toContentBlocks([]provider.Content{content})[0]
+					block.Input = map[string]any{}
+				}
+				index, err = s.startBlock(block)
 
 				if err != nil {
 					return err
@@ -439,6 +470,21 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 				}
 			}
 		}
+		if content.ToolResult != nil && content.ToolResult.Kind == provider.ToolKindToolSearch && content.ToolResult.Execution != "client" {
+			if callIndex, found := s.toolIndexByID[content.ToolResult.ID]; found {
+				if err := s.stopBlock(callIndex); err != nil {
+					return err
+				}
+			}
+			block := toContentBlocks([]provider.Content{content})[0]
+			index, err := s.startBlock(&block)
+			if err != nil {
+				return err
+			}
+			if err := s.stopBlock(index); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Add to underlying accumulator
@@ -450,16 +496,6 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 // Complete signals that streaming is done and emits final events
 func (s *StreamingAccumulator) Complete() error {
 	result := s.accumulator.Result()
-
-	// If no content was generated, send an empty text block
-	if !s.hasContent {
-		if _, err := s.startBlock(&ContentBlock{
-			Type: "text",
-			Text: new(""),
-		}); err != nil {
-			return err
-		}
-	}
 
 	// Close all open content blocks
 	for len(s.openBlocks) > 0 {
@@ -488,9 +524,9 @@ func (s *StreamingAccumulator) Complete() error {
 		cacheReadInputTokens = result.Usage.CacheReadInputTokens
 		cacheCreationInputTokens = result.Usage.CacheCreationInputTokens
 
-		if s.ThinkingEnabled {
+		if result.Usage.ReasoningTokens != nil {
 			outputTokensDetails = &OutputTokensDetails{
-				ThinkingTokens: result.Usage.ReasoningTokens,
+				ThinkingTokens: *result.Usage.ReasoningTokens,
 			}
 		}
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
+	"github.com/adrianliechti/wingman/pkg/provider/tools/toolsearch"
 )
 
 var _ provider.Completer = (*Completer)(nil)
@@ -47,6 +48,9 @@ func NewCompleter(model string, options ...Option) (*Completer, error) {
 }
 
 func (c *Completer) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
+	messages = provider.ResolveInstructions(messages)
+	messages, options = provider.ResolveConfigurationUpdates(messages, options)
+	messages, options = toolsearch.Inline(messages, options)
 	messages = consolidateSystemMessages(messages)
 	return c.responder.Complete(ctx, messages, options)
 }

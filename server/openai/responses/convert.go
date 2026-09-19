@@ -13,6 +13,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
 	"github.com/adrianliechti/wingman/pkg/tool"
+	"github.com/adrianliechti/wingman/server/files"
 	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
@@ -54,6 +55,7 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 	var pendingReasoning []provider.Content
 	var pendingCalls []provider.Content
 	var pendingResults []provider.Content
+	var searchCallID string
 
 	kindByCallID := make(map[string]provider.ToolKind)
 
@@ -446,9 +448,18 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 			flushResults()
 
 			call := item.InputToolSearchCall
+			searchCallID = call.CallID
+			if searchCallID == "" {
+				// Our output item ID prefixes the shared call ID. Recover it
+				// when hosted call_id is null so Claude's signed replay is stable.
+				searchCallID = strings.TrimPrefix(call.ID, "tsc_")
+				if searchCallID == "" {
+					searchCallID = fmt.Sprintf("search_%d", i)
+				}
+			}
 
 			pendingCalls = append(pendingCalls, provider.ToolCallContent(provider.ToolCall{
-				ID:        call.CallID,
+				ID:        searchCallID,
 				Kind:      provider.ToolKindToolSearch,
 				Name:      "tool_search",
 				Execution: call.Execution,
@@ -463,9 +474,13 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 			flushCalls()
 
 			output := item.InputToolSearchOutput
+			id := output.CallID
+			if id == "" {
+				id = searchCallID
+			}
 
 			pendingResults = append(pendingResults, provider.ToolResultContent(provider.ToolResult{
-				ID:        output.CallID,
+				ID:        id,
 				Kind:      provider.ToolKindToolSearch,
 				Execution: output.Execution,
 				Payload:   []byte(output.Tools),
@@ -953,6 +968,22 @@ func toolCallToToolSearchCall(call provider.ToolCall, status string) *ToolSearch
 	return item
 }
 
+func toolResultToToolSearchOutput(result provider.ToolResult) *InputToolSearchOutput {
+	status := "completed"
+	tools := result.Payload
+	if len(tools) == 0 || result.IsError {
+		tools = []byte("[]")
+	}
+	if result.IsError {
+		status = "incomplete"
+	}
+	execution := result.Execution
+	if execution == "" {
+		execution = "server"
+	}
+	return &InputToolSearchOutput{ID: "tso_" + result.ID, CallID: result.ID, Status: status, Execution: execution, Tools: tools}
+}
+
 // computerOutputParts maps a computer_call_output.output object to Parts.
 // Per the OpenAI Responses spec the payload is a computer_screenshot with
 // either an image_url (often a data URL) or a file_id. Falls back to a JSON
@@ -970,7 +1001,7 @@ func computerOutputParts(output any) ([]provider.Part, error) {
 	}
 	if err := json.Unmarshal(data, &screenshot); err == nil && screenshot.Type == "computer_screenshot" {
 		if screenshot.ImageURL != "" {
-			file, err := shared.ToFile(screenshot.ImageURL)
+			file, err := files.FromURL(screenshot.ImageURL)
 			if err != nil {
 				return nil, err
 			}
@@ -995,7 +1026,7 @@ func toParts(items []InputContent) ([]provider.Part, error) {
 			}
 
 		case InputContentImage:
-			file, err := shared.ToFile(c.ImageURL)
+			file, err := files.FromURL(c.ImageURL)
 			if err != nil {
 				return nil, err
 			}
@@ -1017,13 +1048,13 @@ func toParts(items []InputContent) ([]provider.Part, error) {
 // fileFromInputContent decodes an input_file content part into provider.File.
 // FileData accepts either raw base64 (mime inferred from filename) or a full
 // data URL (mime parsed from the URL prefix). FileURL is handled via
-// shared.ToFile which supports http/https + data URLs.
+// files.FromURL which supports http/https + data URLs.
 func fileFromInputContent(c InputContent) (*provider.File, error) {
 	file := &provider.File{Name: c.Filename}
 
 	if c.FileData != "" {
 		if strings.HasPrefix(c.FileData, "data:") {
-			f, err := shared.ToFile(c.FileData)
+			f, err := files.FromURL(c.FileData)
 			if err != nil {
 				return nil, err
 			}
@@ -1045,7 +1076,7 @@ func fileFromInputContent(c InputContent) (*provider.File, error) {
 	}
 
 	if c.FileURL != "" {
-		f, err := shared.ToFile(c.FileURL)
+		f, err := files.FromURL(c.FileURL)
 		if err != nil {
 			return nil, err
 		}
@@ -1071,7 +1102,7 @@ func toInputContent(items []InputContent) ([]provider.Content, error) {
 			result = append(result, provider.RefusalContent(c.Refusal))
 
 		case InputContentImage:
-			file, err := shared.ToFile(c.ImageURL)
+			file, err := files.FromURL(c.ImageURL)
 			if err != nil {
 				return nil, err
 			}

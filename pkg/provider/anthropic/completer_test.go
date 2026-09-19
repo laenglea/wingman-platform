@@ -323,11 +323,7 @@ func TestConvertRequest_ForcedToolDisablesThinkingAndCapsEffort(t *testing.T) {
 	}
 }
 
-// TestConvertRequest_UnsupportedForcedToolChoiceFallsBackToAuto verifies
-// Fable/Mythos 5.1 do not receive the forced tool choices their API rejects.
-// The tool definitions remain in the request, so the model may still select
-// one automatically.
-func TestConvertRequest_UnsupportedForcedToolChoiceFallsBackToAuto(t *testing.T) {
+func TestConvertRequest_UnsupportedForcedToolChoiceIsRejected(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		model   string
@@ -339,7 +335,7 @@ func TestConvertRequest_UnsupportedForcedToolChoiceFallsBackToAuto(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			completer, _ := NewCompleter("http://localhost", tc.model)
 
-			body := requestBody(t, completer, []provider.Message{provider.UserMessage("hi")}, &provider.CompleteOptions{
+			_, err := completer.convertMessageRequest([]provider.Message{provider.UserMessage("hi")}, &provider.CompleteOptions{
 				ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive},
 				Tools: []provider.Tool{{
 					Name:       "get_weather",
@@ -348,16 +344,8 @@ func TestConvertRequest_UnsupportedForcedToolChoiceFallsBackToAuto(t *testing.T)
 				ToolOptions: &provider.ToolOptions{Choice: provider.ToolChoiceAny, Allowed: tc.allowed},
 			})
 
-			if _, present := body["tool_choice"]; present {
-				t.Errorf("tool_choice: got %v, want omitted", body["tool_choice"])
-			}
-
-			if _, present := body["thinking"]; !present {
-				t.Error("thinking was disabled along with the ignored forced tool choice")
-			}
-
-			if tools := body["tools"].([]any); len(tools) != 1 {
-				t.Errorf("tools: got %d, want 1", len(tools))
+			if err == nil || !strings.Contains(err.Error(), "does not support forced tool_choice") {
+				t.Fatalf("unsupported forced tool choice must be rejected: %v", err)
 			}
 		})
 	}
@@ -595,7 +583,7 @@ func TestConvertRequest_CompactionExplicitTrigger(t *testing.T) {
 // TestConvertRequest_SystemPlacement verifies a leading system message maps to
 // the top-level system field and a mid-conversation one stays in messages.
 func TestConvertRequest_SystemPlacement(t *testing.T) {
-	completer, _ := NewCompleter("http://localhost", "claude-test")
+	completer, _ := NewCompleter("http://localhost", "claude-opus-5")
 
 	messages := []provider.Message{
 		provider.SystemMessage("be helpful"),
@@ -793,8 +781,31 @@ func TestToUsage_ZeroReturnsNil(t *testing.T) {
 	}
 }
 
-// TestToUsage_ReasoningTokens verifies thinking tokens map to ReasoningTokens
-// as a subset of the reasoning-inclusive OutputTokens.
+func TestToUsageReasoningTokenPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		known     bool
+	}{
+		{"missing breakdown", `{"input_tokens":10,"output_tokens":5}`, false},
+		{"missing count", `{"output_tokens":5,"output_tokens_details":{}}`, false},
+		{"null count", `{"output_tokens":5,"output_tokens_details":{"thinking_tokens":null}}`, false},
+		{"measured zero", `{"output_tokens":5,"output_tokens_details":{"thinking_tokens":0}}`, true},
+		{"all zero", `{"output_tokens_details":{"thinking_tokens":0}}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var raw anthropic.BetaUsage
+			if err := json.Unmarshal([]byte(tc.raw), &raw); err != nil {
+				t.Fatal(err)
+			}
+			usage := toUsage(raw)
+			if usage == nil || usage.HasReasoningTokens() != tc.known || tc.known && *usage.ReasoningTokens != 0 {
+				t.Fatalf("usage = %+v, want known=%t", usage, tc.known)
+			}
+		})
+	}
+}
+
+// Thinking tokens remain a subset of the reasoning-inclusive output total.
 func TestToUsage_ReasoningTokens(t *testing.T) {
 	usage := toUsage(anthropic.BetaUsage{
 		InputTokens:         10,
@@ -808,11 +819,14 @@ func TestToUsage_ReasoningTokens(t *testing.T) {
 	if usage.OutputTokens != 30 {
 		t.Errorf("OutputTokens = %d, want 30 (thinking-inclusive)", usage.OutputTokens)
 	}
-	if usage.ReasoningTokens != 12 {
-		t.Errorf("ReasoningTokens = %d, want 12", usage.ReasoningTokens)
+	if usage.ReasoningTokens == nil {
+		t.Fatal("expected reasoning token count")
 	}
-	if usage.ReasoningTokens > usage.OutputTokens {
-		t.Errorf("reasoning tokens (%d) exceed OutputTokens (%d)", usage.ReasoningTokens, usage.OutputTokens)
+	if *usage.ReasoningTokens != 12 {
+		t.Errorf("ReasoningTokens = %d, want 12", *usage.ReasoningTokens)
+	}
+	if *usage.ReasoningTokens > usage.OutputTokens {
+		t.Errorf("reasoning tokens (%d) exceed OutputTokens (%d)", *usage.ReasoningTokens, usage.OutputTokens)
 	}
 }
 
