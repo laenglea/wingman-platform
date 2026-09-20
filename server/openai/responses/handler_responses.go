@@ -5,7 +5,6 @@ import (
 	"maps"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -62,6 +61,8 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 
 		MaxTokens:   req.MaxOutputTokens,
 		Temperature: req.Temperature,
+
+		CacheOptions: shared.CacheOptions(req.PromptCacheKey, req.PromptCacheRetention, req.PromptCacheOptions.mode()),
 	}
 
 	if req.ParallelToolCalls != nil && !*req.ParallelToolCalls {
@@ -320,6 +321,9 @@ func responseDefaults(resp *Response, req ResponsesRequest, completion *provider
 	} else {
 		resp.Truncation = "disabled"
 	}
+	resp.PromptCacheKey = req.PromptCacheKey
+	resp.PromptCacheRetention = req.PromptCacheRetention
+	resp.PromptCacheOptions = req.PromptCacheOptions
 
 	if req.Instructions != "" {
 		resp.Instructions = &req.Instructions
@@ -473,22 +477,13 @@ func (m *messageIDs) get(index int, nativeID string) string {
 	for len(*m) <= index {
 		*m = append(*m, "")
 	}
-	if (*m)[index] != "" {
-		return (*m)[index]
+	if (*m)[index] == "" {
+		(*m)[index] = nativeID
 	}
-
-	id := nativeID
-	if id == "" {
-		id = "msg_" + uuid.NewString()
+	if (*m)[index] == "" {
+		(*m)[index] = "msg_" + uuid.NewString()
 	}
-	// Splitting text and refusal from one native item requires distinct IDs.
-	// Derive additional IDs from the original instead of inventing new UUIDs.
-	base := id
-	for suffix := 2; slices.Contains(*m, id); suffix++ {
-		id = base + "_" + strconv.Itoa(suffix)
-	}
-	(*m)[index] = id
-	return id
+	return (*m)[index]
 }
 
 func responseOutputs(message *provider.Message, ids *messageIDs, status string, opts responseOutputOptions) []ResponseOutput {
@@ -765,12 +760,9 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			}
 			return nil
 		case StreamEventResponseCreated:
-			if event.Completion != nil {
-				responseID = event.Completion.ID
-			}
-			if responseID == "" {
-				responseID = "resp_" + uuid.NewString()
-			}
+			// The response is the gateway's own object. Upstream IDs identify
+			// output items and are preserved there, not reused for the response.
+			responseID = "resp_" + uuid.NewString()
 			return writeEvent(w, "response.created", ResponseCreatedEvent{
 				Type:           "response.created",
 				SequenceNumber: nextSeq(),
@@ -1490,11 +1482,7 @@ func (h *Handler) handleResponsesComplete(w http.ResponseWriter, r *http.Request
 
 	completion := acc.Result()
 
-	responseID := completion.ID
-
-	if responseID == "" {
-		responseID = "resp_" + uuid.NewString()
-	}
+	responseID := "resp_" + uuid.NewString()
 
 	now := time.Now().Unix()
 
