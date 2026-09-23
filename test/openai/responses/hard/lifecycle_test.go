@@ -15,12 +15,16 @@ func TestStreamItemLifecycle(t *testing.T) {
 	for _, model := range openai.DefaultModels() {
 		t.Run(model.Name, func(t *testing.T) {
 			h.SkipUnlessConfigured(t, model.Name)
+			toolChoice := "required"
+			if model.Capabilities.NoForcedToolChoice {
+				toolChoice = "auto"
+			}
 			for _, scenario := range []struct {
 				name string
 				body map[string]any
 			}{
 				{"text", map[string]any{"input": "Say hello and nothing else.", "store": false}},
-				{"tool", map[string]any{"input": "Get the weather in Bern.", "tools": []any{weatherTool}, "tool_choice": "required", "store": false}},
+				{"tool", map[string]any{"input": "Get the weather in Bern.", "tools": []any{weatherTool}, "tool_choice": toolChoice, "store": false}},
 				{"truncated", map[string]any{"input": "Write a long essay about the history of mathematics.", "max_output_tokens": 32, "store": false}},
 			} {
 				t.Run(scenario.name, func(t *testing.T) {

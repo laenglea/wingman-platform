@@ -52,9 +52,12 @@ func TestFamilyFor(t *testing.T) {
 		"claude-sonnet-5":           Claude2026,
 		"claude-opus-4-8":           Claude2026,
 		"claude-opus-5":             Claude2026,
+		"claude-opus-5-5":           Claude2026,
 		"claude-haiku-4-5-20251001": ClaudeLegacy,
 		"claude-opus-4-6":           ClaudeLegacy,
 		"gpt-5.6":                   GPTO200k,
+		"gpt-6-sol":                 GPTO200k,
+		"gpt-6-luna":                GPTO200k,
 		"gpt-4o-2024-08-06":         GPTO200k,
 		"o3-mini":                   GPTO200k,
 		"gpt-4-turbo":               GPTCl100k,
@@ -118,6 +121,19 @@ func TestOpenAIImage(t *testing.T) {
 		t.Logf("%s %dx%d low=%v: est=%d measured=%d (%.1f%%)", c.model, c.w, c.h, c.low, got, c.measured, pct)
 		if pct > 5 {
 			t.Errorf("%s %dx%d low=%v: estimate %d vs measured %d", c.model, c.w, c.h, c.low, got, c.measured)
+		}
+	}
+}
+
+// GPT-6 Sol and Luna image sizing follows the documented GPT-6 family
+// patch-based estimate until model-specific measurements are available.
+func TestGPT6ImageEstimate(t *testing.T) {
+	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		if got := OpenAIImage(model, 1024, 1024, false); got != 1229 {
+			t.Errorf("%s high detail = %d, want 1229", model, got)
+		}
+		if got := OpenAIImage(model, 1024, 1024, true); got != 308 {
+			t.Errorf("%s low detail = %d, want 308", model, got)
 		}
 	}
 }

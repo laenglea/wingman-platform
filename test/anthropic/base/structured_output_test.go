@@ -23,6 +23,10 @@ func TestStructuredOutputHTTP(t *testing.T) {
 
 	for _, model := range anthropic.DefaultModels() {
 		t.Run(model.Name, func(t *testing.T) {
+			if model.Capabilities.NoForcedToolChoice {
+				t.Skip("model rejects forced tool_choice")
+			}
+
 			body := map[string]any{
 				"max_tokens": 1024,
 				"messages": []map[string]any{
@@ -62,6 +66,10 @@ func TestStructuredOutputSSE(t *testing.T) {
 
 	for _, model := range anthropic.DefaultModels() {
 		t.Run(model.Name, func(t *testing.T) {
+			if model.Capabilities.NoForcedToolChoice {
+				t.Skip("model rejects forced tool_choice")
+			}
+
 			body := map[string]any{
 				"max_tokens": 1024,
 				"messages": []map[string]any{

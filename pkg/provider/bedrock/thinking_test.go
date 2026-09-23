@@ -32,6 +32,7 @@ func TestResolveThinking(t *testing.T) {
 		{"forced tool disables", "eu.anthropic.claude-sonnet-4-6", nil, adaptive, true, thinking{Disabled: true, Summarized: true, Effort: "max"}},
 		{"unsigned tool turn keeps thinking", "eu.anthropic.claude-sonnet-4-6", unsigned, adaptive, false, thinking{Enabled: true, Summarized: true, Effort: "max"}},
 		{"disabled effort is capped", "eu.anthropic.claude-opus-5", nil, disabled, false, thinking{Disabled: true, Effort: "high"}},
+		{"opus 5.5 cannot disable", "anthropic.claude-opus-5-5", nil, disabled, false, thinking{Effort: "max"}},
 	}
 
 	for _, tc := range cases {

@@ -422,9 +422,14 @@ func isGPT6Astra(model string) bool {
 	return strings.HasPrefix(strings.ToLower(model), "gpt-6-astra")
 }
 
+func isGPT6SolOrLuna(model string) bool {
+	m := strings.ToLower(model)
+	return strings.HasPrefix(m, "gpt-6-sol") || strings.HasPrefix(m, "gpt-6-luna")
+}
+
 // normalizedReasoningEffort applies model-specific compatibility rules before
-// a request reaches the SDK. GPT-6 Astra rejects both `none` and `minimal`;
-// OpenAI's migration guidance recommends `low` for either setting.
+// a request reaches the SDK. GPT-6 Astra rejects `none`, and the GPT-6
+// family does not support `minimal`; migration guidance recommends `low`.
 func normalizedReasoningEffort(model string, reasoning *provider.ReasoningOptions) string {
 	if reasoning == nil {
 		return ""
@@ -438,7 +443,7 @@ func normalizedReasoningEffort(model string, reasoning *provider.ReasoningOption
 	}
 
 	effort := reasoning.Effort
-	if isGPT6Astra(model) && effort == provider.EffortMinimal {
+	if strings.HasPrefix(strings.ToLower(model), "gpt-6-") && effort == provider.EffortMinimal {
 		effort = provider.EffortLow
 	}
 

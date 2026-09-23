@@ -331,6 +331,7 @@ func TestConvertRequest_UnsupportedForcedToolChoiceIsRejected(t *testing.T) {
 	}{
 		{name: "any", model: "claude-fable-5-1"},
 		{name: "named tool", model: "claude-mythos-5-1", allowed: []string{"get_weather"}},
+		{name: "opus 5.5", model: "claude-opus-5-5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			completer, _ := NewCompleter("http://localhost", tc.model)
