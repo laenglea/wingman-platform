@@ -52,6 +52,13 @@ func (h *Harness) SkipUnlessConfigured(t *testing.T, model string) {
 }
 
 func ModelCapabilities(name string) harness.Capabilities {
+	caps := modelCapabilities(name)
+	caps.NoForcedToolChoice = harness.RejectsForcedToolChoice(name)
+
+	return caps
+}
+
+func modelCapabilities(name string) harness.Capabilities {
 	n := strings.ToLower(name)
 
 	switch {

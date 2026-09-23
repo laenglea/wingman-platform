@@ -246,16 +246,18 @@ func TestToolChoice(t *testing.T) {
 			h.SkipUnlessConfigured(t, model.Name)
 
 			for _, tg := range targets(h, model) {
-				required := post(t, h, tg, map[string]any{
-					"tools":       []any{weatherTool},
-					"tool_choice": "required",
-					"messages":    user("Say hello."),
-				})
-				if len(toolCalls(required)) == 0 {
-					t.Errorf("[%s] tool_choice required produced no call: %q", tg.label, messageText(required))
-				}
-				if fr, _ := choice(required)["finish_reason"].(string); fr != "tool_calls" {
-					t.Errorf("[%s] finish_reason %q, expected tool_calls", tg.label, fr)
+				if !model.Capabilities.NoForcedToolChoice {
+					required := post(t, h, tg, map[string]any{
+						"tools":       []any{weatherTool},
+						"tool_choice": "required",
+						"messages":    user("Say hello."),
+					})
+					if len(toolCalls(required)) == 0 {
+						t.Errorf("[%s] tool_choice required produced no call: %q", tg.label, messageText(required))
+					}
+					if fr, _ := choice(required)["finish_reason"].(string); fr != "tool_calls" {
+						t.Errorf("[%s] finish_reason %q, expected tool_calls", tg.label, fr)
+					}
 				}
 
 				none := post(t, h, tg, map[string]any{

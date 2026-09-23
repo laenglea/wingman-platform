@@ -114,6 +114,8 @@ var AlwaysThinkingModels = []string{
 	"fable-5",
 	"mythos-5",
 	"mythos-preview",
+
+	"opus-5-5",
 }
 
 // NoSamplingModels reject temperature/top_p/top_k outright, regardless of
@@ -136,10 +138,14 @@ var NoSamplingModels = []string{
 var NoForcedToolChoiceModels = []string{
 	"fable-5-1",
 	"mythos-5-1",
+
+	"opus-5-5",
 }
 
 // DisabledThinkingEffortCapModels accept `thinking: {type: "disabled"}` only
 // at effort "high" or below — pairing it with "xhigh" or "max" returns a 400.
+// Patterns match by substring, so "opus-5" also covers Opus 5.5, which is
+// always thinking and never reaches the cap.
 var DisabledThinkingEffortCapModels = []string{
 	"opus-5",
 }

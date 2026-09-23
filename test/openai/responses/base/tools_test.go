@@ -199,6 +199,12 @@ func TestToolCallingLongArgumentsSSE(t *testing.T) {
 				},
 			}
 
+			// The prompt already asks for the call; models without forced
+			// tool choice rely on it.
+			if model.Capabilities.NoForcedToolChoice {
+				req["tool_choice"] = "auto"
+			}
+
 			openaiEvents, err := h.Client.PostSSE(ctx, h.OpenAI, "/responses", responses.WithModel(req, h.ReferenceModel))
 			if err != nil {
 				t.Fatalf("openai SSE request failed: %v", err)

@@ -622,9 +622,10 @@ func isBedrockContentFilterMessage(message string) bool {
 // since temperature must be cleared while thinking is enabled.
 func (c *Completer) converseAdditionalFields(messages []provider.Message, options *provider.CompleteOptions) (map[string]any, thinking) {
 	// Forced tool calls (emulated schema mode, tool choice "any") are
-	// incompatible with thinking on Anthropic models over Bedrock.
-	forced := c.schemaAsTool(options) ||
-		(options.ToolOptions != nil && options.ToolOptions.Choice == provider.ToolChoiceAny)
+	// incompatible with thinking on Anthropic models over Bedrock. Models
+	// without forced tool choice steer the schema tool automatically instead.
+	forced := !matchesModel(c.model, NoForcedToolChoiceModels) && (c.schemaAsTool(options) ||
+		(options.ToolOptions != nil && options.ToolOptions.Choice == provider.ToolChoiceAny))
 
 	thinking := c.resolveThinking(messages, options, forced)
 
@@ -780,9 +781,17 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 			Value: document.NewLazyDocument(properties),
 		}
 
+		if matchesModel(c.model, NoForcedToolChoiceModels) {
+			// The model rejects forced tool choice: steer toward the schema
+			// tool from its description and let the model select it.
+			tool.Description = aws.String(strings.TrimSpace(aws.ToString(tool.Description) + " " + schemaToolInstruction))
+		}
+
 		config.Tools = append(config.Tools, &types.ToolMemberToolSpec{Value: tool})
 
-		if len(config.Tools) > 1 {
+		if matchesModel(c.model, NoForcedToolChoiceModels) {
+			config.ToolChoice = &types.ToolChoiceMemberAuto{}
+		} else if len(config.Tools) > 1 {
 			// Client tools stay callable: the model must call some tool, and
 			// the schema tool is the only way to produce the final answer.
 			config.ToolChoice = &types.ToolChoiceMemberAny{}
@@ -1187,6 +1196,14 @@ func (c *Completer) convertToolConfigPolicy(tools []provider.Tool, options *prov
 			}
 
 		case provider.ToolChoiceAny:
+			if matchesModel(c.model, NoForcedToolChoiceModels) {
+				return nil, &provider.ProviderError{
+					Code:    400,
+					Type:    "invalid_request_error",
+					Message: fmt.Sprintf("bedrock: model %s does not support forced tool_choice; use auto or none", c.model),
+				}
+			}
+
 			if len(options.Allowed) == 1 {
 				result.ToolChoice = &types.ToolChoiceMemberTool{
 					Value: types.SpecificToolChoice{

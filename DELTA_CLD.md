@@ -46,7 +46,8 @@ Implemented and tested:
   to the existing reasoning context setting.
 - Optional unknown fields and provider hints remain best effort. Trailing JSON,
   missing required fields, invalid enum values, unsupported semantic controls,
-  and forced tool choice on Fable/Mythos 5.1 return explicit errors.
+  and forced tool choice on Fable/Mythos 5.1 and Opus 5.5 return explicit
+  errors (Claude API and Bedrock).
 
 Unsupported semantic controls still return errors: tool additions/removals,
 thinking display `updates`, explicit binding controls, task budgets, custom
@@ -54,6 +55,7 @@ compaction instructions/pause, and unsupported context edits. Cache markers/TTL,
 `top_p`, `top_k`, and `metadata` are accepted as optional hints but are not
 preserved across providers. Automatic Claude caching remains enabled.
 Computer/browser toolsets remain unsupported; legacy computer tools still work.
+Opus 5.5 accepts only the toolset, so legacy computer tools fail upstream there.
 
 Claude Files/Skills, hosted code execution, advisor, and MCP connector support
 would be separate feature work. Managed Agents and administrative endpoints are

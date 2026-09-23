@@ -201,17 +201,19 @@ func TestToolChoice(t *testing.T) {
 			h.SkipUnlessConfigured(t, model.Name)
 
 			for _, tg := range targets(h, model) {
-				forced := post(t, h, tg, map[string]any{
-					"max_tokens":  1024,
-					"tools":       []any{anthropic.WeatherTool},
-					"tool_choice": map[string]any{"type": "any"},
-					"messages":    user("Say hello."),
-				})
-				if len(toolUses(forced)) == 0 {
-					t.Errorf("[%s] tool_choice any produced no tool_use: %q", tg.label, messageText(forced))
-				}
-				if forced["stop_reason"] != "tool_use" {
-					t.Errorf("[%s] stop_reason %v, expected tool_use", tg.label, forced["stop_reason"])
+				if !model.Capabilities.NoForcedToolChoice {
+					forced := post(t, h, tg, map[string]any{
+						"max_tokens":  1024,
+						"tools":       []any{anthropic.WeatherTool},
+						"tool_choice": map[string]any{"type": "any"},
+						"messages":    user("Say hello."),
+					})
+					if len(toolUses(forced)) == 0 {
+						t.Errorf("[%s] tool_choice any produced no tool_use: %q", tg.label, messageText(forced))
+					}
+					if forced["stop_reason"] != "tool_use" {
+						t.Errorf("[%s] stop_reason %v, expected tool_use", tg.label, forced["stop_reason"])
+					}
 				}
 
 				none := post(t, h, tg, map[string]any{

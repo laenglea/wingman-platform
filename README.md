@@ -176,6 +176,7 @@ providers:
   - type: anthropic
     token: ${ANTHROPIC_API_KEY}
     models:
+      - claude-opus-5-5
       - claude-sonnet-4-6
       - claude-haiku-4-5
 

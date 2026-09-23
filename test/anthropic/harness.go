@@ -48,6 +48,13 @@ type Model struct {
 }
 
 func ModelCapabilities(name string) harness.Capabilities {
+	caps := modelCapabilities(name)
+	caps.NoForcedToolChoice = harness.RejectsForcedToolChoice(name)
+
+	return caps
+}
+
+func modelCapabilities(name string) harness.Capabilities {
 	n := strings.ToLower(name)
 
 	switch {
