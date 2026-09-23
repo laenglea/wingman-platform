@@ -166,6 +166,8 @@ providers:
     token: ${OPENAI_API_KEY}
     models:
       - gpt-6-astra
+      - gpt-6-sol
+      - gpt-6-luna
       - gpt-5.4
       - gpt-5.4-mini
       - text-embedding-3-large
@@ -262,6 +264,8 @@ providers:
 
     models:
       - gpt-6-astra
+      - gpt-6-sol
+      - gpt-6-luna
       - gpt-4o
       - gpt-4o-mini
       - text-embedding-3-small

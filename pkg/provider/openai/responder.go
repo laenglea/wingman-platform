@@ -406,7 +406,8 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 	if err != nil {
 		return nil, err
 	}
-	if !isLegacyModel(r.model) && options.Temperature != nil {
+	if !isLegacyModel(r.model) && options.Temperature != nil &&
+		(!isGPT6SolOrLuna(r.model) || normalizedReasoningEffort(r.model, options.ReasoningOptions) != "none") {
 		optsCopy := *options
 		optsCopy.Temperature = nil
 		options = &optsCopy

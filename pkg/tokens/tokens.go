@@ -28,6 +28,7 @@ const (
 	// all Haiku models.
 	ClaudeLegacy Family = "claude-legacy"
 	// GPTO200k is OpenAI's o200k_base: GPT-5.x, GPT-4o, GPT-4.1, o-series.
+	// It is also the fallback estimate for GPT-6 until tokenizer calibration is available.
 	GPTO200k Family = "gpt-o200k"
 	// GPTCl100k is OpenAI's cl100k_base: GPT-4, GPT-3.5, embeddings.
 	GPTCl100k Family = "gpt-cl100k"
@@ -46,6 +47,7 @@ var familyPrefixes = map[string]Family{
 	"claude":          ClaudeLegacy,
 
 	"gpt-5":   GPTO200k,
+	"gpt-6":   GPTO200k,
 	"gpt-4o":  GPTO200k,
 	"gpt-4.1": GPTO200k,
 	"chatgpt": GPTO200k,
