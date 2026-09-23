@@ -6,6 +6,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/azurespeech"
+	"github.com/adrianliechti/wingman/pkg/provider/google"
 	"github.com/adrianliechti/wingman/pkg/provider/mistral"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
 	"github.com/adrianliechti/wingman/pkg/provider/openrouter"
@@ -50,6 +51,9 @@ func createSynthesizer(cfg providerConfig, model modelContext) (provider.Synthes
 	case "azurespeech", "azure-speech":
 		return azureSpeechSynthesizer(cfg, model)
 
+	case "gemini", "google":
+		return googleSynthesizer(cfg, model)
+
 	case "xai":
 		return xaiSynthesizer(cfg, model)
 
@@ -72,6 +76,20 @@ func azureSpeechSynthesizer(cfg providerConfig, model modelContext) (provider.Sy
 	region := cfg.Vars["region"]
 
 	return azurespeech.NewSynthesizer(region, model.ID, options...)
+}
+
+func googleSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesizer, error) {
+	var options []google.Option
+
+	if cfg.Token != "" {
+		options = append(options, google.WithToken(cfg.Token))
+	}
+
+	if model.Client != nil {
+		options = append(options, google.WithClient(model.Client))
+	}
+
+	return google.NewSynthesizer(model.ID, options...)
 }
 
 func openaiSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesizer, error) {

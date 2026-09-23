@@ -40,10 +40,7 @@ func TestConvertContent_DummyThoughtSignature(t *testing.T) {
 		},
 	}
 
-	content, err := convertContent(message, nil)
-	if err != nil {
-		t.Fatalf("convertContent: %v", err)
-	}
+	content := convertContent(message, nil)
 
 	if len(content.Parts) != 1 || content.Parts[0].FunctionCall == nil {
 		t.Fatalf("expected 1 function call part, got %+v", content.Parts)
@@ -66,10 +63,7 @@ func TestConvertContent_RealSignaturePreferred(t *testing.T) {
 		},
 	}
 
-	content, err := convertContent(message, nil)
-	if err != nil {
-		t.Fatalf("convertContent: %v", err)
-	}
+	content := convertContent(message, nil)
 
 	if len(content.Parts) != 1 || content.Parts[0].FunctionCall == nil {
 		t.Fatalf("expected 1 function call part, got %+v", content.Parts)
@@ -95,10 +89,7 @@ func TestConvertContent_PendingSignaturePreferred(t *testing.T) {
 		},
 	}
 
-	content, err := convertContent(message, nil)
-	if err != nil {
-		t.Fatalf("convertContent: %v", err)
-	}
+	content := convertContent(message, nil)
 
 	if len(content.Parts) != 1 || content.Parts[0].FunctionCall == nil {
 		t.Fatalf("expected 1 function call part, got %+v", content.Parts)
@@ -121,10 +112,7 @@ func TestConvertContent_ToolResultError(t *testing.T) {
 		},
 	}
 
-	content, err := convertContent(message, map[string]string{"call_1": "search"})
-	if err != nil {
-		t.Fatalf("convertContent: %v", err)
-	}
+	content := convertContent(message, map[string]string{"call_1": "search"})
 
 	if len(content.Parts) != 1 || content.Parts[0].FunctionResponse == nil {
 		t.Fatalf("expected 1 function response part, got %+v", content.Parts)
@@ -233,6 +221,39 @@ func TestApplyFinishReason(t *testing.T) {
 			}
 			if tt.status == provider.CompletionStatusRefused && (delta.StopDetails == nil || delta.StopDetails.Category != string(tt.reason)) {
 				t.Errorf("StopDetails = %+v, want refusal with category %q", delta.StopDetails, tt.reason)
+			}
+		})
+	}
+}
+
+func TestConvertThinkingConfig(t *testing.T) {
+	tests := []struct {
+		name      string
+		model     string
+		reasoning provider.ReasoningOptions
+
+		level  genai.ThinkingLevel
+		budget *int32
+	}{
+		{name: "gemini 3 effort", model: "gemini-3.8-flash", reasoning: provider.ReasoningOptions{Effort: provider.EffortLow}, level: genai.ThinkingLevelLow},
+		{name: "gemini 3 xhigh", model: "gemini-3.8-flash", reasoning: provider.ReasoningOptions{Effort: provider.EffortXHigh}, level: genai.ThinkingLevelHigh},
+		{name: "gemini 3 disabled", model: "gemini-3.8-flash", reasoning: provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortHigh}, level: genai.ThinkingLevelMinimal},
+		{name: "gemini 3 default", model: "gemini-3.8-flash", reasoning: provider.ReasoningOptions{}},
+		{name: "gemini 2 effort", model: "gemini-2.5-flash", reasoning: provider.ReasoningOptions{Effort: provider.EffortMedium}, budget: new(int32(8192))},
+		{name: "gemini 2 disabled", model: "models/gemini-2.5-flash", reasoning: provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled}, budget: new(int32(0))},
+		{name: "gemini 2 default", model: "gemini-2.5-pro", reasoning: provider.ReasoningOptions{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := convertThinkingConfig(tt.model, &tt.reasoning)
+
+			if config.ThinkingLevel != tt.level {
+				t.Errorf("ThinkingLevel = %q, want %q", config.ThinkingLevel, tt.level)
+			}
+
+			if (config.ThinkingBudget == nil) != (tt.budget == nil) || (tt.budget != nil && *config.ThinkingBudget != *tt.budget) {
+				t.Errorf("ThinkingBudget = %v, want %v", config.ThinkingBudget, tt.budget)
 			}
 		})
 	}

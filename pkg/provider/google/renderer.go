@@ -2,6 +2,7 @@ package google
 
 import (
 	"context"
+	"errors"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"google.golang.org/genai"
@@ -61,23 +62,36 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 		return nil, convertError(err)
 	}
 
-	result := &provider.Rendering{
-		ID:    image.ResponseID,
-		Model: r.model,
-	}
-
-	for _, part := range image.Candidates[0].Content.Parts {
-		if part.InlineData == nil {
+	for _, candidate := range image.Candidates {
+		if candidate.Content == nil {
 			continue
 		}
 
-		result.Content = part.InlineData.Data
-		result.ContentType = part.InlineData.MIMEType
+		for _, part := range candidate.Content.Parts {
+			if part.InlineData == nil {
+				continue
+			}
 
-		break
+			return &provider.Rendering{
+				ID:    image.ResponseID,
+				Model: r.model,
+
+				Content:     part.InlineData.Data,
+				ContentType: part.InlineData.MIMEType,
+			}, nil
+		}
 	}
 
-	return result, nil
+	// A blocked prompt or a refused candidate carries no image.
+	reason := "no image in response"
+
+	if feedback := image.PromptFeedback; feedback != nil && feedback.BlockReason != "" {
+		reason = "prompt blocked: " + string(feedback.BlockReason)
+	} else if len(image.Candidates) > 0 && image.Candidates[0].FinishReason != "" {
+		reason = "no image in response: " + string(image.Candidates[0].FinishReason)
+	}
+
+	return nil, errors.New("gemini: " + reason)
 }
 
 var googleAspects = []provider.AspectRatio{
@@ -102,7 +116,7 @@ func imageConfig(options *provider.RenderOptions) *genai.GenerateContentConfig {
 
 	switch options.Resolution {
 	case provider.Resolution512:
-		config.ImageSize = "0.5K"
+		config.ImageSize = "512"
 	case provider.Resolution1K:
 		config.ImageSize = "1K"
 	case provider.Resolution2K:

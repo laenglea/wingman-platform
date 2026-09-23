@@ -332,10 +332,9 @@ providers:
     #   - id: {gemini api model name}
     models:
       - gemini-3.8-flash
-      - gemini-3.1-pro-preview
-      - gemini-3.1-flash-lite
+      - gemini-3.8-flash-tts
+      - gemini-3.5-transcribe
       - gemini-3.1-flash-image
-      - gemini-3-pro-image
       - gemini-embedding-2
 ```
 

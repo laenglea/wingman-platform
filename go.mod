@@ -7,10 +7,12 @@ exclude github.com/gobwas/glob v1.0.0
 
 require (
 	github.com/abemedia/go-cfb v0.2.0
-	github.com/adrianliechti/go-extract v0.0.0-20260906123702-488d5cedbae8
-	github.com/anthropics/anthropic-sdk-go v1.74.0
+	github.com/adrianliechti/go-extract v0.0.0-20260922092841-9e05cb92f7ad
+	github.com/anthropics/anthropic-sdk-go v1.75.0
 	github.com/aws/aws-sdk-go-v2 v1.47.0
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.20
 	github.com/aws/aws-sdk-go-v2/config v1.33.5
+	github.com/aws/aws-sdk-go-v2/credentials v1.20.5
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.63.0
 	github.com/aws/smithy-go v1.28.2
 	github.com/coreos/go-oidc/v3 v3.21.0
@@ -22,7 +24,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/open-policy-agent/opa v1.20.2
-	github.com/openai/openai-go/v3 v3.63.1
+	github.com/openai/openai-go/v3 v3.66.0
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0
@@ -55,8 +57,6 @@ require (
 	github.com/JohannesKaufmann/dom v0.3.1 // indirect
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2 // indirect
 	github.com/agnivade/levenshtein v1.2.1 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.20 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.20.5 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.0 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.3 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.3 // indirect

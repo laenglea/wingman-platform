@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"iter"
+	"net/http"
 	"strings"
 
 	"google.golang.org/genai"
@@ -52,14 +54,9 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			return
 		}
 
-		contents, err := convertMessages(messages)
+		contents := convertMessages(messages)
 
-		if err != nil {
-			yield(nil, err)
-			return
-		}
-
-		config, err := convertGenerateConfig(convertInstruction(messages), options)
+		config, err := convertGenerateConfig(c.model, convertInstruction(messages), options)
 
 		if err != nil {
 			yield(nil, err)
@@ -68,11 +65,9 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 		toolAliases := provider.ToolAliases(options.Tools)
 
-		iter := client.Models.GenerateContentStream(ctx, c.model, contents, config)
-
 		var sawToolCall bool
 
-		for resp, err := range iter {
+		for resp, err := range generateContentStream(ctx, client, c.model, contents, config) {
 			if err != nil {
 				yield(nil, convertError(err))
 				return
@@ -88,10 +83,24 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				Usage: toCompletionUsage(resp.UsageMetadata),
 			}
 
+			if feedback := resp.PromptFeedback; feedback != nil && feedback.BlockReason != "" {
+				// A blocked prompt yields no candidates at all.
+				delta.StopReason = provider.StopReasonRefusal
+				delta.Status = provider.CompletionStatusRefused
+				delta.StopDetails = &provider.StopDetails{
+					Type:     "refusal",
+					Category: string(feedback.BlockReason),
+				}
+			}
+
 			if len(resp.Candidates) > 0 {
 				candidate := resp.Candidates[0]
 
-				delta.Message.Content = toContent(candidate.Content, toolAliases, options.Tools)
+				// Content is absent when a candidate stops before any output,
+				// e.g. on a safety block.
+				if candidate.Content != nil {
+					delta.Message.Content = toContent(candidate.Content, toolAliases, options.Tools)
+				}
 
 				for _, c := range delta.Message.Content {
 					if c.ToolCall != nil {
@@ -133,33 +142,90 @@ func convertInstruction(messages []provider.Message) *genai.Content {
 	}
 }
 
-func convertGenerateConfig(instruction *genai.Content, options *provider.CompleteOptions) (*genai.GenerateContentConfig, error) {
+// generateContentStream retries once at LOW when the model rejects MINIMAL
+// thinking, which several Gemini 3 models (3.1 Pro, 3.7 and 3.8 Flash) do not
+// offer. The rejection arrives before any output, so the retry is invisible.
+func generateContentStream(ctx context.Context, client *genai.Client, model string, contents []*genai.Content, config *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
+	return func(yield func(*genai.GenerateContentResponse, error) bool) {
+		for resp, err := range client.Models.GenerateContentStream(ctx, model, contents, config) {
+			if err != nil && config.ThinkingConfig != nil && config.ThinkingConfig.ThinkingLevel == genai.ThinkingLevelMinimal && isUnsupportedThinkingLevel(err) {
+				config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelLow
+
+				for resp, err := range client.Models.GenerateContentStream(ctx, model, contents, config) {
+					if !yield(resp, err) {
+						return
+					}
+				}
+
+				return
+			}
+
+			if !yield(resp, err) {
+				return
+			}
+		}
+	}
+}
+
+func isUnsupportedThinkingLevel(err error) bool {
+	var apierr genai.APIError
+	return errors.As(err, &apierr) && apierr.Code == http.StatusBadRequest && strings.Contains(apierr.Message, "Thinking level")
+}
+
+func convertThinkingConfig(model string, reasoning *provider.ReasoningOptions) *genai.ThinkingConfig {
+	config := &genai.ThinkingConfig{
+		IncludeThoughts: reasoning.IncludeSummary && reasoning.Type != provider.ReasoningTypeDisabled,
+	}
+
+	effort := reasoning.Effort
+
+	if reasoning.Type == provider.ReasoningTypeDisabled {
+		effort = ""
+	}
+
+	// Gemini 2.x rejects thinkingLevel and is steered by a token budget.
+	if strings.HasPrefix(strings.TrimPrefix(model, "models/"), "gemini-2") {
+		switch {
+		case reasoning.Type == provider.ReasoningTypeDisabled:
+			config.ThinkingBudget = new(int32(0))
+		case effort == "":
+		case effort == provider.EffortMinimal, effort == provider.EffortLow:
+			config.ThinkingBudget = new(int32(1024))
+		case effort == provider.EffortMedium:
+			config.ThinkingBudget = new(int32(8192))
+		default:
+			config.ThinkingBudget = new(int32(24576))
+		}
+
+		return config
+	}
+
+	// Gemini 3 cannot fully disable thinking; minimal is the closest level.
+	if reasoning.Type == provider.ReasoningTypeDisabled {
+		effort = provider.EffortMinimal
+	}
+
+	switch effort {
+	case provider.EffortMinimal:
+		config.ThinkingLevel = genai.ThinkingLevelMinimal
+	case provider.EffortLow:
+		config.ThinkingLevel = genai.ThinkingLevelLow
+	case provider.EffortMedium:
+		config.ThinkingLevel = genai.ThinkingLevelMedium
+	case provider.EffortHigh, provider.EffortXHigh, provider.EffortMax:
+		config.ThinkingLevel = genai.ThinkingLevelHigh
+	}
+
+	return config
+}
+
+func convertGenerateConfig(model string, instruction *genai.Content, options *provider.CompleteOptions) (*genai.GenerateContentConfig, error) {
 	config := &genai.GenerateContentConfig{
 		SystemInstruction: instruction,
 	}
 
-	if reasoning := options.ReasoningOptions; reasoning != nil {
-		config.ThinkingConfig = &genai.ThinkingConfig{
-			IncludeThoughts: reasoning.IncludeSummary,
-		}
-
-		if reasoning.Type == provider.ReasoningTypeDisabled {
-			// Gemini models cannot fully disable thinking; minimal is the
-			// closest equivalent to "no thinking".
-			config.ThinkingConfig.IncludeThoughts = false
-			config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelMinimal
-		} else {
-			switch reasoning.Effort {
-			case provider.EffortMinimal:
-				config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelMinimal
-			case provider.EffortLow:
-				config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelLow
-			case provider.EffortMedium:
-				config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelMedium
-			case provider.EffortHigh, provider.EffortXHigh, provider.EffortMax:
-				config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelHigh
-			}
-		}
+	if options.ReasoningOptions != nil {
+		config.ThinkingConfig = convertThinkingConfig(model, options.ReasoningOptions)
 	}
 
 	flatTools := provider.FlattenTools(options.Tools)
@@ -223,7 +289,7 @@ func convertGenerateConfig(instruction *genai.Content, options *provider.Complet
 	return config, nil
 }
 
-func convertContent(message provider.Message, toolCallNames map[string]string) (*genai.Content, error) {
+func convertContent(message provider.Message, toolCallNames map[string]string) *genai.Content {
 	content := &genai.Content{}
 
 	switch message.Role {
@@ -396,10 +462,10 @@ func convertContent(message provider.Message, toolCallNames map[string]string) (
 		}
 	}
 
-	return content, nil
+	return content
 }
 
-func convertMessages(messages []provider.Message) ([]*genai.Content, error) {
+func convertMessages(messages []provider.Message) []*genai.Content {
 	// Build a callID → name index from assistant tool calls so tool results
 	// (which have no Name field) can recover the tool name when the id isn't
 	// in encoded form. The lookup uses both the raw id and the plain id
@@ -425,14 +491,10 @@ func convertMessages(messages []provider.Message) ([]*genai.Content, error) {
 	var result []*genai.Content
 	for _, m := range messages {
 		if m.Role == provider.MessageRoleUser || m.Role == provider.MessageRoleAssistant {
-			content, err := convertContent(m, toolCallNames)
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, content)
+			result = append(result, convertContent(m, toolCallNames))
 		}
 	}
-	return result, nil
+	return result
 }
 
 func convertTools(tools []provider.Tool) ([]*genai.Tool, error) {
@@ -591,6 +653,7 @@ func applyFinishReason(delta *provider.Completion, reason genai.FinishReason, sa
 	case genai.FinishReasonLanguage,
 		genai.FinishReasonMalformedFunctionCall,
 		genai.FinishReasonUnexpectedToolCall,
+		genai.FinishReasonTooManyToolCalls,
 		genai.FinishReasonNoImage,
 		genai.FinishReasonOther,
 		genai.FinishReasonImageOther:
@@ -678,7 +741,7 @@ var dummyThoughtSignature = []byte("skip_thought_signature_validator")
 // parseToolID is the inverse of formatToolID. For plain IDs without "::" the
 // entire string is returned as id with empty name and signature.
 func parseToolID(s string) (id, name string, signature []byte) {
-	parts := strings.Split(s, "::")
+	parts := strings.SplitN(s, "::", 3)
 
 	if len(parts) > 0 {
 		id = parts[0]

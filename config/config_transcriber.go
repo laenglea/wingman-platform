@@ -6,6 +6,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/azurespeech"
+	"github.com/adrianliechti/wingman/pkg/provider/google"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
 	"github.com/adrianliechti/wingman/pkg/provider/openrouter"
 )
@@ -52,6 +53,9 @@ func createTranscriber(cfg providerConfig, model modelContext) (provider.Transcr
 	case "azurespeech", "azure-speech":
 		return azureSpeechTranscriber(cfg, model)
 
+	case "gemini", "google":
+		return googleTranscriber(cfg, model)
+
 	default:
 		return nil, errors.New("invalid transcriber type: " + cfg.Type)
 	}
@@ -71,6 +75,20 @@ func azureSpeechTranscriber(cfg providerConfig, model modelContext) (provider.Tr
 	region := cfg.Vars["region"]
 
 	return azurespeech.NewTranscriber(region, model.ID, options...)
+}
+
+func googleTranscriber(cfg providerConfig, model modelContext) (provider.Transcriber, error) {
+	var options []google.Option
+
+	if cfg.Token != "" {
+		options = append(options, google.WithToken(cfg.Token))
+	}
+
+	if model.Client != nil {
+		options = append(options, google.WithClient(model.Client))
+	}
+
+	return google.NewTranscriber(model.ID, options...)
 }
 
 func openaiTranscriber(cfg providerConfig, model modelContext) (provider.Transcriber, error) {
