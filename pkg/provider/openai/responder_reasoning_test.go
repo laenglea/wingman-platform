@@ -47,6 +47,41 @@ func TestGPT6AstraNormalizesUnsupportedReasoningEfforts(t *testing.T) {
 	}
 }
 
+func TestGPT6SolAndLunaRequestCompatibility(t *testing.T) {
+	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		t.Run(model, func(t *testing.T) {
+			messages := []provider.Message{provider.UserMessage("hi")}
+			temperature := float32(0.7)
+			responder, err := NewResponder("", model)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			high := &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortHigh}
+			responsesRequest, err := responder.convertResponsesRequest(messages, &provider.CompleteOptions{
+				ReasoningOptions: high, Temperature: &temperature,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if responsesRequest.Reasoning.Effort != "high" || responsesRequest.Temperature.Valid() {
+				t.Fatalf("Responses reasoning request: effort=%q temperature=%v", responsesRequest.Reasoning.Effort, responsesRequest.Temperature)
+			}
+
+			none := &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled}
+			responsesRequest, err = responder.convertResponsesRequest(messages, &provider.CompleteOptions{
+				ReasoningOptions: none, Temperature: &temperature,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if responsesRequest.Reasoning.Effort != "none" || !responsesRequest.Temperature.Valid() {
+				t.Fatalf("Responses none request: effort=%q temperature=%v", responsesRequest.Reasoning.Effort, responsesRequest.Temperature)
+			}
+		})
+	}
+}
+
 func assertAstraRequestCompatibility(t *testing.T, request any) {
 	t.Helper()
 

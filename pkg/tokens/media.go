@@ -85,9 +85,14 @@ func ClaudeImage(model string, w, h int) int {
 type oaiImageModel struct {
 	base, perTile int     // tile models
 	patchMult     float64 // patch models (base/perTile zero)
+	patchBudget   int
+	lowMaxPixels  int
 }
 
 var oaiImagePrefixes = map[string]oaiImageModel{
+	// OpenAI documents 1.2x patch tokens for Astra and the preceding 5.6
+	// tiers; use the same GPT-6 family estimate for Sol and Luna.
+	"gpt-6-":       {patchMult: 1.2, patchBudget: 2500, lowMaxPixels: 512},
 	"gpt-4o-mini":  {base: 2833, perTile: 5667},
 	"gpt-4.1-mini": {patchMult: 1.62},
 	"gpt-4.1-nano": {patchMult: 2.46},
@@ -104,7 +109,7 @@ var oaiImagePrefixes = map[string]oaiImageModel{
 
 // OpenAIImage estimates image tokens for an OpenAI model at detail "high"
 // (also the practical result of "auto" for typical images). detailLow uses
-// the flat low-detail cost. Unknown dimensions assume 1024x1024.
+// the model's low-detail sizing rule. Unknown dimensions assume 1024x1024.
 func OpenAIImage(model string, w, h int, detailLow bool) int {
 	spec, bestLen := oaiImageModel{base: 85, perTile: 170}, 0
 	for prefix, s := range oaiImagePrefixes {
@@ -117,8 +122,16 @@ func OpenAIImage(model string, w, h int, detailLow bool) int {
 	}
 
 	if spec.patchMult > 0 {
-		patches := min(int(math.Ceil(float64(w)/32)*math.Ceil(float64(h)/32)), 1536)
-		return int(float64(patches)*spec.patchMult + 0.5)
+		if detailLow && spec.lowMaxPixels > 0 && max(w, h) > spec.lowMaxPixels {
+			scale := float64(spec.lowMaxPixels) / float64(max(w, h))
+			w, h = max(1, int(float64(w)*scale)), max(1, int(float64(h)*scale))
+		}
+		budget := spec.patchBudget
+		if budget == 0 {
+			budget = 1536
+		}
+		patches := min(int(math.Ceil(float64(w)/32)*math.Ceil(float64(h)/32)), budget)
+		return int(math.Ceil(float64(patches) * spec.patchMult))
 	}
 
 	if detailLow {

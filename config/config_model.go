@@ -85,10 +85,8 @@ func DetectModelType(id string) ModelType {
 	realtime := []string{
 		"realtime",
 		"sonic",
-		"live-preview",
-		"live-transcribe",
+		"-live", // gemini-3.8-live, gemini-live-2.5-flash, gpt-live-transcribe, …
 		"native-audio",
-		"transcribe-live",
 	}
 
 	completers := []string{

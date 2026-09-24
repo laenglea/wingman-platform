@@ -58,6 +58,57 @@ func TestConvertConverseInputUsesForcedToolForSchema(t *testing.T) {
 	}
 }
 
+// TestConvertConverseInputSteersSchemaToolWithoutForcing verifies models that
+// reject forced tool choice (Opus 5.5) get the schema tool with automatic
+// selection, and keep thinking on instead of sending the rejected disable.
+func TestConvertConverseInputSteersSchemaToolWithoutForcing(t *testing.T) {
+	c := &Completer{Config: &Config{model: "anthropic.claude-opus-5-5"}}
+
+	options := &provider.CompleteOptions{
+		Schema: &provider.Schema{
+			Name:       "classify_chat",
+			Properties: testSchema,
+		},
+		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortXHigh},
+	}
+
+	req, err := c.convertConverseInput([]provider.Message{
+		provider.UserMessage("Return JSON."),
+	}, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := req.ToolConfig.ToolChoice.(*types.ToolChoiceMemberAuto); !ok {
+		t.Fatalf("expected auto tool choice, got %T", req.ToolConfig.ToolChoice)
+	}
+
+	fields, thinking := c.converseAdditionalFields(nil, options)
+	if !thinking.Enabled || thinking.Disabled {
+		t.Fatalf("expected thinking to stay enabled, got %+v", thinking)
+	}
+	if got, _ := fields["thinking"].(map[string]any); got["type"] != "adaptive" {
+		t.Errorf("thinking: got %v, want adaptive", fields["thinking"])
+	}
+}
+
+// TestConvertConverseInputRejectsForcedToolChoice verifies forced tool choice
+// on a model that rejects it returns an explicit error instead of an
+// upstream 400.
+func TestConvertConverseInputRejectsForcedToolChoice(t *testing.T) {
+	c := &Completer{Config: &Config{model: "anthropic.claude-opus-5-5"}}
+
+	_, err := c.convertConverseInput([]provider.Message{
+		provider.UserMessage("hi"),
+	}, &provider.CompleteOptions{
+		Tools:       []provider.Tool{{Name: "get_weather", Parameters: map[string]any{"type": "object"}}},
+		ToolOptions: &provider.ToolOptions{Choice: provider.ToolChoiceAny},
+	})
+	if err == nil {
+		t.Fatal("expected forced tool choice to be rejected")
+	}
+}
+
 // TestConverseAdditionalFields_SchemaDisablesThinking verifies schema mode on
 // models that think by default (Sonnet 5, Opus 5) sends an explicit disable —
 // Bedrock rejects forced tool_choice while thinking is active, and omitting

@@ -37,10 +37,36 @@ var NoSamplingModels = []string{
 // DefaultThinkingModels think when the field is omitted but still accept an
 // explicit `thinking: {type: "disabled"}` — required by Bedrock for forced
 // tool_choice. Fable/Mythos also think by default but reject the disable.
+// Patterns match by substring, so "opus-5" also covers Opus 5.5; the
+// AlwaysThinkingModels check takes precedence for it.
 var DefaultThinkingModels = []string{
 	"opus-5",
 	"sonnet-5",
 }
+
+// AlwaysThinkingModels reject an explicit `thinking: {type: "disabled"}` —
+// thinking cannot be turned off on these models.
+var AlwaysThinkingModels = []string{
+	"fable-5",
+	"mythos-5",
+	"mythos-preview",
+
+	"opus-5-5",
+}
+
+// NoForcedToolChoiceModels reject tool_choice "any" and a named tool. Reject
+// such requests rather than weakening the caller's requirement; schema mode
+// emulation steers the schema tool with automatic selection instead.
+var NoForcedToolChoiceModels = []string{
+	"fable-5-1",
+	"mythos-5-1",
+
+	"opus-5-5",
+}
+
+// schemaToolInstruction steers schema mode toward the schema tool on models
+// that cannot be forced to call it.
+const schemaToolInstruction = "Always deliver the final answer by calling this tool, and do not answer in plain text."
 
 // DisabledThinkingEffortCapModels accept `thinking: {type: "disabled"}` only
 // at effort "high" or below — pairing it with "xhigh" or "max" returns a 400.
@@ -161,6 +187,10 @@ func (c *Completer) resolveThinking(messages []provider.Message, options *provid
 	if forced {
 		t.Enabled = false
 		t.Disabled = true
+	}
+
+	if matchesModel(c.model, AlwaysThinkingModels) {
+		t.Disabled = false
 	}
 
 	if t.Disabled && matchesModel(c.model, DisabledThinkingEffortCapModels) && (t.Effort == "xhigh" || t.Effort == "max") {

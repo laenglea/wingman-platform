@@ -102,6 +102,9 @@ func TestDetectRealtimeAndTranscriptionModels(t *testing.T) {
 		"gemini-3.1-flash-live-preview":                 ModelTypeRealtime,
 		"gemini-2.5-flash-native-audio-preview-12-2025": ModelTypeRealtime,
 		"gemini-3.5-transcribe-live":                    ModelTypeRealtime,
+		"gemini-3.8-live":                               ModelTypeRealtime,
+		"gemini-3.8-live-extended-thinking":             ModelTypeRealtime,
+		"gemini-3.8-flash":                              ModelTypeCompleter,
 		"amazon.nova-2-sonic-v1:0":                      ModelTypeRealtime,
 		"gpt-live-transcribe":                           ModelTypeRealtime,
 		"gpt-transcribe":                                ModelTypeTranscriber,
@@ -112,5 +115,34 @@ func TestDetectRealtimeAndTranscriptionModels(t *testing.T) {
 				t.Errorf("DetectModelType(%q) = %q, want %q", model, got, want)
 			}
 		})
+	}
+}
+
+func TestRealtimeDefaultSkipsLiveTranscribers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte(`
+providers:
+  - type: openai
+    token: test-openai-token
+    models:
+      - gpt-live-transcribe
+      - gpt-realtime-2.1
+      - gpt-realtime-2.1-mini
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Parse(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	realtime, err := cfg.Realtime("")
+	if err != nil {
+		t.Fatalf("Realtime(\"\") default: %v", err)
+	}
+	if want, err := cfg.Realtime("gpt-realtime-2.1"); err != nil || realtime != want {
+		t.Error("default realtime should be gpt-realtime-2.1, not the transcription-only gpt-live-transcribe")
 	}
 }

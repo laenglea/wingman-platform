@@ -31,10 +31,7 @@ func TestThoughtSignatureSurvivesJSON(t *testing.T) {
 	}
 
 	message := provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ReasoningContent(provider.Reasoning{Text: "why", Signature: wire})}}
-	parts, err := convertContent(message, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	parts := convertContent(message, nil)
 	if len(parts.Parts) != 1 || !bytes.Equal(parts.Parts[0].ThoughtSignature, raw) {
 		t.Fatalf("signature changed through JSON: %q, want %q", parts.Parts[0].ThoughtSignature, raw)
 	}

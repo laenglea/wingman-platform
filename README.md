@@ -166,6 +166,8 @@ providers:
     token: ${OPENAI_API_KEY}
     models:
       - gpt-6-astra
+      - gpt-6-sol
+      - gpt-6-luna
       - gpt-5.4
       - gpt-5.4-mini
       - text-embedding-3-large
@@ -174,6 +176,7 @@ providers:
   - type: anthropic
     token: ${ANTHROPIC_API_KEY}
     models:
+      - claude-opus-5-5
       - claude-sonnet-4-6
       - claude-haiku-4-5
 
@@ -262,6 +265,8 @@ providers:
 
     models:
       - gpt-6-astra
+      - gpt-6-sol
+      - gpt-6-luna
       - gpt-4o
       - gpt-4o-mini
       - text-embedding-3-small
@@ -332,10 +337,9 @@ providers:
     #   - id: {gemini api model name}
     models:
       - gemini-3.8-flash
-      - gemini-3.1-pro-preview
-      - gemini-3.1-flash-lite
+      - gemini-3.8-flash-tts
+      - gemini-3.5-transcribe
       - gemini-3.1-flash-image
-      - gemini-3-pro-image
       - gemini-embedding-2
 ```
 

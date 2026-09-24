@@ -155,6 +155,12 @@ func TestToolCallingLongInputSSE(t *testing.T) {
 				"tool_choice": map[string]any{"type": "tool", "name": "save_note"},
 			}
 
+			// The prompt already asks for the call; models without forced
+			// tool choice rely on it.
+			if model.Capabilities.NoForcedToolChoice {
+				req["tool_choice"] = map[string]any{"type": "auto"}
+			}
+
 			anthropicEvents := anthropic.PostMessagesSSE(t, h, h.Anthropic, anthropic.WithModel(req, h.ReferenceModel))
 			wingmanEvents := anthropic.PostMessagesSSE(t, h, h.Wingman, anthropic.WithModel(req, model.Name))
 
