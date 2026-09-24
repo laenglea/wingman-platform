@@ -263,13 +263,6 @@ func (c *Agent) Complete(ctx context.Context, messages []provider.Message, optio
 
 			completion := acc.Result()
 
-			completion.ID = accID
-			completion.Model = c.model
-
-			if completion.Message == nil {
-				return
-			}
-
 			var agentCalls []provider.ToolCall
 			var hasCallerCall bool
 
@@ -290,16 +283,30 @@ func (c *Agent) Complete(ctx context.Context, messages []provider.Message, optio
 				}
 			}
 
+			// Only successful tool rounds continue. Incomplete or failed turns
+			// must retain their boundary without executing unfinished calls.
+			if len(agentCalls) == 0 || completion.Status != "" && completion.Status != provider.CompletionStatusCompleted {
+				if completion.Status != "" || completion.StopReason != "" || completion.StopDetails != nil || completion.StopSequence != "" {
+					yield(&provider.Completion{
+						ID:    accID,
+						Model: c.model,
+
+						Status:       completion.Status,
+						StopReason:   completion.StopReason,
+						StopDetails:  completion.StopDetails,
+						StopSequence: completion.StopSequence,
+					}, nil)
+				}
+
+				return
+			}
+
 			// Agent tools are executed in-loop; caller tools are surfaced through
 			// the stream for the caller to handle. A single assistant turn cannot
 			// span both — the chain would either loop without the caller's result
 			// (provider 400) or yield without the agent result (lost work).
-			if len(agentCalls) > 0 && hasCallerCall {
+			if hasCallerCall {
 				yield(nil, errors.New("agent: model returned both agent-handled and caller-handled tool calls in one turn"))
-				return
-			}
-
-			if len(agentCalls) == 0 {
 				return
 			}
 

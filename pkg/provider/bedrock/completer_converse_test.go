@@ -190,6 +190,45 @@ func TestConvertConverseInput_MidConversationSystem(t *testing.T) {
 	}
 }
 
+// Without a client limit Converse caps Claude Opus 5.5 at 4096 output tokens,
+// which truncates tool calls after thinking and a preamble. Claude models get
+// their own limit instead, except context-bound ones, where it would fail long
+// prompts; the client's value still wins. Want 0 means no limit is sent.
+func TestConvertConverseInput_DefaultMaxTokens(t *testing.T) {
+	limit := 2048
+	profile := "arn:aws:bedrock:eu-central-1:123456789012:application-inference-profile/r7rhmi9b01o7"
+
+	cases := []struct {
+		model   string
+		options *provider.CompleteOptions
+		want    int32
+	}{
+		{"eu.anthropic.claude-opus-5-5", &provider.CompleteOptions{}, 128000},
+		{"eu.anthropic.claude-sonnet-4-6", &provider.CompleteOptions{}, 128000},
+		{"eu.anthropic.claude-haiku-4-5-20251001-v1:0", &provider.CompleteOptions{}, 64000},
+		{"eu.anthropic.claude-sonnet-4-20250514-v1:0", &provider.CompleteOptions{}, 0},
+		{"us.anthropic.claude-opus-4-1-20250805-v1:0", &provider.CompleteOptions{}, 0},
+		{"anthropic.claude-3-5-haiku-20241022-v1:0", &provider.CompleteOptions{}, 0},
+		{"amazon.nova-pro-v1:0", &provider.CompleteOptions{}, 0},
+		{"eu.anthropic.claude-sonnet-5", &provider.CompleteOptions{MaxTokens: &limit}, 2048},
+		{profile, &provider.CompleteOptions{}, 0},
+		{"arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5", &provider.CompleteOptions{}, 128000},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			c := &Completer{Config: &Config{model: tc.model}}
+			req, err := c.convertConverseInput([]provider.Message{provider.UserMessage("hi")}, tc.options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := req.InferenceConfig.MaxTokens; (got == nil) != (tc.want == 0) || aws.ToInt32(got) != tc.want {
+				t.Errorf("maxTokens = %v, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestConvertFormats_AddedTypes(t *testing.T) {
 	for mime, want := range map[string]types.DocumentFormat{
 		"application/msword":       types.DocumentFormatDoc,

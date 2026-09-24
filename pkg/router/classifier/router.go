@@ -143,26 +143,36 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 	return func(yield func(*provider.Completion, error) bool) {
 		emitted := false
 
+		// Chunks without content (the role delta, the stop and usage of an
+		// empty answer) wait for the first output. On a fallback they are
+		// dropped, or clients would keep their status and stop reason for
+		// the fallback's answer.
+		var pending []*provider.Completion
+
 		for completion, err := range c.candidates[d.index].Completer.Complete(ctx, messages, options) {
 			// A hard failure before any output is produced falls back once, so
 			// a single bad backend can't break the request. Once output has
 			// streamed, errors propagate normally.
 			if err != nil && !emitted && d.fallback != d.index {
-				for completion, err := range c.candidates[d.fallback].Completer.Complete(ctx, messages, options) {
-					if !yield(completion, err) {
-						return
-					}
-				}
-
-				return
+				break
 			}
 
 			// Only meaningful output counts as emitted: providers yield a
 			// role-only delta as the first stream chunk, and a stream that
 			// dies right after it should still fall back.
-			if completion != nil && completion.Message != nil && len(completion.Message.Content) > 0 {
-				emitted = true
+			if !emitted && err == nil && !hasContent(completion) {
+				pending = append(pending, completion)
+				continue
 			}
+
+			for _, p := range pending {
+				if !yield(p, nil) {
+					return
+				}
+			}
+
+			pending = nil
+			emitted = emitted || hasContent(completion)
 
 			if !yield(completion, err) {
 				return
@@ -177,8 +187,41 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					return
 				}
 			}
+
+			return
+		}
+
+		for _, p := range pending {
+			if !yield(p, nil) {
+				return
+			}
 		}
 	}
+}
+
+// hasContent ignores item metadata and empty text or reasoning starts.
+// Once any payload has streamed, switching providers would mix their output.
+func hasContent(completion *provider.Completion) bool {
+	if completion == nil || completion.Message == nil {
+		return false
+	}
+
+	for _, part := range completion.Message.Content {
+		if part.Text != "" || part.Refusal != "" || part.File != nil || part.ToolCall != nil || part.ToolResult != nil {
+			return true
+		}
+		if r := part.Reasoning; r != nil && (r.Text != "" || r.Summary != "" || r.Signature != "") {
+			return true
+		}
+		if c := part.Compaction; c != nil && (c.Content != "" || c.Signature != "") {
+			return true
+		}
+		if part.CompactionTrigger || part.ConfigurationUpdate != nil || part.Instructions != nil {
+			return true
+		}
+	}
+
+	return false
 }
 
 // classify resolves the routing decision for a request, caching it so a task's

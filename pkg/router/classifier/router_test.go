@@ -2,6 +2,7 @@ package classifier
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"slices"
 	"strings"
@@ -19,6 +20,7 @@ type mockCompleter struct {
 	text    string
 	err     error
 	prelude bool
+	prefix  []provider.Completion
 	empty   bool
 	calls   int
 }
@@ -26,6 +28,12 @@ type mockCompleter struct {
 func (m *mockCompleter) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	return func(yield func(*provider.Completion, error) bool) {
 		m.calls++
+
+		for i := range m.prefix {
+			if !yield(&m.prefix[i], nil) {
+				return
+			}
+		}
 
 		if m.prelude {
 			role := &provider.Completion{
@@ -456,6 +464,89 @@ func TestEmptyStreamFallsBack(t *testing.T) {
 
 	if cheap.calls != 1 || strong.calls != 1 {
 		t.Fatalf("calls: cheap=%d strong=%d", cheap.calls, strong.calls)
+	}
+}
+
+func TestFallbackDropsEmptyAnswerMetadata(t *testing.T) {
+	for name, content := range map[string]provider.Content{
+		"empty text":     provider.TextContent(""),
+		"message start":  {MessageID: "msg_cheap", Phase: provider.MessagePhaseCommentary},
+		"thinking start": provider.ReasoningContent(provider.Reasoning{ID: "rs_cheap"}),
+	} {
+		for _, streamErr := range []error{nil, context.DeadlineExceeded} {
+			t.Run(name+"/"+fmt.Sprint(streamErr), func(t *testing.T) {
+				cheap := &mockCompleter{empty: true, err: streamErr, prefix: []provider.Completion{
+					{ID: "cheap", Reasoning: provider.ReasoningContextAllTurns, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{content}}},
+					{Status: provider.CompletionStatusRefused, StopReason: provider.StopReasonRefusal, Usage: &provider.Usage{InputTokens: 100}},
+				}}
+				strong := &mockCompleter{name: "strong"}
+				c, err := NewCompleter([]Candidate{
+					{Completer: cheap, Model: "cheap", Cost: 1, MaxDifficulty: 2},
+					{Completer: strong, Model: "strong", Cost: 60, MaxDifficulty: 4},
+				}, Options{DefaultIndex: 1})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				var acc provider.CompletionAccumulator
+				for completion, err := range c.Complete(t.Context(), userMsg("hello"), nil) {
+					if err != nil {
+						t.Fatal(err)
+					}
+					acc.Add(*completion)
+				}
+				result := acc.Result()
+				if result.Text() != "strong" || result.Status != "" || result.StopReason != "" || result.Reasoning != "" || result.Usage != nil || result.ID != "" {
+					t.Fatalf("fallback inherited empty answer metadata: %+v, text=%q", result, result.Text())
+				}
+				if cheap.calls != 1 || strong.calls != 1 {
+					t.Fatalf("calls: cheap=%d strong=%d", cheap.calls, strong.calls)
+				}
+			})
+		}
+	}
+}
+
+func TestStreamKeepsMetadataWithoutFallback(t *testing.T) {
+	for name, content := range map[string]provider.Content{
+		"only candidate": {},
+		"text":           provider.TextContent("partial"),
+		"refusal":        {Refusal: "declined"},
+		"reasoning":      provider.ReasoningContent(provider.Reasoning{Text: "thinking"}),
+		"tool call":      provider.ToolCallContent(provider.ToolCall{ID: "call_1", Name: "lookup"}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			primary := &mockCompleter{empty: true, prefix: []provider.Completion{
+				{ID: "primary", Message: &provider.Message{Role: provider.MessageRoleAssistant}},
+				{Message: &provider.Message{Content: []provider.Content{{MessageID: "msg_primary"}}}},
+				{Message: &provider.Message{Content: []provider.Content{content}}},
+				{StopReason: provider.StopReasonEndTurn, Usage: &provider.Usage{InputTokens: 10}},
+			}}
+			fallback := &mockCompleter{name: "fallback"}
+			candidates := []Candidate{{Completer: primary, Model: "primary", Cost: 1, MaxDifficulty: 2}}
+			if name != "only candidate" {
+				primary.err = context.DeadlineExceeded
+				candidates = append(candidates, Candidate{Completer: fallback, Model: "fallback", Cost: 60, MaxDifficulty: 4})
+			}
+			c, err := NewCompleter(candidates, Options{DefaultIndex: len(candidates) - 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var got []provider.Completion
+			var gotErr error
+			for completion, err := range c.Complete(t.Context(), userMsg("hello"), nil) {
+				if err != nil {
+					gotErr = err
+				}
+				if completion != nil {
+					got = append(got, *completion)
+				}
+			}
+			if !slices.Equal(got, primary.prefix) || gotErr != primary.err || fallback.calls != 0 {
+				t.Fatalf("changed stream: chunks=%+v, error=%v, fallback calls=%d", got, gotErr, fallback.calls)
+			}
+		})
 	}
 }
 
