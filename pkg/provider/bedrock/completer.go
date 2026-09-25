@@ -133,6 +133,11 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		// the freeform text once the block closes.
 		customArgs := map[int32]*strings.Builder{}
 
+		// Adjacent text blocks share an item; reasoning and tool blocks
+		// separate them so replay preserves their order. Converse streams
+		// blocks sequentially, so only the current text item is needed.
+		textItem, afterText := "", false
+
 		for event := range stream.Events() {
 			switch v := event.(type) {
 			case *types.ConverseStreamOutputMemberMessageStart:
@@ -150,6 +155,8 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				}
 
 			case *types.ConverseStreamOutputMemberContentBlockStart:
+				afterText = false
+
 				switch b := v.Value.Start.(type) {
 				case *types.ContentBlockStartMemberToolUse:
 					toolCallIDs[aws.ToInt32(v.Value.ContentBlockIndex)] = aws.ToString(b.Value.ToolUseId)
@@ -195,6 +202,19 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				}
 
 			case *types.ConverseStreamOutputMemberContentBlockDelta:
+				blockIndex := aws.ToInt32(v.Value.ContentBlockIndex)
+				_, isText := v.Value.Delta.(*types.ContentBlockDeltaMemberText)
+				isText = isText || schemaBlocks[blockIndex]
+				if isText {
+					switch {
+					case textItem == "":
+						textItem = "msg_" + id
+					case !afterText:
+						textItem = fmt.Sprintf("msg_%s_%d", id, blockIndex)
+					}
+				}
+				afterText = isText
+
 				switch b := v.Value.Delta.(type) {
 				case *types.ContentBlockDeltaMemberReasoningContent:
 					switch r := b.Value.(type) {
@@ -269,7 +289,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 							Role: provider.MessageRoleAssistant,
 
 							Content: []provider.Content{
-								provider.TextContent(b.Value),
+								{MessageID: textItem, Text: b.Value},
 							},
 						},
 					}
@@ -307,7 +327,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					// Schema mode: the schema tool's arguments are the answer.
 					if schemaBlocks[aws.ToInt32(v.Value.ContentBlockIndex)] {
 						delta.Message.Content = []provider.Content{
-							provider.TextContent(aws.ToString(b.Value.Input)),
+							{MessageID: textItem, Text: aws.ToString(b.Value.Input)},
 						}
 					}
 
@@ -632,12 +652,13 @@ func (c *Completer) converseAdditionalFields(messages []provider.Message, option
 	fields := map[string]any{}
 
 	if thinking.Enabled {
-		config := map[string]any{"type": "adaptive"}
+		// Always explicit: Claude 5.x models omit thinking text by default.
+		display := "summarized"
 		if !thinking.Summarized {
-			config["display"] = "omitted"
+			display = "omitted"
 		}
 
-		fields["thinking"] = config
+		fields["thinking"] = map[string]any{"type": "adaptive", "display": display}
 	} else if thinking.Disabled && matchesModel(c.model, DefaultThinkingModels) {
 		// Bedrock only accepts the explicit disable on models that think
 		// by default; the others are off when the field is omitted.
@@ -699,11 +720,14 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 		return nil, err
 	}
 
-	// ToolChoiceNone suppresses toolConfig, but Bedrock requires it when message history
-	// contains toolUse/toolResult blocks. In that case, fall back to no ToolChoice (auto).
+	// Converse has no "none" choice, and Claude's native one leaves current
+	// models with an empty answer where they would have called a tool. The
+	// tools are left out instead. Replayed tool blocks need their definitions,
+	// so with tool history "none" is best effort.
 	toolOptions := options.ToolOptions
+	none := toolOptions != nil && toolOptions.Choice == provider.ToolChoiceNone
 
-	if toolOptions != nil && toolOptions.Choice == provider.ToolChoiceNone && inputHasToolBlocks(input) {
+	if none && inputHasToolBlocks(input) {
 		toolOptions = nil
 	}
 
@@ -791,11 +815,12 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 
 		if matchesModel(c.model, NoForcedToolChoiceModels) {
 			config.ToolChoice = &types.ToolChoiceMemberAuto{}
-		} else if len(config.Tools) > 1 {
+		} else if len(config.Tools) > 1 && !none {
 			// Client tools stay callable: the model must call some tool, and
 			// the schema tool is the only way to produce the final answer.
 			config.ToolChoice = &types.ToolChoiceMemberAny{}
 		} else {
+			// Forcing the schema tool also keeps "none" with tool history.
 			config.ToolChoice = &types.ToolChoiceMemberTool{
 				Value: types.SpecificToolChoice{
 					Name: aws.String(options.Schema.Name),
@@ -805,6 +830,10 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 	}
 
 	inference := &types.InferenceConfiguration{}
+
+	if tokens := defaultMaxTokens(c.model); tokens > 0 {
+		inference.MaxTokens = aws.Int32(tokens)
+	}
 
 	if options.MaxTokens != nil {
 		inference.MaxTokens = aws.Int32(int32(*options.MaxTokens))
@@ -1038,15 +1067,14 @@ func convertUserContentPolicy(m provider.Message, cache cachePolicy) ([]types.Co
 	return content, nil
 }
 
-// Bedrock rejects assistant turns where a text block sits between a toolUse
-// block and its toolResult, so blocks are grouped reasoning -> text -> toolUse
-// (stable within each group).
+// Blocks keep the order the model produced them in, so interleaved thinking
+// replays unchanged.
 func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
-	var reasoning, texts, calls []types.ContentBlock
+	var content []types.ContentBlock
 
 	for _, c := range m.Content {
 		if text := strings.TrimRight(c.Text, " \t\n\r"); text != "" {
-			texts = append(texts, &types.ContentBlockMemberText{Value: text})
+			content = append(content, &types.ContentBlockMemberText{Value: text})
 		}
 
 		if c.Reasoning != nil && c.Reasoning.Signature != "" {
@@ -1057,7 +1085,7 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 					return nil, err
 				}
 
-				reasoning = append(reasoning, &types.ContentBlockMemberReasoningContent{
+				content = append(content, &types.ContentBlockMemberReasoningContent{
 					Value: &types.ReasoningContentBlockMemberRedactedContent{
 						Value: data,
 					},
@@ -1069,7 +1097,7 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 				if text == "" {
 					text = c.Reasoning.Summary
 				}
-				reasoning = append(reasoning, &types.ContentBlockMemberReasoningContent{
+				content = append(content, &types.ContentBlockMemberReasoningContent{
 					Value: &types.ReasoningContentBlockMemberReasoningText{
 						Value: types.ReasoningTextBlock{
 							Text:      aws.String(text),
@@ -1095,7 +1123,7 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 				data = map[string]any{}
 			}
 
-			calls = append(calls, &types.ContentBlockMemberToolUse{
+			content = append(content, &types.ContentBlockMemberToolUse{
 				Value: types.ToolUseBlock{
 					ToolUseId: aws.String(toolid.Sanitize(c.ToolCall.ID, 64)),
 
@@ -1105,11 +1133,6 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 			})
 		}
 	}
-
-	content := make([]types.ContentBlock, 0, len(reasoning)+len(texts)+len(calls))
-	content = append(content, reasoning...)
-	content = append(content, texts...)
-	content = append(content, calls...)
 
 	return content, nil
 }

@@ -769,6 +769,76 @@ func TestComplete_EarlyTermination(t *testing.T) {
 }
 
 // =============================================================================
+// TestComplete_StopMetadata - only the final round's boundary reaches the caller
+// =============================================================================
+
+func TestComplete_StopMetadata(t *testing.T) {
+	completer := &mockCompleter{
+		responses: [][]provider.Completion{
+			{
+				{Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{{ToolCall: &provider.ToolCall{ID: "call-a", Name: "tool_a", Arguments: `{}`}}}}},
+				{Status: provider.CompletionStatusCompleted, StopReason: provider.StopReasonToolUse},
+			},
+			{
+				{Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{{Text: "partial"}}}},
+				{Status: provider.CompletionStatusIncomplete, StopReason: provider.StopReasonMaxTokens},
+			},
+		},
+	}
+
+	chain, err := New("test-model",
+		WithCompleter(completer),
+		WithTools(&mockToolProvider{tools: []provider.Tool{{Name: "tool_a"}}}),
+	)
+	require.NoError(t, err)
+
+	completions, err := collectCompletions(chain.Complete(context.Background(), nil, nil))
+	require.NoError(t, err)
+
+	// The agent handles its own tool round, so its tool_use must not surface.
+	for _, completion := range completions {
+		require.NotEqual(t, provider.StopReasonToolUse, completion.StopReason)
+	}
+
+	last := completions[len(completions)-1]
+	require.Equal(t, provider.CompletionStatusIncomplete, last.Status)
+	require.Equal(t, provider.StopReasonMaxTokens, last.StopReason)
+}
+
+func TestComplete_UnsuccessfulToolCall(t *testing.T) {
+	for _, tc := range []struct {
+		name, arguments string
+		status          provider.CompletionStatus
+		reason          provider.StopReason
+	}{
+		{"truncated valid JSON", `{}`, provider.CompletionStatusIncomplete, provider.StopReasonMaxTokens},
+		{"truncated partial JSON", `{"value":`, provider.CompletionStatusIncomplete, provider.StopReasonMaxTokens},
+		{"truncated empty arguments", "", provider.CompletionStatusIncomplete, provider.StopReasonMaxTokens},
+		{"failed", `{}`, provider.CompletionStatusFailed, ""},
+		{"refused", `{}`, provider.CompletionStatusRefused, provider.StopReasonRefusal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			completer := &mockCompleter{responses: [][]provider.Completion{{
+				{Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{
+					provider.ToolCallContent(provider.ToolCall{ID: "call-a", Name: "tool_a", Arguments: tc.arguments}),
+				}}},
+				{Status: tc.status, StopReason: tc.reason},
+			}}}
+			tools := &mockToolProvider{tools: []provider.Tool{{Name: "tool_a"}}}
+			chain, err := New("test-model", WithCompleter(completer), WithTools(tools))
+			require.NoError(t, err)
+
+			result, err := accumulateCompletion(chain.Complete(t.Context(), nil, nil))
+			require.NoError(t, err)
+			require.Empty(t, tools.executeCalls, "an unsuccessful turn must not execute tools")
+			require.Len(t, completer.capturedMessages, 1, "an unsuccessful turn must not continue")
+			require.Equal(t, tc.status, result.Status)
+			require.Equal(t, tc.reason, result.StopReason)
+		})
+	}
+}
+
+// =============================================================================
 // TestComplete_CompletionID - ID consistency
 // =============================================================================
 

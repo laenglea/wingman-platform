@@ -145,6 +145,29 @@ func TestConverseAdditionalFields_SchemaOmitsThinkingForOlderModels(t *testing.T
 	}
 }
 
+// TestConverseAdditionalFields_ThinkingDisplay verifies the display is always
+// explicit: Claude 5.x models omit thinking text by default, so a requested
+// summary must ask for it.
+func TestConverseAdditionalFields_ThinkingDisplay(t *testing.T) {
+	c := &Completer{Config: &Config{model: "eu.anthropic.claude-opus-5-5"}}
+
+	for _, summarized := range []bool{true, false} {
+		fields, _ := c.converseAdditionalFields(nil, &provider.CompleteOptions{
+			ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, IncludeSummary: summarized},
+		})
+
+		want := "omitted"
+		if summarized {
+			want = "summarized"
+		}
+
+		got, _ := fields["thinking"].(map[string]any)
+		if got["type"] != "adaptive" || got["display"] != want {
+			t.Errorf("summary %t: thinking = %v, want adaptive with display %s", summarized, fields["thinking"], want)
+		}
+	}
+}
+
 // TestConverseAdditionalFields_DisabledThinkingCapsEffort verifies Claude
 // Opus 5 — which rejects an explicit disable at effort xhigh/max — gets the
 // effort capped to high when schema mode forces thinking off.
@@ -227,38 +250,53 @@ func TestConverseAdditionalFields_UnsignedToolHistoryKeepsThinking(t *testing.T)
 	}
 }
 
-// TestConvertAssistantContent_GroupsBlocks verifies assistant blocks are
-// grouped reasoning -> text -> toolUse regardless of input order: Bedrock
-// rejects turns where a text block separates toolUse from its toolResult.
-func TestConvertAssistantContent_GroupsBlocks(t *testing.T) {
-	content, err := convertAssistantContent(provider.Message{
-		Role: provider.MessageRoleAssistant,
-		Content: []provider.Content{
+// TestConvertAssistantContent_KeepsOrder verifies blocks replay in the order
+// the model produced them, which Bedrock accepts in any arrangement.
+func TestConvertAssistantContent_KeepsOrder(t *testing.T) {
+	cases := []struct {
+		name    string
+		content []provider.Content
+		want    []string
+	}{
+		{"text after calls", []provider.Content{
 			provider.ToolCallContent(provider.ToolCall{ID: "call_1", Name: "step_one", Arguments: "{}"}),
 			provider.TextContent("halfway update"),
 			provider.ReasoningContent(provider.Reasoning{Text: "thought", Signature: "SIG"}),
 			provider.ToolCallContent(provider.ToolCall{ID: "call_2", Name: "step_two", Arguments: "{}"}),
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
+		}, []string{"tool_use", "text", "reasoning:thought", "tool_use"}},
+		{"interleaved thinking", []provider.Content{
+			provider.ReasoningContent(provider.Reasoning{Text: "plan", Signature: "SIG1"}),
+			provider.TextContent("first"),
+			provider.ReasoningContent(provider.Reasoning{Text: "check", Signature: "SIG2"}),
+			provider.TextContent("second"),
+			provider.ToolCallContent(provider.ToolCall{ID: "call_1", Name: "step_one", Arguments: "{}"}),
+		}, []string{"reasoning:plan", "text", "reasoning:check", "text", "tool_use"}},
 	}
 
-	var kinds []string
-	for _, block := range content {
-		switch block.(type) {
-		case *types.ContentBlockMemberReasoningContent:
-			kinds = append(kinds, "reasoning")
-		case *types.ContentBlockMemberText:
-			kinds = append(kinds, "text")
-		case *types.ContentBlockMemberToolUse:
-			kinds = append(kinds, "tool_use")
-		}
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content, err := convertAssistantContent(provider.Message{Role: provider.MessageRoleAssistant, Content: tc.content})
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	want := []string{"reasoning", "text", "tool_use", "tool_use"}
-	if !slices.Equal(kinds, want) {
-		t.Fatalf("block order: got %v, want %v", kinds, want)
+			var kinds []string
+			for _, block := range content {
+				switch block := block.(type) {
+				case *types.ContentBlockMemberReasoningContent:
+					text := block.Value.(*types.ReasoningContentBlockMemberReasoningText).Value.Text
+					kinds = append(kinds, "reasoning:"+aws.ToString(text))
+				case *types.ContentBlockMemberText:
+					kinds = append(kinds, "text")
+				case *types.ContentBlockMemberToolUse:
+					kinds = append(kinds, "tool_use")
+				}
+			}
+
+			if !slices.Equal(kinds, tc.want) {
+				t.Fatalf("block order: got %v, want %v", kinds, tc.want)
+			}
+		})
 	}
 }
 

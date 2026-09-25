@@ -7,17 +7,52 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
+// LegacyModels take neither adaptive thinking nor an effort. Bedrock names
+// Sonnet 4 and Opus 4 by date only (claude-sonnet-4-20250514).
 var LegacyModels = []string{
 	"claude-3",
 
 	"sonnet-4-0",
+	"sonnet-4-2025",
 	"sonnet-4-5",
 
 	"opus-4-0",
+	"opus-4-2025",
 	"opus-4-1",
 	"opus-4-5",
 
 	"haiku-4-5",
+}
+
+// ContextBoundModels predate Claude 4.5 and reject a request whose input plus
+// max_tokens exceeds the context window, where later models stop at the
+// window instead.
+var ContextBoundModels = []string{
+	"claude-3",
+
+	"sonnet-4-0",
+	"sonnet-4-2025",
+
+	"opus-4-0",
+	"opus-4-2025",
+	"opus-4-1",
+}
+
+// defaultMaxTokens is the output limit sent when the client sets none.
+// Converse otherwise applies a far lower model default (4096 on Claude Opus
+// 5.5), which thinking and a short preamble can exhaust before the tool call,
+// so the turn ends as truncated right after the commentary. Claude models get
+// the Anthropic adapter's defaults. Other families keep the Bedrock default,
+// as do context-bound models, where a large limit would fail long prompts.
+func defaultMaxTokens(model string) int32 {
+	switch {
+	case !isClaudeModel(model) || matchesModel(model, ContextBoundModels):
+		return 0
+	case matchesModel(model, LegacyModels):
+		return 64000
+	default:
+		return 128000
+	}
 }
 
 // NoSamplingModels reject temperature/top_p/top_k outright — the same set as
