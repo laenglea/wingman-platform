@@ -140,14 +140,23 @@ var NoForcedToolChoiceModels = []string{
 	"mythos-5-1",
 
 	"opus-5-5",
+	"sonnet-5-5",
 }
 
-// DisabledThinkingEffortCapModels accept `thinking: {type: "disabled"}` only
-// at effort "high" or below — pairing it with "xhigh" or "max" returns a 400.
-// Patterns match by substring, so "opus-5" also covers Opus 5.5, which is
-// always thinking and never reaches the cap.
+// BetweenToolsModels reject `thinking: {type: "disabled"}`; their lowest
+// setting, `thinking: {type: "between_tools"}`, turns off up-front thinking
+// and is sent instead.
+var BetweenToolsModels = []string{
+	"sonnet-5-5",
+}
+
+// DisabledThinkingEffortCapModels accept `thinking: {type: "disabled"}` (or
+// "between_tools") only at effort "high" or below — pairing it with "xhigh"
+// or "max" returns a 400. Patterns match by substring, so "opus-5" also
+// covers Opus 5.5, which is always thinking and never reaches the cap.
 var DisabledThinkingEffortCapModels = []string{
 	"opus-5",
+	"sonnet-5-5",
 }
 
 func matchesModel(model string, patterns []string) bool {

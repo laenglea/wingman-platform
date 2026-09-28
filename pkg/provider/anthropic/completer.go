@@ -543,11 +543,15 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 }
 
 func (c *Completer) convertMessageRequest(input []provider.Message, options *provider.CompleteOptions) (*anthropic.BetaMessageNewParams, error) {
-	midSystem := matchesModel(c.model, []string{"fable-5", "mythos-5", "opus-4-8", "opus-5"})
+	midSystem := matchesModel(c.model, []string{"fable-5", "mythos-5", "opus-4-8", "opus-5", "sonnet-5-5"})
 	if !midSystem {
 		input = provider.ResolveInstructions(input)
 	}
-	if !matchesModel(c.model, []string{"fable-5-1", "mythos-5-1", "opus-5"}) {
+	// between_tools pins the effort for the conversation, so per-message
+	// updates are lowered to the request instead.
+	betweenTools := matchesModel(c.model, BetweenToolsModels) && options != nil &&
+		options.ReasoningOptions != nil && options.ReasoningOptions.Type == provider.ReasoningTypeDisabled
+	if betweenTools || !matchesModel(c.model, []string{"fable-5-1", "mythos-5-1", "opus-5", "sonnet-5-5"}) {
 		input, options = provider.ResolveConfigurationUpdates(input, options)
 	}
 	if options == nil {
@@ -1161,7 +1165,11 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 		case provider.ToolChoiceAny:
 			if matchesModel(c.model, NoForcedToolChoiceModels) {
-				return nil, fmt.Errorf("anthropic: model %s does not support forced tool_choice; use auto or none", c.model)
+				return nil, &provider.ProviderError{
+					Code:    400,
+					Type:    "invalid_request_error",
+					Message: fmt.Sprintf("anthropic: model %s does not support forced tool_choice; use auto or none", c.model),
+				}
 			}
 
 			forcesTool = true
@@ -1190,6 +1198,8 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 	thinking := c.resolveThinking(input, options, forcesTool)
 
+	extraFields := map[string]any{}
+
 	if thinking.Enabled {
 		display := anthropic.BetaThinkingConfigAdaptiveDisplaySummarized
 		if !thinking.Summarized {
@@ -1199,6 +1209,9 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		req.Thinking = anthropic.BetaThinkingConfigParamUnion{
 			OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{Display: display},
 		}
+	} else if thinking.Disabled && matchesModel(c.model, BetweenToolsModels) {
+		// Not yet typed in the SDK.
+		extraFields["thinking"] = map[string]any{"type": "between_tools"}
 	} else if thinking.Disabled {
 		req.Thinking = anthropic.BetaThinkingConfigParamUnion{
 			OfDisabled: &anthropic.BetaThinkingConfigDisabledParam{},
@@ -1238,8 +1251,11 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		if len(options.Stop) > 0 || options.Schema != nil || forcesTool {
 			return nil, fmt.Errorf("anthropic: compaction cannot be combined with stop sequences, output format, or forced tools")
 		}
-		compaction := map[string]any{"type": "summarize"}
-		req.SetExtraFields(map[string]any{"compaction": compaction})
+		extraFields["compaction"] = map[string]any{"type": "summarize"}
+	}
+
+	if len(extraFields) > 0 {
+		req.SetExtraFields(extraFields)
 	}
 
 	return req, nil

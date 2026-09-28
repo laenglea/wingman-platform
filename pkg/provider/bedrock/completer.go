@@ -659,6 +659,8 @@ func (c *Completer) converseAdditionalFields(messages []provider.Message, option
 		}
 
 		fields["thinking"] = map[string]any{"type": "adaptive", "display": display}
+	} else if thinking.Disabled && matchesModel(c.model, BetweenToolsModels) {
+		fields["thinking"] = map[string]any{"type": "between_tools"}
 	} else if thinking.Disabled && matchesModel(c.model, DefaultThinkingModels) {
 		// Bedrock only accepts the explicit disable on models that think
 		// by default; the others are off when the field is omitted.

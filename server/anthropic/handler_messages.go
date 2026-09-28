@@ -158,7 +158,9 @@ func toCompleteOptions(req MessageRequest) (*provider.CompleteOptions, error) {
 
 	if req.Thinking != nil {
 		switch req.Thinking.Type {
-		case "disabled":
+		case "disabled", "between_tools":
+			// between_tools is the lowest setting on models that reject an
+			// explicit disable; providers map it back per model.
 			reasoningType = provider.ReasoningTypeDisabled
 		case "enabled":
 			reasoningType = provider.ReasoningTypeAdaptive
@@ -309,9 +311,9 @@ func validateMessageRequest(req MessageRequest) error {
 			return fmt.Errorf("thinking.block_binding: binding controls are not supported")
 		}
 		switch req.Thinking.Type {
-		case "enabled", "adaptive", "disabled":
+		case "enabled", "adaptive", "disabled", "between_tools":
 		default:
-			return fmt.Errorf("thinking.type: must be enabled, adaptive, or disabled")
+			return fmt.Errorf("thinking.type: must be enabled, adaptive, disabled, or between_tools")
 		}
 		switch req.Thinking.Display {
 		case "", "summarized", "omitted":

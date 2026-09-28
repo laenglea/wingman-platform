@@ -301,6 +301,27 @@ func TestConvertRequest_DisabledThinkingCapsEffort(t *testing.T) {
 	}
 }
 
+// TestConvertRequest_DisabledThinkingSendsBetweenTools verifies Claude Sonnet
+// 5.5, which rejects an explicit disable, gets its lowest setting instead,
+// with the effort capped at high.
+func TestConvertRequest_DisabledThinkingSendsBetweenTools(t *testing.T) {
+	completer, _ := NewCompleter("http://localhost", "claude-sonnet-5-5")
+
+	body := requestBody(t, completer, []provider.Message{provider.UserMessage("hi")}, &provider.CompleteOptions{
+		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortMax},
+	})
+
+	thinking, _ := body["thinking"].(map[string]any)
+	if thinking["type"] != "between_tools" || len(thinking) != 1 {
+		t.Fatalf("thinking: got %v, want between_tools", body["thinking"])
+	}
+
+	config, _ := body["output_config"].(map[string]any)
+	if config["effort"] != "high" {
+		t.Errorf("effort: got %v, want high", config["effort"])
+	}
+}
+
 // TestConvertRequest_ForcedToolDisablesThinkingAndCapsEffort verifies the
 // forced tool_choice path — which disables thinking after effort is already
 // set — also gets the Claude Opus 5 effort cap applied.
@@ -332,6 +353,7 @@ func TestConvertRequest_UnsupportedForcedToolChoiceIsRejected(t *testing.T) {
 		{name: "any", model: "claude-fable-5-1"},
 		{name: "named tool", model: "claude-mythos-5-1", allowed: []string{"get_weather"}},
 		{name: "opus 5.5", model: "claude-opus-5-5"},
+		{name: "sonnet 5.5", model: "claude-sonnet-5-5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			completer, _ := NewCompleter("http://localhost", tc.model)

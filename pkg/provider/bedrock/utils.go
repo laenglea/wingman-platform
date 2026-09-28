@@ -97,16 +97,26 @@ var NoForcedToolChoiceModels = []string{
 	"mythos-5-1",
 
 	"opus-5-5",
+	"sonnet-5-5",
+}
+
+// BetweenToolsModels reject `thinking: {type: "disabled"}`; their lowest
+// setting, `thinking: {type: "between_tools"}`, turns off up-front thinking
+// and is sent instead.
+var BetweenToolsModels = []string{
+	"sonnet-5-5",
 }
 
 // schemaToolInstruction steers schema mode toward the schema tool on models
 // that cannot be forced to call it.
 const schemaToolInstruction = "Always deliver the final answer by calling this tool, and do not answer in plain text."
 
-// DisabledThinkingEffortCapModels accept `thinking: {type: "disabled"}` only
-// at effort "high" or below — pairing it with "xhigh" or "max" returns a 400.
+// DisabledThinkingEffortCapModels accept `thinking: {type: "disabled"}` (or
+// "between_tools") only at effort "high" or below — pairing it with "xhigh"
+// or "max" returns a 400.
 var DisabledThinkingEffortCapModels = []string{
 	"opus-5",
+	"sonnet-5-5",
 }
 
 // Structured outputs (strict tool use) is supported by the Claude 4.5 and 4.6

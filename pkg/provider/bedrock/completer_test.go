@@ -92,6 +92,24 @@ func TestConvertConverseInputSteersSchemaToolWithoutForcing(t *testing.T) {
 	}
 }
 
+// TestConverseAdditionalFieldsSendsBetweenTools verifies Claude Sonnet 5.5,
+// which rejects an explicit disable, gets its lowest setting instead, with
+// the effort capped at high.
+func TestConverseAdditionalFieldsSendsBetweenTools(t *testing.T) {
+	c := &Completer{Config: &Config{model: "anthropic.claude-sonnet-5-5"}}
+
+	fields, _ := c.converseAdditionalFields(nil, &provider.CompleteOptions{
+		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortXHigh},
+	})
+
+	if got, _ := fields["thinking"].(map[string]any); got["type"] != "between_tools" || len(got) != 1 {
+		t.Fatalf("thinking: got %v, want between_tools", fields["thinking"])
+	}
+	if got, _ := fields["output_config"].(map[string]any); got["effort"] != "high" {
+		t.Errorf("effort: got %v, want high", fields["output_config"])
+	}
+}
+
 // TestConvertConverseInputRejectsForcedToolChoice verifies forced tool choice
 // on a model that rejects it returns an explicit error instead of an
 // upstream 400.

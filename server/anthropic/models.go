@@ -46,7 +46,7 @@ type ContextManagementEdit struct {
 }
 
 type ThinkingConfig struct {
-	Type         string          `json:"type"`                    // "enabled", "adaptive", or "disabled"
+	Type         string          `json:"type"`                    // "enabled", "adaptive", "disabled", or "between_tools"
 	BudgetTokens int             `json:"budget_tokens,omitempty"` // required when type is "enabled"
 	Display      string          `json:"display,omitempty"`       // "summarized" or "omitted"
 	BlockBinding json.RawMessage `json:"block_binding,omitempty"`
