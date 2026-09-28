@@ -13,7 +13,7 @@ func TestMultiTurnHTTP(t *testing.T) {
 	for _, model := range anthropic.DefaultModels() {
 		t.Run(model.Name, func(t *testing.T) {
 			body := map[string]any{
-				"max_tokens": 100,
+				"max_tokens": 2048,
 				"messages": []map[string]any{
 					{"role": "user", "content": "My name is Alice."},
 					{"role": "assistant", "content": "Nice to meet you, Alice!"},
@@ -22,6 +22,8 @@ func TestMultiTurnHTTP(t *testing.T) {
 			}
 
 			anthropicResp, wingmanResp := anthropic.CompareHTTP(t, h, model.Name, body)
+			anthropic.RequireTextContent(t, "anthropic", anthropicResp.Body)
+			anthropic.RequireTextContent(t, "wingman", wingmanResp.Body)
 
 			rules := anthropic.DefaultMessagesResponseRules()
 			harness.CompareStructure(t, "response", anthropicResp.Body, wingmanResp.Body, harness.CompareOption{Rules: rules})
@@ -35,7 +37,7 @@ func TestMultiTurnSSE(t *testing.T) {
 	for _, model := range anthropic.DefaultModels() {
 		t.Run(model.Name, func(t *testing.T) {
 			body := map[string]any{
-				"max_tokens": 100,
+				"max_tokens": 2048,
 				"messages": []map[string]any{
 					{"role": "user", "content": "My name is Alice."},
 					{"role": "assistant", "content": "Nice to meet you, Alice!"},
@@ -46,7 +48,7 @@ func TestMultiTurnSSE(t *testing.T) {
 			anthropicEvents, wingmanEvents := anthropic.CompareSSE(t, h, model.Name, body)
 
 			rules := anthropic.DefaultMessagesSSERules()
-			harness.CompareSSEStructureByType(t, anthropicEvents, wingmanEvents, rules)
+			harness.CompareSSEStructureByType(t, anthropic.WithoutThinking(anthropicEvents), anthropic.WithoutThinking(wingmanEvents), rules)
 		})
 	}
 }

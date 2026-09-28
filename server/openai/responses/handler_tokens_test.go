@@ -15,6 +15,9 @@ func postInputTokens(t *testing.T, body string) InputTokensResponse {
 	t.Helper()
 
 	cfg := &config.Config{Policy: noop.New()}
+	for _, model := range []string{"gpt-5", "gpt-4o"} {
+		cfg.RegisterCompleter(model, &optionsCompleter{})
+	}
 	h := New(cfg)
 
 	req := httptest.NewRequest(http.MethodPost, "/responses/input_tokens", bytes.NewBufferString(body))
@@ -83,5 +86,22 @@ func TestInputTokensBadBody(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestInputTokensUnknownModel(t *testing.T) {
+	h := New(&config.Config{Policy: noop.New()})
+
+	req := httptest.NewRequest(http.MethodPost, "/responses/input_tokens", bytes.NewBufferString(`{"model":"missing","input":"hi"}`))
+	rec := httptest.NewRecorder()
+	h.handleInputTokens(rec, req)
+
+	var resp struct {
+		Error struct{ Type, Code, Param string }
+	}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+
+	if rec.Code != http.StatusNotFound || resp.Error.Code != "model_not_found" || resp.Error.Param != "model" || resp.Error.Type != "invalid_request_error" {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }

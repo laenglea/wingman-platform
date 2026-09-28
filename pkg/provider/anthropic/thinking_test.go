@@ -10,7 +10,10 @@ import (
 func TestResolveThinking(t *testing.T) {
 	adaptive := &provider.CompleteOptions{ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortMax, IncludeSummary: true}}
 	disabled := &provider.CompleteOptions{ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortMax}}
+	updates := &provider.CompleteOptions{ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortLow, IncludeUpdates: true}}
 	effortOnly := &provider.CompleteOptions{ReasoningOptions: &provider.ReasoningOptions{Effort: provider.EffortLow}}
+	summaryOnly := &provider.CompleteOptions{ReasoningOptions: &provider.ReasoningOptions{IncludeSummary: true}}
+	updatesOnly := &provider.CompleteOptions{ReasoningOptions: &provider.ReasoningOptions{IncludeUpdates: true}}
 
 	unsigned := []provider.Message{
 		provider.UserMessage("hi"),
@@ -35,7 +38,13 @@ func TestResolveThinking(t *testing.T) {
 		{"always-thinking cannot disable", "claude-fable-5-1", nil, disabled, false, thinking{Effort: anthropic.BetaOutputConfigEffortMax}},
 		{"disabled effort is capped", "claude-opus-5", nil, disabled, false, thinking{Disabled: true, Effort: anthropic.BetaOutputConfigEffortHigh}},
 		{"opus 5.5 cannot disable", "claude-opus-5-5", nil, disabled, false, thinking{Effort: anthropic.BetaOutputConfigEffortMax}},
+		{"updates on a progress-update model", "claude-sonnet-5-5", nil, updates, false, thinking{Enabled: true, Updates: true, Effort: anthropic.BetaOutputConfigEffortLow}},
+		{"updates elsewhere are omitted", "claude-sonnet-4-6", nil, updates, false, thinking{Enabled: true, Effort: anthropic.BetaOutputConfigEffortLow}},
 		{"sonnet 5.5 disabled effort is capped", "claude-sonnet-5-5", nil, disabled, false, thinking{Disabled: true, Effort: anthropic.BetaOutputConfigEffortHigh}},
+		{"summary sets display on a default-thinking model", "claude-sonnet-5", nil, summaryOnly, false, thinking{Enabled: true, Summarized: true}},
+		{"updates set display on a default-thinking model", "claude-opus-5-5", nil, updatesOnly, false, thinking{Enabled: true, Updates: true}},
+		{"summary leaves an opt-in model off", "claude-opus-4-8", nil, summaryOnly, false, thinking{Summarized: true}},
+		{"forced tool keeps default display", "claude-fable-5", nil, summaryOnly, true, thinking{Summarized: true}},
 	}
 
 	for _, tc := range cases {

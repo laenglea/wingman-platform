@@ -3,6 +3,7 @@ package anthropic
 import (
 	"net/http"
 
+	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/tokens"
 )
 
@@ -17,6 +18,16 @@ func (h *Handler) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	var req CountTokensRequest
 	if err := decodeRequest(r.Body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if _, err := h.Completer(req.Model); err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+
+	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
+		writeError(w, http.StatusNotFound, err)
 		return
 	}
 

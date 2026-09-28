@@ -26,13 +26,6 @@ belong.
 - [ ] **Validation.** Require `contents`; validate `Content.role` (coerced to
       `user` today), single-field `Part` unions, enums, numeric ranges, name
       constraints, schema mutual exclusion.
-- [ ] **Model errors.** Unknown or policy-denied model → 404 `NOT_FOUND` on
-      `generateContent` / `streamGenerateContent` (400 today;
-      `handler_generate.go`, `parseGenerateRequest`).
-- [ ] **Adapter errors.** Backend request-conversion errors that aren't
-      `provider.ProviderError` surface as 500 `INTERNAL`; return 400
-      `INVALID_ARGUMENT` (e.g. the Anthropic adapter's compaction conflicts in
-      `pkg/provider/anthropic/completer.go`).
 - [ ] **API-key auth.** Accept `key=` and `x-goog-api-key` when an authorizer
       is configured (`pkg/auth/static` accepts Bearer only).
 - [ ] **Sampling.** Carry `topP`, `topK`, `seed`, `presencePenalty`,
@@ -82,8 +75,6 @@ belong.
 
 ## P2
 
-- [ ] **Auth errors.** Return a Google error body instead of a bare 401
-      (`server/server_auth.go`).
 - [ ] **`systemInstruction` parts.** Honor or reject non-text parts (dropped).
 - [ ] **Request fields.** Honor or reject `cachedContent`, `serviceTier`,
       `store`.

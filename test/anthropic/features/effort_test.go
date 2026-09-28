@@ -140,8 +140,9 @@ func TestAdaptiveThinkingDisplayOmittedHTTP(t *testing.T) {
 					"type":    "adaptive",
 					"display": "omitted",
 				},
+				"output_config": map[string]any{"effort": "high"},
 				"messages": []map[string]any{
-					{"role": "user", "content": "How many r's are in strawberry?"},
+					{"role": "user", "content": "Find the smallest positive integer x such that x mod 7 = 3, x mod 11 = 5, and x mod 13 = 7. Show your steps and verify all remainders."},
 				},
 			}
 

@@ -52,7 +52,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 		req, err := r.convertResponsesRequest(messages, options)
 
 		if err != nil {
-			yield(nil, err)
+			yield(nil, provider.InvalidRequest(err))
 			return
 		}
 

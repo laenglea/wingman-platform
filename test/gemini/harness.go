@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	DefaultWingmanURL = "http://localhost:8080/v1beta"
+	DefaultWingmanURL = "http://localhost:4242/v1beta"
 	DefaultGeminiURL  = "https://generativelanguage.googleapis.com/v1beta"
 )
 

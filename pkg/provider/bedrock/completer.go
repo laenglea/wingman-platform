@@ -89,9 +89,12 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		req, err := c.convertConverseInput(messages, options)
 
 		if err != nil {
-			yield(nil, err)
+			yield(nil, provider.InvalidRequest(err))
 			return
 		}
+
+		_, thinking := c.converseAdditionalFields(messages, options)
+		notes := c.progressNotes(thinking)
 
 		params := &bedrockruntime.ConverseStreamInput{
 			ModelId: req.ModelId,
@@ -227,9 +230,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 								Role: provider.MessageRoleAssistant,
 
 								Content: []provider.Content{
-									provider.ReasoningContent(provider.Reasoning{
-										Text: r.Value,
-									}),
+									provider.ReasoningContent(thinkingReasoning(r.Value, notes)),
 								},
 							},
 						}
@@ -653,9 +654,13 @@ func (c *Completer) converseAdditionalFields(messages []provider.Message, option
 
 	if thinking.Enabled {
 		// Always explicit: Claude 5.x models omit thinking text by default.
-		display := "summarized"
-		if !thinking.Summarized {
-			display = "omitted"
+		display := "omitted"
+		switch {
+		case thinking.Summarized:
+			display = "summarized"
+		case thinking.Updates:
+			display = "updates"
+			fields["anthropic_beta"] = []string{"thinking-display-updates-2026-08-18"}
 		}
 
 		fields["thinking"] = map[string]any{"type": "adaptive", "display": display}

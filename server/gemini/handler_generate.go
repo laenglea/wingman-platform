@@ -154,11 +154,11 @@ func (h *Handler) parseGenerateRequest(r *http.Request) (provider.Completer, []p
 
 	completer, err := h.Completer(model)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, modelNotFound(model)
 	}
 
 	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, model, policy.ActionAccess); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, modelNotFound(model)
 	}
 
 	messages, err := toMessages(req.SystemInstruction, req.Contents)
@@ -299,4 +299,12 @@ func writeStreamChunk(w http.ResponseWriter, response GenerateContentResponse, u
 	}
 
 	return http.NewResponseController(w).Flush()
+}
+
+// modelNotFound is Gemini's 404 for an unknown or inaccessible model.
+func modelNotFound(model string) error {
+	return &provider.ProviderError{
+		Code:    http.StatusNotFound,
+		Message: "models/" + model + " is not found for API version v1beta, or is not supported for generateContent.",
+	}
 }

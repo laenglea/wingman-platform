@@ -53,7 +53,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		req, err := c.convertCompletionRequest(messages, options)
 
 		if err != nil {
-			yield(nil, err)
+			yield(nil, provider.InvalidRequest(err))
 			return
 		}
 

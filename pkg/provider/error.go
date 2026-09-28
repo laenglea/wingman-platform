@@ -52,6 +52,26 @@ func CodeFromError(err error, fallback int) int {
 	return fallback
 }
 
+// InvalidRequest marks an error raised while building a request, before
+// anything is sent upstream, as a client error (400). Errors that already
+// carry a status are returned unchanged.
+func InvalidRequest(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	if _, ok := errors.AsType[*ProviderError](err); ok {
+		return err
+	}
+
+	return &ProviderError{
+		Code:    http.StatusBadRequest,
+		Type:    "invalid_request_error",
+		Message: err.Error(),
+		Err:     err,
+	}
+}
+
 // RetryAfterFromError extracts the Retry-After duration from a ProviderError.
 func RetryAfterFromError(err error) time.Duration {
 	if provErr, ok := errors.AsType[*ProviderError](err); ok {

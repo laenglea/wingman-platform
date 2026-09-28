@@ -17,12 +17,11 @@ var reasoningTests = []struct {
 		name:             "reasoning with summary",
 		requireReasoning: true,
 		body: map[string]any{
-			// medium effort: larger models (gpt-5.4) produce no summary at all
-			// for trivial questions at low effort — verified against the live
-			// API — while the reference mini model does.
-			"input": "How many r's are in strawberry?",
+			// Use a nontrivial task: adaptive models can answer letter-counting
+			// questions without producing any reasoning item.
+			"input": "Find the smallest positive integer x such that x mod 7 = 3, x mod 11 = 5, and x mod 13 = 7. Show your steps and verify all remainders.",
 			"reasoning": map[string]any{
-				"effort":  "medium",
+				"effort":  "high",
 				"summary": "auto",
 			},
 		},

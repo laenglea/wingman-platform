@@ -55,7 +55,7 @@ The suite loads the repository `.env` without replacing exported values:
 | `OPENAI_API_KEY` | Required reference credential |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` |
 | `TEST_OPENAI_REFERENCE_MODEL` | `gpt-5.4-mini` |
-| `WINGMAN_BASE_URL` | `http://localhost:8080/v1` |
+| `WINGMAN_BASE_URL` | `http://localhost:4242/v1` |
 | `WINGMAN_API_KEY` | `test-key` |
 | `TEST_OPENAI_MODELS` | Override the default matrix, comma separated |
 | `CODEX_LIVE` | Set to `1` to enable paid tests; checked before loading `.env` |

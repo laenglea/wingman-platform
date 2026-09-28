@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	DefaultWingmanURL = "http://localhost:8080/v1"
+	DefaultWingmanURL = "http://localhost:4242/v1"
 	DefaultOpenAIURL  = "https://api.openai.com/v1"
 )
 

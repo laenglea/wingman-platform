@@ -23,9 +23,6 @@ Out of scope: Files/Skills, Managed Agents, admin endpoints, advisor pairings.
         models that require it; keep legacy for Bedrock.
       - Other backends: compile members to function tools with the same
         names; keep ordered, stop-on-error execution.
-- [ ] **`count_tokens` model lookup.** Resolve the model and apply the access
-      policy like `/messages`; unknown or forbidden models must 404
-      (`server/anthropic/handler_tokens.go` calls `tokens.Estimate` directly).
 - [ ] **`tool_result` content blocks.** Accept `tool_reference` and
       `search_result` inside `tool_result.content`, so client-side tool search
       can load deferred tools (`server/anthropic/convert.go`,
@@ -54,8 +51,8 @@ Out of scope: Files/Skills, Managed Agents, admin endpoints, advisor pairings.
       `validateCompactionRequest`).
 - [ ] **Applied context edits.** Emit `context_management` on the response
       and `message_delta`.
-- [ ] **Response envelope.** Emit `context_management` and `diagnostics`
-      (null when unused); `stop_details.fallback_credit_token`,
+- [ ] **Response envelope.** Emit `context_management` when applicable;
+      `stop_details.fallback_credit_token`,
       `fallback_has_prefill_claim`, `recommended_model`; `citations: []` on
       text blocks (`server/anthropic/models.go`, `convert.go`).
 - [ ] **Usage fields.** Emit `usage.cache_creation` breakdown, `iterations`,
@@ -75,11 +72,8 @@ Out of scope: Files/Skills, Managed Agents, admin endpoints, advisor pairings.
       inline definitions from `inline-tools-2026-09-15`). Extend conversation
       updates with the active tool set; resolve it into `Tools` for backends
       without positional updates, like `ResolveConfigurationUpdates`.
-- [ ] **Progress updates.** Support `thinking.display: "updates"` (rejected
-      today) via shared commentary events.
 - [ ] **`between_tools` elsewhere.** Only Sonnet 5.5 keeps between-tool
-      progress notes; other backends treat it as fully disabled. Needs the
-      commentary events above.
+      progress notes; other backends treat it as fully disabled.
 - [ ] **Context edits.** Support `clear_tool_uses_*` and thinking retention
       counts other than all / one turn.
 - [ ] **Explicit cache placement.** The Anthropic frontend never selects
@@ -91,8 +85,6 @@ Out of scope: Files/Skills, Managed Agents, admin endpoints, advisor pairings.
       `output_config.task_budget` (advisory loop budget, not `MaxTokens`).
 - [ ] **Headers.** Validate `anthropic-beta` / `anthropic-version`; honor
       `anthropic-user-profile-id`; return `request-id` and workspace headers.
-- [ ] **Auth errors.** Return an Anthropic error body instead of a bare 401
-      (`server/server_auth.go`).
 - [ ] **Input blocks** (rejected with a field path today): `search_result`,
       `mcp_tool_use`, `mcp_tool_result`, `container_upload`,
       `mid_conv_system`, `fallback`, advisor / code-execution results,
@@ -116,7 +108,7 @@ Out of scope: Files/Skills, Managed Agents, admin endpoints, advisor pairings.
 ## Tests
 
 - [ ] `max_tokens: 0` on non-Claude backends.
-- [ ] Thinking display and explicit binding-policy controls; Fable 5.1 replay
+- [ ] Explicit binding-policy controls; Fable 5.1 replay
       with strict binding enforcement.
 - [ ] JSON and SSE wire fixtures for every stop reason and envelope / usage
       field presence.

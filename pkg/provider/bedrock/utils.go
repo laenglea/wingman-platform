@@ -107,9 +107,35 @@ var BetweenToolsModels = []string{
 	"sonnet-5-5",
 }
 
+// progressNotes reports whether returned thinking text holds only the notes
+// the model writes between tool calls: display "updates" and between_tools
+// return those notes and never reasoning.
+func (c *Completer) progressNotes(t thinking) bool {
+	return (t.Enabled && t.Updates) || (t.Disabled && matchesModel(c.model, BetweenToolsModels))
+}
+
+// thinkingReasoning returns progress notes as a summary, so frontends show
+// them without the caller asking for reasoning summaries.
+func thinkingReasoning(text string, notes bool) provider.Reasoning {
+	if notes {
+		return provider.Reasoning{Summary: text}
+	}
+	return provider.Reasoning{Text: text}
+}
+
 // schemaToolInstruction steers schema mode toward the schema tool on models
 // that cannot be forced to call it.
 const schemaToolInstruction = "Always deliver the final answer by calling this tool, and do not answer in plain text."
+
+// ProgressUpdateModels write progress notes between tool calls, returned
+// with `display: "updates"` (beta) while reasoning stays hidden.
+var ProgressUpdateModels = []string{
+	"fable-5",
+	"mythos-5",
+
+	"opus-5-5",
+	"sonnet-5-5",
+}
 
 // DisabledThinkingEffortCapModels accept `thinking: {type: "disabled"}` (or
 // "between_tools") only at effort "high" or below — pairing it with "xhigh"
@@ -198,6 +224,7 @@ type thinking struct {
 	Enabled    bool
 	Disabled   bool
 	Summarized bool
+	Updates    bool
 	Effort     string
 }
 
@@ -216,6 +243,7 @@ func (c *Completer) resolveThinking(messages []provider.Message, options *provid
 	if r := options.ReasoningOptions; r != nil {
 		t.Effort = outputEffort(r.Effort)
 		t.Summarized = r.IncludeSummary
+		t.Updates = r.IncludeUpdates && !r.IncludeSummary && matchesModel(c.model, ProgressUpdateModels)
 
 		switch r.Type {
 		case provider.ReasoningTypeAdaptive:
@@ -236,6 +264,13 @@ func (c *Completer) resolveThinking(messages []provider.Message, options *provid
 
 	if matchesModel(c.model, AlwaysThinkingModels) {
 		t.Disabled = false
+	}
+
+	// Display is only sent with an explicit adaptive config; without one, a
+	// model that thinks by default uses its default display, "omitted".
+	if !t.Enabled && !t.Disabled && !forced && (t.Summarized || t.Updates) &&
+		(matchesModel(c.model, AlwaysThinkingModels) || matchesModel(c.model, DefaultThinkingModels)) {
+		t.Enabled = true
 	}
 
 	if t.Disabled && matchesModel(c.model, DisabledThinkingEffortCapModels) && (t.Effort == "xhigh" || t.Effort == "max") {

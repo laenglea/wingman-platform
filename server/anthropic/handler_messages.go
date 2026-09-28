@@ -28,7 +28,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 	completer, err := h.Completer(req.Model)
 
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, http.StatusNotFound, err)
 		return
 	}
 
@@ -175,20 +175,16 @@ func toCompleteOptions(req MessageRequest) (*provider.CompleteOptions, error) {
 		}
 	}
 
-	if reasoningType != "" || reasoningEffort != "" {
-		summary := req.Thinking == nil || req.Thinking.Display != "omitted"
-
-		options.ReasoningOptions = &provider.ReasoningOptions{
-			Type:   reasoningType,
-			Effort: reasoningEffort,
-
-			IncludeSummary:   summary,
-			IncludeSignature: true,
-		}
-	} else {
-		// Request replayable state without overriding the model's thinking
-		// defaults. Providers that always return signatures need no extra flag.
-		options.ReasoningOptions = &provider.ReasoningOptions{IncludeSignature: true}
+	// Keep replayable state while leaving display at the model's default
+	// unless the caller supplies a thinking configuration.
+	options.ReasoningOptions = &provider.ReasoningOptions{
+		Type:             reasoningType,
+		Effort:           reasoningEffort,
+		IncludeSignature: true,
+	}
+	if req.Thinking != nil {
+		options.ReasoningOptions.IncludeSummary = req.Thinking.Display == "" || req.Thinking.Display == "summarized"
+		options.ReasoningOptions.IncludeUpdates = req.Thinking.Display == "updates"
 	}
 
 	if req.ContextManagement != nil {
@@ -316,9 +312,9 @@ func validateMessageRequest(req MessageRequest) error {
 			return fmt.Errorf("thinking.type: must be enabled, adaptive, disabled, or between_tools")
 		}
 		switch req.Thinking.Display {
-		case "", "summarized", "omitted":
+		case "", "summarized", "omitted", "updates":
 		default:
-			return fmt.Errorf("thinking.display: only summarized and omitted are supported")
+			return fmt.Errorf("thinking.display: must be summarized, omitted, or updates")
 		}
 	}
 	if req.ToolChoice != nil {

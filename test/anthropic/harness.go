@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	DefaultWingmanURL       = "http://localhost:8080/v1"
+	DefaultWingmanURL       = "http://localhost:4242/v1"
 	DefaultAnthropicURL     = "https://api.anthropic.com/v1"
 	DefaultAnthropicVersion = "2023-06-01"
 )

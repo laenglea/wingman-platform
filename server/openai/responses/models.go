@@ -72,6 +72,15 @@ type ReasoningConfig struct {
 	Context *string          `json:"context,omitempty"`
 }
 
+// ResponseReasoning includes effective metadata, which can be unavailable
+// on other backends even when the request supplied a preference.
+type ResponseReasoning struct {
+	Effort  *ReasoningEffort `json:"effort"`
+	Summary *any             `json:"summary"`
+	Context *string          `json:"context"`
+	Mode    string           `json:"mode"`
+}
+
 type ReasoningEffort string
 
 var (
@@ -926,7 +935,8 @@ type Response struct {
 	Model  string `json:"model"`
 	Status string `json:"status"` // completed, failed, in_progress, incomplete
 
-	Background bool `json:"background"`
+	Background     bool            `json:"background"`
+	AccessPrograms json.RawMessage `json:"access_programs"`
 
 	Output []ResponseOutput `json:"output"`
 
@@ -940,16 +950,19 @@ type Response struct {
 	ParallelToolCalls  bool    `json:"parallel_tool_calls"`
 	PreviousResponseID *string `json:"previous_response_id"`
 
-	Reasoning *ReasoningConfig `json:"reasoning"`
+	Reasoning *ResponseReasoning `json:"reasoning"`
 
-	ServiceTier string  `json:"service_tier"`
-	Store       bool    `json:"store"`
-	Temperature float32 `json:"temperature"`
+	ServiceTier      string  `json:"service_tier"`
+	Store            bool    `json:"store"`
+	Temperature      float32 `json:"temperature"`
+	FrequencyPenalty float32 `json:"frequency_penalty"`
+	PresencePenalty  float32 `json:"presence_penalty"`
 
 	Text *TextConfig `json:"text"`
 
-	ToolChoice any   `json:"tool_choice"`
-	Tools      []any `json:"tools"`
+	ToolChoice any       `json:"tool_choice"`
+	Tools      []any     `json:"tools"`
+	ToolUsage  ToolUsage `json:"tool_usage"`
 
 	TopLogprobs int     `json:"top_logprobs"`
 	TopP        float32 `json:"top_p"`
@@ -967,6 +980,26 @@ type Response struct {
 
 	Usage *Usage `json:"usage"`
 	User  *any   `json:"user"`
+}
+
+// These hosted tools are not executed by the Responses gateway, so their
+// usage remains zero. Ordinary function calls are counted in Usage instead.
+type ToolUsage struct {
+	ImageGen struct {
+		InputTokens         int               `json:"input_tokens"`
+		InputTokensDetails  ImageTokenDetails `json:"input_tokens_details"`
+		OutputTokens        int               `json:"output_tokens"`
+		OutputTokensDetails ImageTokenDetails `json:"output_tokens_details"`
+		TotalTokens         int               `json:"total_tokens"`
+	} `json:"image_gen"`
+	WebSearch struct {
+		NumRequests int `json:"num_requests"`
+	} `json:"web_search"`
+}
+
+type ImageTokenDetails struct {
+	ImageTokens int `json:"image_tokens"`
+	TextTokens  int `json:"text_tokens"`
 }
 
 // ResponseBilling represents billing information
@@ -1041,14 +1074,14 @@ func (r ResponseOutput) MarshalJSON() ([]byte, error) {
 				Role     MessageRole        `json:"role,omitempty"`
 				Status   string             `json:"status,omitempty"`
 				Contents []OutputContent    `json:"content"`
-				Phase    string             `json:"phase,omitempty"`
+				Phase    *string            `json:"phase"`
 			}{
 				Type:     r.Type,
 				ID:       r.OutputMessage.ID,
 				Role:     r.OutputMessage.Role,
 				Status:   r.OutputMessage.Status,
 				Contents: r.OutputMessage.Contents,
-				Phase:    r.OutputMessage.Phase,
+				Phase:    outputPhase(r.OutputMessage.Phase),
 			})
 		}
 	case ResponseOutputTypeFunctionCall:
@@ -1371,8 +1404,15 @@ type OutputItem struct {
 	Type    string          `json:"type"` // message
 	Status  string          `json:"status"`
 	Content []OutputContent `json:"content"`
-	Phase   string          `json:"phase,omitempty"`
+	Phase   *string         `json:"phase"`
 	Role    MessageRole     `json:"role,omitempty"`
+}
+
+func outputPhase(phase string) *string {
+	if phase == "" {
+		return nil
+	}
+	return &phase
 }
 
 // https://platform.openai.com/docs/api-reference/responses-streaming/response/content_part/added

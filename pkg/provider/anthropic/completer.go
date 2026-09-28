@@ -55,7 +55,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		req, err := c.convertMessageRequest(messages, options)
 
 		if err != nil {
-			yield(nil, err)
+			yield(nil, provider.InvalidRequest(err))
 			return
 		}
 
@@ -69,6 +69,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessageNewParams, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	return func(yield func(*provider.Completion, error) bool) {
 		toolAliases := provider.ToolAliases(options.Tools)
+		notes := progressNotes(req.Thinking)
 
 		message := anthropic.BetaMessage{}
 		stream := c.messages.NewStreaming(ctx, *req)
@@ -176,10 +177,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 							Role: provider.MessageRoleAssistant,
 
 							Content: []provider.Content{
-								provider.ReasoningContent(provider.Reasoning{
-									Text:      event.Thinking,
-									Signature: event.Signature,
-								}),
+								provider.ReasoningContent(thinkingReasoning(event.Thinking, event.Signature, notes)),
 							},
 						},
 
@@ -296,9 +294,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 							Role: provider.MessageRoleAssistant,
 
 							Content: []provider.Content{
-								provider.ReasoningContent(provider.Reasoning{
-									Text: event.Thinking,
-								}),
+								provider.ReasoningContent(thinkingReasoning(event.Thinking, "", notes)),
 							},
 						},
 					}
@@ -1165,11 +1161,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 		case provider.ToolChoiceAny:
 			if matchesModel(c.model, NoForcedToolChoiceModels) {
-				return nil, &provider.ProviderError{
-					Code:    400,
-					Type:    "invalid_request_error",
-					Message: fmt.Sprintf("anthropic: model %s does not support forced tool_choice; use auto or none", c.model),
-				}
+				return nil, fmt.Errorf("anthropic: model %s does not support forced tool_choice; use auto or none", c.model)
 			}
 
 			forcesTool = true
@@ -1198,20 +1190,23 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 	thinking := c.resolveThinking(input, options, forcesTool)
 
-	extraFields := map[string]any{}
-
 	if thinking.Enabled {
-		display := anthropic.BetaThinkingConfigAdaptiveDisplaySummarized
-		if !thinking.Summarized {
-			display = anthropic.BetaThinkingConfigAdaptiveDisplayOmitted
+		display := anthropic.BetaThinkingConfigAdaptiveDisplayOmitted
+		switch {
+		case thinking.Summarized:
+			display = anthropic.BetaThinkingConfigAdaptiveDisplaySummarized
+		case thinking.Updates:
+			display = anthropic.BetaThinkingConfigAdaptiveDisplayUpdates
+			req.Betas = append(req.Betas, anthropic.AnthropicBetaThinkingDisplayUpdates2026_08_18)
 		}
 
 		req.Thinking = anthropic.BetaThinkingConfigParamUnion{
 			OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{Display: display},
 		}
 	} else if thinking.Disabled && matchesModel(c.model, BetweenToolsModels) {
-		// Not yet typed in the SDK.
-		extraFields["thinking"] = map[string]any{"type": "between_tools"}
+		req.Thinking = anthropic.BetaThinkingConfigParamUnion{
+			OfBetweenTools: &anthropic.BetaThinkingConfigBetweenToolsParam{},
+		}
 	} else if thinking.Disabled {
 		req.Thinking = anthropic.BetaThinkingConfigParamUnion{
 			OfDisabled: &anthropic.BetaThinkingConfigDisabledParam{},
@@ -1251,11 +1246,8 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		if len(options.Stop) > 0 || options.Schema != nil || forcesTool {
 			return nil, fmt.Errorf("anthropic: compaction cannot be combined with stop sequences, output format, or forced tools")
 		}
-		extraFields["compaction"] = map[string]any{"type": "summarize"}
-	}
-
-	if len(extraFields) > 0 {
-		req.SetExtraFields(extraFields)
+		compaction := map[string]any{"type": "summarize"}
+		req.SetExtraFields(map[string]any{"compaction": compaction})
 	}
 
 	return req, nil

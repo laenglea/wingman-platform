@@ -149,6 +149,9 @@ func TestDefaultThinkingE2E(t *testing.T) {
 				if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 					t.Fatal(err)
 				}
+				if diagnostics, ok := result["diagnostics"]; !ok || diagnostics != nil {
+					t.Fatalf("expected unused diagnostics to be null: %v", result)
+				}
 				blocks, usage = result["content"].([]any), result["usage"].(map[string]any)
 			}
 			if len(blocks) != 2 {
@@ -268,7 +271,6 @@ func TestUnsupportedFeaturesRejectedE2E(t *testing.T) {
 	router := featureRouter(p)
 	for _, fields := range []string{
 		`"messages":[{"role":"user","content":"Temporary","clear_at":"next_user_message"}]`,
-		`"thinking":{"type":"adaptive","display":"updates"}`,
 		`"thinking":{"type":"adaptive","block_binding":{"prefix_mismatch_behavior":"error"}}`,
 		`"output_config":{"task_budget":{"type":"tokens","total":20000}}`,
 		`"tools":[{"type":"computer_toolset_20260801"}]`,

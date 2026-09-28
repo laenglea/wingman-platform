@@ -19,7 +19,7 @@ func TestBasicHTTP(t *testing.T) {
 				{
 					name: "simple message",
 					body: map[string]any{
-						"max_tokens": 100,
+						"max_tokens": 2048,
 						"messages": []map[string]any{
 							{"role": "user", "content": "Say hello and nothing else."},
 						},
@@ -28,7 +28,7 @@ func TestBasicHTTP(t *testing.T) {
 				{
 					name: "with system prompt",
 					body: map[string]any{
-						"max_tokens": 100,
+						"max_tokens": 2048,
 						"system":     "You are a helpful assistant. Always respond in exactly one word.",
 						"messages": []map[string]any{
 							{"role": "user", "content": "What is the capital of France?"},
@@ -40,6 +40,8 @@ func TestBasicHTTP(t *testing.T) {
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
 					anthropicResp, wingmanResp := anthropic.CompareHTTP(t, h, model.Name, tt.body)
+					anthropic.RequireTextContent(t, "anthropic", anthropicResp.Body)
+					anthropic.RequireTextContent(t, "wingman", wingmanResp.Body)
 
 					rules := anthropic.DefaultMessagesResponseRules()
 					harness.CompareStructure(t, "response", anthropicResp.Body, wingmanResp.Body, harness.CompareOption{Rules: rules})
@@ -55,7 +57,7 @@ func TestBasicSSE(t *testing.T) {
 	for _, model := range anthropic.DefaultModels() {
 		t.Run(model.Name, func(t *testing.T) {
 			body := map[string]any{
-				"max_tokens": 100,
+				"max_tokens": 2048,
 				"messages": []map[string]any{
 					{"role": "user", "content": "Say hello and nothing else."},
 				},
@@ -64,7 +66,7 @@ func TestBasicSSE(t *testing.T) {
 			anthropicEvents, wingmanEvents := anthropic.CompareSSE(t, h, model.Name, body)
 
 			rules := anthropic.DefaultMessagesSSERules()
-			harness.CompareSSEStructureByType(t, anthropicEvents, wingmanEvents, rules)
+			harness.CompareSSEStructureByType(t, anthropic.WithoutThinking(anthropicEvents), anthropic.WithoutThinking(wingmanEvents), rules)
 		})
 	}
 }

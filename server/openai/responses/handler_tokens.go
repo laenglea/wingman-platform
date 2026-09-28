@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/tokens"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
 // InputTokensResponse mirrors the upstream POST /responses/input_tokens
@@ -26,6 +28,16 @@ func (h *Handler) handleInputTokens(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if _, err := h.Completer(req.Model); err != nil {
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(req.Model))
+		return
+	}
+
+	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(req.Model))
 		return
 	}
 

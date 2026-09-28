@@ -132,6 +132,13 @@ var NoSamplingModels = []string{
 	"sonnet-5",
 }
 
+// DefaultThinkingModels think when the thinking field is omitted. Patterns
+// match by substring, so "opus-5" and "sonnet-5" also cover their 5.5 models.
+var DefaultThinkingModels = []string{
+	"opus-5",
+	"sonnet-5",
+}
+
 // NoForcedToolChoiceModels reject `tool_choice: {type: "any"}` and named
 // `tool_choice: {type: "tool"}`. Reject these requests rather than weakening
 // the caller's requirement to automatic selection.
@@ -147,6 +154,16 @@ var NoForcedToolChoiceModels = []string{
 // setting, `thinking: {type: "between_tools"}`, turns off up-front thinking
 // and is sent instead.
 var BetweenToolsModels = []string{
+	"sonnet-5-5",
+}
+
+// ProgressUpdateModels write progress notes between tool calls, returned
+// with `display: "updates"` (beta) while reasoning stays hidden.
+var ProgressUpdateModels = []string{
+	"fable-5",
+	"mythos-5",
+
+	"opus-5-5",
 	"sonnet-5-5",
 }
 
@@ -187,11 +204,28 @@ func outputEffort(e provider.Effort) anthropic.BetaOutputConfigEffort {
 	return ""
 }
 
+// progressNotes reports whether returned thinking text holds only the notes
+// the model writes between tool calls: display "updates" and between_tools
+// return those notes and never reasoning.
+func progressNotes(t anthropic.BetaThinkingConfigParamUnion) bool {
+	return t.OfBetweenTools != nil || (t.OfAdaptive != nil && t.OfAdaptive.Display == anthropic.BetaThinkingConfigAdaptiveDisplayUpdates)
+}
+
+// thinkingReasoning returns progress notes as a summary, so frontends show
+// them without the caller asking for reasoning summaries.
+func thinkingReasoning(text, signature string, notes bool) provider.Reasoning {
+	if notes {
+		return provider.Reasoning{Summary: text, Signature: signature}
+	}
+	return provider.Reasoning{Text: text, Signature: signature}
+}
+
 // thinking is the resolved thinking configuration for one request.
 type thinking struct {
 	Enabled    bool
 	Disabled   bool
 	Summarized bool
+	Updates    bool
 	Effort     anthropic.BetaOutputConfigEffort
 }
 
@@ -209,6 +243,7 @@ func (c *Completer) resolveThinking(messages []provider.Message, options *provid
 	if r := options.ReasoningOptions; r != nil {
 		t.Effort = outputEffort(r.Effort)
 		t.Summarized = r.IncludeSummary
+		t.Updates = r.IncludeUpdates && !r.IncludeSummary && matchesModel(c.model, ProgressUpdateModels)
 
 		switch r.Type {
 		case provider.ReasoningTypeAdaptive:
@@ -229,6 +264,13 @@ func (c *Completer) resolveThinking(messages []provider.Message, options *provid
 
 	if matchesModel(c.model, AlwaysThinkingModels) {
 		t.Disabled = false
+	}
+
+	// Display is only sent with an explicit adaptive config; without one, a
+	// model that thinks by default uses its default display, "omitted".
+	if !t.Enabled && !t.Disabled && !forced && (t.Summarized || t.Updates) &&
+		(matchesModel(c.model, AlwaysThinkingModels) || matchesModel(c.model, DefaultThinkingModels)) {
+		t.Enabled = true
 	}
 
 	if t.Disabled && matchesModel(c.model, DisabledThinkingEffortCapModels) {

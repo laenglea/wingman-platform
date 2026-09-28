@@ -21,8 +21,6 @@ format) → `pkg/provider` (shared types) → `pkg/provider/*` (backends).
 
 ### Both endpoints
 
-- [ ] **Model errors.** Unknown model → `type: "invalid_request_error"`,
-      `code: "model_not_found"`, `param: "model"` (`not_found_error` today).
 - [ ] **Forced `tool_choice` on Claude.** `required` / a named function on
       Opus 5.5, Sonnet 5.5, Fable/Mythos 5.1 returns 400 without
       `param: "tool_choice"`; add it.
@@ -41,16 +39,16 @@ format) → `pkg/provider` (shared types) → `pkg/provider/*` (backends).
       (`pkg/provider/openai/responder.go`).
 - [ ] **`reasoning.summary`.** Keep `auto` / `concise` / `detailed` instead of
       collapsing to `IncludeSummary` (`handler_responses.go`).
-- [ ] **`reasoning.mode`.** Accept and forward it; echo it in the response.
+- [ ] **`reasoning.mode`.** Accept and forward non-default modes; the
+      response currently reports `standard`.
 - [ ] **Input files.** Support image/file `file_id` and `detail`.
 - [ ] **`tool_choice` / `allowed_tools`.** Enforce typed hosted entries and
       non-`function` `allowed_tools` instead of degrading to `auto`
       (`convert.go`, `toToolOptions`).
 - [ ] **Programmatic tool calling.** Carry function `caller` data so it
       round-trips.
-- [ ] **Response fields.** Add `presence_penalty`, `frequency_penalty`,
-      `reasoning.mode`, `tool_usage`, `tools[].output_schema`; default
-      `top_p` is `0.98`. Echo the requested `service_tier`, `top_p`,
+- [ ] **Response fields.** Honor non-default penalties and function
+      `output_schema`. Echo the requested `service_tier`, `top_p`,
       `top_logprobs`, `metadata`, `max_tool_calls`, `safety_identifier`,
       `moderation` instead of fixed values.
 - [ ] **Shell events.** Emit `response.shell_call_command.added/delta/done`
@@ -75,8 +73,6 @@ format) → `pkg/provider` (shared types) → `pkg/provider/*` (backends).
 
 ### Both endpoints
 
-- [ ] **Auth errors.** Return an OpenAI error body instead of a bare 401
-      (`server/server_auth.go`).
 - [ ] **Annotations.** Produce URL / file citations
       (`response.output_text.annotation.added` on Responses).
 

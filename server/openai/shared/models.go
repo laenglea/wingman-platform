@@ -14,3 +14,14 @@ type Error struct {
 func (e *Error) Error() string {
 	return e.Message
 }
+
+// ModelNotFound is OpenAI's error for an unknown or inaccessible model. It
+// deliberately doesn't say which.
+func ModelNotFound(model string) *Error {
+	return &Error{
+		Type:    "invalid_request_error",
+		Code:    "model_not_found",
+		Param:   "model",
+		Message: "The model `" + model + "` does not exist or you do not have access to it.",
+	}
+}
