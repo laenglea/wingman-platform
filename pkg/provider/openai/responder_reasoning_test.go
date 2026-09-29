@@ -10,40 +10,53 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 )
 
-func TestGPT6AstraNormalizesUnsupportedReasoningEfforts(t *testing.T) {
-	tests := []struct {
-		name      string
-		reasoning provider.ReasoningOptions
-	}{
-		{name: "none", reasoning: provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled}},
-		{name: "minimal", reasoning: provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortMinimal}},
+func TestRequiredReasoningRequestCompatibility(t *testing.T) {
+	type testCase struct {
+		name       string
+		reasoning  *provider.ReasoningOptions
+		wantEffort string
+	}
+	tests := []testCase{
+		{name: "default"},
+		{name: "adaptive", reasoning: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive}, wantEffort: "medium"},
+		{name: "none", reasoning: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled}, wantEffort: "low"},
+		{name: "minimal", reasoning: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortMinimal}, wantEffort: "low"},
+	}
+	for _, effort := range []provider.Effort{provider.EffortLow, provider.EffortMedium, provider.EffortHigh, provider.EffortXHigh, provider.EffortMax} {
+		tests = append(tests, testCase{
+			name:       string(effort),
+			reasoning:  &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: effort},
+			wantEffort: string(effort),
+		})
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			temperature := float32(0.7)
-			options := &provider.CompleteOptions{ReasoningOptions: &tt.reasoning, Temperature: &temperature}
+	for _, model := range []string{"gpt-6-astra", "gpt-6.1-sol", "GPT-6.1-SOL"} {
+		for _, tt := range tests {
+			t.Run(model+"/"+tt.name, func(t *testing.T) {
+				temperature := float32(0.7)
+				options := &provider.CompleteOptions{ReasoningOptions: tt.reasoning, Temperature: &temperature}
 
-			responder, err := NewResponder("", "gpt-6-astra")
-			if err != nil {
-				t.Fatalf("new responder: %v", err)
-			}
-			responsesRequest, err := responder.convertResponsesRequest([]provider.Message{provider.UserMessage("hi")}, options)
-			if err != nil {
-				t.Fatalf("convert Responses request: %v", err)
-			}
-			assertAstraRequestCompatibility(t, responsesRequest)
+				responder, err := NewResponder("", model)
+				if err != nil {
+					t.Fatalf("new responder: %v", err)
+				}
+				responsesRequest, err := responder.convertResponsesRequest([]provider.Message{provider.UserMessage("hi")}, options)
+				if err != nil {
+					t.Fatalf("convert Responses request: %v", err)
+				}
+				assertRequiredReasoningRequest(t, responsesRequest, tt.wantEffort)
 
-			completer, err := NewCompleter("", "gpt-6-astra")
-			if err != nil {
-				t.Fatalf("new completer: %v", err)
-			}
-			chatRequest, err := completer.convertCompletionRequest([]provider.Message{provider.UserMessage("hi")}, options)
-			if err != nil {
-				t.Fatalf("convert Chat request: %v", err)
-			}
-			assertAstraRequestCompatibility(t, chatRequest)
-		})
+				completer, err := NewCompleter("", model)
+				if err != nil {
+					t.Fatalf("new completer: %v", err)
+				}
+				chatRequest, err := completer.convertCompletionRequest([]provider.Message{provider.UserMessage("hi")}, options)
+				if err != nil {
+					t.Fatalf("convert Chat request: %v", err)
+				}
+				assertRequiredReasoningRequest(t, chatRequest, tt.wantEffort)
+			})
+		}
 	}
 }
 
@@ -82,7 +95,7 @@ func TestGPT6SolAndLunaRequestCompatibility(t *testing.T) {
 	}
 }
 
-func assertAstraRequestCompatibility(t *testing.T, request any) {
+func assertRequiredReasoningRequest(t *testing.T, request any, wantEffort string) {
 	t.Helper()
 
 	data, err := json.Marshal(request)
@@ -95,17 +108,17 @@ func assertAstraRequestCompatibility(t *testing.T, request any) {
 		t.Fatalf("unmarshal request: %v", err)
 	}
 
-	var effort any
+	var effort string
 	if reasoning, ok := payload["reasoning"].(map[string]any); ok {
-		effort = reasoning["effort"]
+		effort, _ = reasoning["effort"].(string)
 	} else {
-		effort = payload["reasoning_effort"]
+		effort, _ = payload["reasoning_effort"].(string)
 	}
-	if effort != "low" {
-		t.Fatalf("reasoning effort = %v, want low; request=%s", effort, data)
+	if effort != wantEffort {
+		t.Fatalf("reasoning effort = %q, want %q; request=%s", effort, wantEffort, data)
 	}
 	if _, ok := payload["temperature"]; ok {
-		t.Fatalf("Astra request unexpectedly includes temperature: %s", data)
+		t.Fatalf("reasoning request unexpectedly includes temperature: %s", data)
 	}
 }
 
