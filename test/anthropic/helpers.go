@@ -123,6 +123,11 @@ func PostMessagesSSE(t *testing.T, h *Harness, ep harness.Endpoint, body map[str
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("%s returned status %d: %s", ep.Name, resp.StatusCode, raw)
+	}
+
 	events, err := harness.ParseSSE(resp.Body)
 	if err != nil {
 		t.Fatalf("parse SSE from %s: %v", ep.Name, err)
@@ -134,6 +139,9 @@ func PostMessagesSSE(t *testing.T, h *Harness, ep harness.Endpoint, body map[str
 // betaHeaders returns the beta headers required by features used in the body.
 func betaHeaders(body map[string]any) []string {
 	var betas []string
+	if thinking, ok := body["thinking"].(map[string]any); ok && thinking["display"] == "updates" {
+		betas = append(betas, "thinking-display-updates-2026-08-18")
+	}
 	// Signed compaction also needs the beta on every continuation request.
 	data, _ := json.Marshal(body["messages"])
 	if body["compaction"] != nil || strings.Contains(string(data), `"type":"compaction"`) && strings.Contains(string(data), `"signature"`) {
@@ -203,6 +211,8 @@ func CompareSSE(t *testing.T, h *Harness, model string, body map[string]any) ([]
 	if len(wingmanEvents) == 0 {
 		t.Fatal("wingman returned no SSE events")
 	}
+	ValidateMessageStream(t, anthropicEvents)
+	ValidateMessageStream(t, wingmanEvents)
 
 	anthropicTypes := SSEEventTypes(anthropicEvents)
 	wingmanTypes := SSEEventTypes(wingmanEvents)
@@ -214,13 +224,13 @@ func CompareSSE(t *testing.T, h *Harness, model string, body map[string]any) ([]
 	return anthropicEvents, wingmanEvents
 }
 
-// SSEEventTypes collapses an event stream into its type pattern. Ping events
-// are skipped and consecutive events of the same type are merged.
+// SSEEventTypes compares the non-thinking event pattern. Adaptive models
+// choose whether to think; dedicated tests check their signed output.
 func SSEEventTypes(events []*harness.SSEEvent) []string {
 	var types []string
 	var prev string
 
-	for _, e := range events {
+	for _, e := range WithoutThinking(events) {
 		name := e.Event
 		if name == "" {
 			if t, ok := e.Data["type"].(string); ok {
@@ -231,7 +241,6 @@ func SSEEventTypes(events []*harness.SSEEvent) []string {
 		if name == "ping" {
 			continue
 		}
-
 		if name != prev {
 			types = append(types, name)
 			prev = name
@@ -239,6 +248,79 @@ func SSEEventTypes(events []*harness.SSEEvent) []string {
 	}
 
 	return types
+}
+
+// WithoutThinking lets schema comparisons match text/tool events even when
+// only one model produces thinking. The original events remain intact.
+func WithoutThinking(events []*harness.SSEEvent) []*harness.SSEEvent {
+	var result []*harness.SSEEvent
+	thinking := map[float64]bool{}
+	for _, event := range events {
+		index, indexed := event.Data["index"].(float64)
+		if block, ok := event.Data["content_block"].(map[string]any); ok && indexed {
+			if block["type"] == "thinking" || block["type"] == "redacted_thinking" {
+				thinking[index] = true
+			}
+		}
+		if !indexed || !thinking[index] {
+			result = append(result, event)
+		}
+	}
+	return result
+}
+
+// ValidateMessageStream checks real block boundaries before comparisons
+// ignore differences in chunk counts and optional thinking blocks.
+func ValidateMessageStream(t *testing.T, events []*harness.SSEEvent) {
+	t.Helper()
+	if err := messageStreamError(events); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func messageStreamError(events []*harness.SSEEvent) error {
+	open, seen := map[float64]bool{}, map[float64]bool{}
+	started, stopped := false, false
+	for _, event := range events {
+		index, indexed := event.Data["index"].(float64)
+		if strings.HasPrefix(event.Event, "content_block_") && (!indexed || index < 0 || index != float64(int(index))) {
+			return fmt.Errorf("%s has invalid index: %v", event.Event, event.Data["index"])
+		}
+		switch event.Event {
+		case "error":
+			return fmt.Errorf("stream error: %v", event.Data)
+		case "message_start":
+			if started {
+				return fmt.Errorf("duplicate message_start")
+			}
+			started = true
+		case "content_block_start":
+			if !started || stopped || seen[index] {
+				return fmt.Errorf("invalid content_block_start at %v", index)
+			}
+			open[index], seen[index] = true, true
+		case "content_block_delta", "content_block_stop":
+			if !open[index] {
+				return fmt.Errorf("%s outside block %v", event.Event, index)
+			}
+			if event.Event == "content_block_stop" {
+				delete(open, index)
+			}
+		case "message_delta":
+			if !started || stopped || len(open) != 0 {
+				return fmt.Errorf("message_delta with unfinished blocks or invalid lifecycle")
+			}
+		case "message_stop":
+			if !started || stopped || len(open) != 0 {
+				return fmt.Errorf("message_stop with unfinished blocks or invalid lifecycle")
+			}
+			stopped = true
+		}
+	}
+	if !stopped {
+		return fmt.Errorf("stream did not finish")
+	}
+	return nil
 }
 
 func RequireTextContent(t *testing.T, label string, body map[string]any) {

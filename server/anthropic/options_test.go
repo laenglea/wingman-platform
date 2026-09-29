@@ -119,6 +119,26 @@ func TestToCompleteOptions_Thinking(t *testing.T) {
 	}
 }
 
+// TestToCompleteOptions_ThinkingDisplay verifies display maps to summary and
+// progress-update visibility.
+func TestToCompleteOptions_ThinkingDisplay(t *testing.T) {
+	for display, want := range map[string][2]bool{
+		"":           {true, false},
+		"summarized": {true, false},
+		"omitted":    {false, false},
+		"updates":    {false, true},
+	} {
+		options, err := toCompleteOptions(MessageRequest{Thinking: &ThinkingConfig{Type: "adaptive", Display: display}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got := options.ReasoningOptions; got.IncludeSummary != want[0] || got.IncludeUpdates != want[1] {
+			t.Errorf("%q: summary %v, updates %v, want %v", display, got.IncludeSummary, got.IncludeUpdates, want)
+		}
+	}
+}
+
 // TestToCompleteOptions_CompactionWithoutTrigger verifies a compaction edit
 // without an explicit trigger still enables compaction (upstream default).
 func TestToCompleteOptions_CompactionWithoutTrigger(t *testing.T) {
@@ -228,5 +248,17 @@ func TestMessageRequestDistinguishesMissingAndZeroMaxTokens(t *testing.T) {
 
 	if req.MaxTokens == nil || *req.MaxTokens != 0 {
 		t.Fatalf("max tokens: got %v, want pointer to 0", req.MaxTokens)
+	}
+}
+
+// TestToCompleteOptions_EffortOnlyKeepsDefaultDisplay verifies a request
+// without a thinking object leaves the model's default display in place.
+func TestToCompleteOptions_EffortOnlyKeepsDefaultDisplay(t *testing.T) {
+	options, err := toCompleteOptions(MessageRequest{OutputConfig: &OutputConfig{Effort: "high"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := options.ReasoningOptions; got.IncludeSummary || got.IncludeUpdates {
+		t.Errorf("summary %v, updates %v, want neither", got.IncludeSummary, got.IncludeUpdates)
 	}
 }

@@ -20,6 +20,9 @@ const (
 	FieldType
 	// FieldNonEmpty requires the field to be present and non-zero/non-empty in both.
 	FieldNonEmpty
+	// FieldOptional permits a field to be absent on either endpoint.
+	// When both provide it, compare it normally, including nested rules.
+	FieldOptional
 )
 
 // CompareOption configures structural comparison.
@@ -59,6 +62,9 @@ func compareMap(t *testing.T, diffs *[]string, prefix string, expected, actual m
 		}
 
 		if !ok {
+			if rule == FieldOptional {
+				continue
+			}
 			*diffs = append(*diffs, fmt.Sprintf("field %q present in expected but missing in actual", path))
 			continue
 		}
@@ -85,7 +91,7 @@ func compareMap(t *testing.T, diffs *[]string, prefix string, expected, actual m
 	for key := range actual {
 		path := joinPath(prefix, key)
 		rule := resolveRule(path, opts.Rules)
-		if rule == FieldIgnore {
+		if rule == FieldIgnore || rule == FieldOptional {
 			continue
 		}
 

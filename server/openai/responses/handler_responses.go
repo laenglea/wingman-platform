@@ -31,12 +31,12 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 	completer, err := h.Completer(req.Model)
 
 	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(req.Model))
 		return
 	}
 
 	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
-		writeError(w, http.StatusNotFound, err)
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(req.Model))
 		return
 	}
 
@@ -130,6 +130,12 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		}
 
 		options.ReasoningOptions.Context = provider.ReasoningContext(*req.Reasoning.Context)
+	}
+
+	// Without a summary, reasoning stays hidden, but progress notes between
+	// tool calls are output the caller would see as text on other models.
+	if options.ReasoningOptions != nil && !options.ReasoningOptions.IncludeSummary {
+		options.ReasoningOptions.IncludeUpdates = true
 	}
 
 	// Handle structured output configuration
@@ -314,7 +320,7 @@ func responseDefaults(resp *Response, req ResponsesRequest, completion *provider
 		resp.Temperature = *req.Temperature
 	}
 
-	resp.TopP = 1
+	resp.TopP = 0.98
 	resp.TopLogprobs = 0
 	if req.Truncation != "" {
 		resp.Truncation = req.Truncation
@@ -335,14 +341,10 @@ func responseDefaults(resp *Response, req ResponsesRequest, completion *provider
 		resp.IncompleteDetails = &IncompleteDetails{Reason: "max_output_tokens"}
 	}
 
+	resp.Reasoning = &ResponseReasoning{Mode: "standard"}
 	if req.Reasoning != nil {
-		reasoning := *req.Reasoning
-		resp.Reasoning = &reasoning
-	} else {
-		effort := ReasoningEffortNone
-		resp.Reasoning = &ReasoningConfig{
-			Effort: &effort,
-		}
+		resp.Reasoning.Effort = req.Reasoning.Effort
+		resp.Reasoning.Summary = req.Reasoning.Summary
 	}
 
 	if resp.Reasoning.Effort == nil {
@@ -405,7 +407,14 @@ func responseDefaults(resp *Response, req ResponsesRequest, completion *provider
 				}
 			}
 
-			tools[i] = t
+			if t.Type == ToolTypeFunction {
+				tools[i] = struct {
+					Tool
+					OutputSchema any `json:"output_schema"`
+				}{Tool: t}
+			} else {
+				tools[i] = t
+			}
 		}
 		resp.Tools = tools
 	} else {
@@ -431,15 +440,9 @@ func reasoningRequested(req ResponsesRequest) bool {
 		return false
 	}
 
-	if req.Reasoning.Effort != nil && *req.Reasoning.Effort != ReasoningEffortNone && *req.Reasoning.Effort != ReasoningEffortMinimal {
-		return true
-	}
-
-	if req.Reasoning.Summary != nil {
-		return true
-	}
-
-	return false
+	// Even none and minimal can return progress notes on models that think
+	// between tool calls. Preserve those notes and their replayable state.
+	return req.Reasoning.Effort != nil || req.Reasoning.Context != nil || req.Reasoning.Summary != nil
 }
 
 type responseOutputOptions struct {
@@ -786,7 +789,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 					Type:    "message",
 					Status:  "in_progress",
 					Content: []OutputContent{},
-					Phase:   string(event.MessagePhase),
+					Phase:   outputPhase(string(event.MessagePhase)),
 					Role:    MessageRoleAssistant,
 				},
 			})
@@ -1349,7 +1352,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 					Type:    "message",
 					Status:  itemStatus(event.Incomplete),
 					Content: content,
-					Phase:   string(event.MessagePhase),
+					Phase:   outputPhase(string(event.MessagePhase)),
 					Role:    MessageRoleAssistant,
 				},
 			})

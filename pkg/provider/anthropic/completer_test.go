@@ -301,6 +301,47 @@ func TestConvertRequest_DisabledThinkingCapsEffort(t *testing.T) {
 	}
 }
 
+// TestConvertRequest_DisabledThinkingSendsBetweenTools verifies Claude Sonnet
+// 5.5, which rejects an explicit disable, gets its lowest setting instead,
+// with the effort capped at high.
+func TestConvertRequest_DisabledThinkingSendsBetweenTools(t *testing.T) {
+	completer, _ := NewCompleter("http://localhost", "claude-sonnet-5-5")
+
+	body := requestBody(t, completer, []provider.Message{provider.UserMessage("hi")}, &provider.CompleteOptions{
+		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortMax},
+	})
+
+	thinking, _ := body["thinking"].(map[string]any)
+	if thinking["type"] != "between_tools" || len(thinking) != 1 {
+		t.Fatalf("thinking: got %v, want between_tools", body["thinking"])
+	}
+
+	config, _ := body["output_config"].(map[string]any)
+	if config["effort"] != "high" {
+		t.Errorf("effort: got %v, want high", config["effort"])
+	}
+}
+
+// TestConvertRequest_ProgressUpdates verifies display "updates" is sent with
+// its beta on models that write progress notes.
+func TestConvertRequest_ProgressUpdates(t *testing.T) {
+	completer, _ := NewCompleter("http://localhost", "claude-fable-5-1")
+
+	req, err := completer.convertMessageRequest([]provider.Message{provider.UserMessage("hi")}, &provider.CompleteOptions{
+		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, IncludeUpdates: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := req.Thinking.OfAdaptive; got == nil || got.Display != anthropic.BetaThinkingConfigAdaptiveDisplayUpdates {
+		t.Fatalf("thinking: got %+v, want adaptive with updates", req.Thinking)
+	}
+	if !slices.Contains(req.Betas, anthropic.AnthropicBetaThinkingDisplayUpdates2026_08_18) {
+		t.Errorf("betas: got %v, want the display-updates beta", req.Betas)
+	}
+}
+
 // TestConvertRequest_ForcedToolDisablesThinkingAndCapsEffort verifies the
 // forced tool_choice path — which disables thinking after effort is already
 // set — also gets the Claude Opus 5 effort cap applied.
@@ -332,6 +373,7 @@ func TestConvertRequest_UnsupportedForcedToolChoiceIsRejected(t *testing.T) {
 		{name: "any", model: "claude-fable-5-1"},
 		{name: "named tool", model: "claude-mythos-5-1", allowed: []string{"get_weather"}},
 		{name: "opus 5.5", model: "claude-opus-5-5"},
+		{name: "sonnet 5.5", model: "claude-sonnet-5-5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			completer, _ := NewCompleter("http://localhost", tc.model)
@@ -977,5 +1019,36 @@ func TestCompleterReplaysSummaryAsThinking(t *testing.T) {
 
 	if thinking["type"] != "thinking" || thinking["thinking"] != "summarized thought" || thinking["signature"] != "SIG" {
 		t.Fatalf("thinking block: %v", thinking)
+	}
+}
+
+// TestProgressNotesReturnedAsSummary verifies thinking text is labeled as a
+// summary only when the request can return nothing but progress notes.
+func TestProgressNotesReturnedAsSummary(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		model     string
+		reasoning *provider.ReasoningOptions
+		want      bool
+	}{
+		{"updates", "claude-sonnet-5-5", &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, IncludeUpdates: true}, true},
+		{"between tools", "claude-sonnet-5-5", &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, IncludeUpdates: true}, true},
+		{"summarized", "claude-sonnet-5-5", &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, IncludeSummary: true}, false},
+		{"raw thinking", "claude-3-7-sonnet", &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, IncludeUpdates: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			completer, _ := NewCompleter("http://localhost", tc.model)
+			req, err := completer.convertMessageRequest([]provider.Message{provider.UserMessage("hi")}, &provider.CompleteOptions{ReasoningOptions: tc.reasoning})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := progressNotes(req.Thinking); got != tc.want {
+				t.Fatalf("progressNotes = %v, want %v", got, tc.want)
+			}
+			r := thinkingReasoning("note", "sig", tc.want)
+			if tc.want && (r.Summary != "note" || r.Text != "") || !tc.want && r.Text != "note" {
+				t.Errorf("reasoning = %+v", r)
+			}
+		})
 	}
 }

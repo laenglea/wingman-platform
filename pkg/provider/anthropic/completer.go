@@ -55,7 +55,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		req, err := c.convertMessageRequest(messages, options)
 
 		if err != nil {
-			yield(nil, err)
+			yield(nil, provider.InvalidRequest(err))
 			return
 		}
 
@@ -69,6 +69,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessageNewParams, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	return func(yield func(*provider.Completion, error) bool) {
 		toolAliases := provider.ToolAliases(options.Tools)
+		notes := progressNotes(req.Thinking)
 
 		message := anthropic.BetaMessage{}
 		stream := c.messages.NewStreaming(ctx, *req)
@@ -176,10 +177,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 							Role: provider.MessageRoleAssistant,
 
 							Content: []provider.Content{
-								provider.ReasoningContent(provider.Reasoning{
-									Text:      event.Thinking,
-									Signature: event.Signature,
-								}),
+								provider.ReasoningContent(thinkingReasoning(event.Thinking, event.Signature, notes)),
 							},
 						},
 
@@ -296,9 +294,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 							Role: provider.MessageRoleAssistant,
 
 							Content: []provider.Content{
-								provider.ReasoningContent(provider.Reasoning{
-									Text: event.Thinking,
-								}),
+								provider.ReasoningContent(thinkingReasoning(event.Thinking, "", notes)),
 							},
 						},
 					}
@@ -543,11 +539,15 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 }
 
 func (c *Completer) convertMessageRequest(input []provider.Message, options *provider.CompleteOptions) (*anthropic.BetaMessageNewParams, error) {
-	midSystem := matchesModel(c.model, []string{"fable-5", "mythos-5", "opus-4-8", "opus-5"})
+	midSystem := matchesModel(c.model, []string{"fable-5", "mythos-5", "opus-4-8", "opus-5", "sonnet-5-5"})
 	if !midSystem {
 		input = provider.ResolveInstructions(input)
 	}
-	if !matchesModel(c.model, []string{"fable-5-1", "mythos-5-1", "opus-5"}) {
+	// between_tools pins the effort for the conversation, so per-message
+	// updates are lowered to the request instead.
+	betweenTools := matchesModel(c.model, BetweenToolsModels) && options != nil &&
+		options.ReasoningOptions != nil && options.ReasoningOptions.Type == provider.ReasoningTypeDisabled
+	if betweenTools || !matchesModel(c.model, []string{"fable-5-1", "mythos-5-1", "opus-5", "sonnet-5-5"}) {
 		input, options = provider.ResolveConfigurationUpdates(input, options)
 	}
 	if options == nil {
@@ -1191,13 +1191,21 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	thinking := c.resolveThinking(input, options, forcesTool)
 
 	if thinking.Enabled {
-		display := anthropic.BetaThinkingConfigAdaptiveDisplaySummarized
-		if !thinking.Summarized {
-			display = anthropic.BetaThinkingConfigAdaptiveDisplayOmitted
+		display := anthropic.BetaThinkingConfigAdaptiveDisplayOmitted
+		switch {
+		case thinking.Summarized:
+			display = anthropic.BetaThinkingConfigAdaptiveDisplaySummarized
+		case thinking.Updates:
+			display = anthropic.BetaThinkingConfigAdaptiveDisplayUpdates
+			req.Betas = append(req.Betas, anthropic.AnthropicBetaThinkingDisplayUpdates2026_08_18)
 		}
 
 		req.Thinking = anthropic.BetaThinkingConfigParamUnion{
 			OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{Display: display},
+		}
+	} else if thinking.Disabled && matchesModel(c.model, BetweenToolsModels) {
+		req.Thinking = anthropic.BetaThinkingConfigParamUnion{
+			OfBetweenTools: &anthropic.BetaThinkingConfigBetweenToolsParam{},
 		}
 	} else if thinking.Disabled {
 		req.Thinking = anthropic.BetaThinkingConfigParamUnion{

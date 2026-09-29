@@ -47,6 +47,32 @@ func TestPerMessageEffortPreservesPosition(t *testing.T) {
 	}
 }
 
+// TestPerMessageEffortBetweenTools verifies Claude Sonnet 5.5 keeps effort
+// updates positional with adaptive thinking, but lowers them to the request
+// under between_tools, which rejects a mid-conversation effort change.
+func TestPerMessageEffortBetweenTools(t *testing.T) {
+	c, _ := NewCompleter("http://localhost", "claude-sonnet-5-5")
+	input := []provider.Message{
+		provider.UserMessage("Plan"),
+		provider.AssistantMessage("Plan ready"),
+		{Content: []provider.Content{provider.ConfigurationUpdateContent(provider.ConfigurationUpdate{ReasoningEffort: provider.EffortLow})}},
+		provider.UserMessage("Summarize"),
+	}
+
+	body := requestBody(t, c, input, &provider.CompleteOptions{ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortHigh}})
+	if len(body["messages"].([]any)) != 4 || body["output_config"].(map[string]any)["effort"] != "high" {
+		t.Fatalf("adaptive: lost effort position: %v", body)
+	}
+
+	body = requestBody(t, c, input, &provider.CompleteOptions{ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortHigh}})
+	if len(body["messages"].([]any)) != 3 || body["output_config"].(map[string]any)["effort"] != "low" {
+		t.Fatalf("between_tools: effort update not lowered: %v", body)
+	}
+	if body["thinking"].(map[string]any)["type"] != "between_tools" {
+		t.Fatalf("between_tools: got %v", body["thinking"])
+	}
+}
+
 func TestToolSearchPreservesDefinitionsAndResults(t *testing.T) {
 	c, _ := NewCompleter("http://localhost", "claude-fable-5-1")
 	options := &provider.CompleteOptions{Tools: []provider.Tool{

@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	DefaultWingmanURL       = "http://localhost:8080/v1"
+	DefaultWingmanURL       = "http://localhost:4242/v1"
 	DefaultAnthropicURL     = "https://api.anthropic.com/v1"
 	DefaultAnthropicVersion = "2023-06-01"
 )
@@ -69,6 +69,10 @@ func modelCapabilities(name string) harness.Capabilities {
 			return harness.Capabilities{StructuredOutput: true, Cache: true}
 		case strings.Contains(n, "-4-0"), strings.Contains(n, "opus-4-1"), strings.Contains(n, "-4-5"):
 			return harness.Capabilities{Thinking: true, StructuredOutput: true, Cache: true, TextEditor: true, ComputerUse: true, Shell: true, ToolSearch: true}
+		case strings.Contains(n, "opus-5-5"), strings.Contains(n, "sonnet-5-5"):
+			// The Claude API accepts only computer_toolset_20260801 here,
+			// which wingman does not translate yet.
+			return harness.Capabilities{Thinking: true, StructuredOutput: true, Cache: true, TextEditor: true, Shell: true, ToolSearch: true, Compaction: true}
 		default:
 			return harness.Capabilities{Thinking: true, StructuredOutput: true, Cache: true, TextEditor: true, ComputerUse: true, Shell: true, ToolSearch: true, Compaction: true}
 		}

@@ -16,9 +16,13 @@ func DefaultResponsesResponseRules() map[string]harness.FieldRule {
 		"output.*.summary.*.text":    harness.FieldIgnore,
 		"output.*.call_id":           harness.FieldPresence,
 		"output.*.arguments":         harness.FieldPresence,
+		"output.*.phase":             harness.FieldPresence,
+		"output.*.status":            harness.FieldOptional,
 
-		"usage.input_tokens":                           harness.FieldNonEmpty,
-		"usage.output_tokens":                          harness.FieldNonEmpty,
+		"usage.input_tokens":  harness.FieldNonEmpty,
+		"usage.output_tokens": harness.FieldNonEmpty,
+		// Some backends do not report a reasoning-token breakdown.
+		"usage.output_tokens_details":                  harness.FieldOptional,
 		"usage.total_tokens":                           harness.FieldNonEmpty,
 		"usage.input_tokens_details.cached_tokens":     harness.FieldPresence,
 		"usage.output_tokens_details.reasoning_tokens": harness.FieldPresence,
@@ -29,6 +33,7 @@ func DefaultResponsesResponseRules() map[string]harness.FieldRule {
 		"billing":           harness.FieldIgnore,
 		"store":             harness.FieldIgnore,
 		"reasoning.summary": harness.FieldIgnore,
+		"reasoning.context": harness.FieldPresence,
 		"service_tier":      harness.FieldPresence,
 	}
 }
@@ -47,12 +52,16 @@ func DefaultResponsesSSERules() map[string]harness.FieldRule {
 		"response.output.*.encrypted_content":                   harness.FieldIgnore,
 		"response.output.*.call_id":                             harness.FieldPresence,
 		"response.output.*.arguments":                           harness.FieldPresence,
+		"response.output.*.phase":                               harness.FieldPresence,
+		"response.output.*.status":                              harness.FieldOptional,
 		"response.usage.input_tokens":                           harness.FieldNonEmpty,
 		"response.usage.output_tokens":                          harness.FieldNonEmpty,
+		"response.usage.output_tokens_details":                  harness.FieldOptional,
 		"response.usage.total_tokens":                           harness.FieldNonEmpty,
 		"response.usage.input_tokens_details.cached_tokens":     harness.FieldPresence,
 		"response.usage.output_tokens_details.reasoning_tokens": harness.FieldPresence,
 		"response.reasoning.summary":                            harness.FieldIgnore,
+		"response.reasoning.context":                            harness.FieldPresence,
 		"response.text.format.description":                      harness.FieldIgnore,
 		"response.prompt_cache_retention":                       harness.FieldIgnore,
 		"response.billing":                                      harness.FieldIgnore,
@@ -68,6 +77,7 @@ func DefaultResponsesSSERules() map[string]harness.FieldRule {
 		"item.summary":           harness.FieldIgnore,
 		"item.summary.*.text":    harness.FieldIgnore,
 		"item.status":            harness.FieldIgnore,
+		"item.phase":             harness.FieldPresence,
 		"item.content":           harness.FieldIgnore,
 
 		"arguments":       harness.FieldIgnore,

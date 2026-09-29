@@ -146,7 +146,13 @@ func TestToolSearchCrossProviderLive(t *testing.T) {
 func postLiveOutput(t *testing.T, client *harness.Client, endpoint harness.Endpoint, api string, body map[string]any) []any {
 	t.Helper()
 	if stream, _ := body["stream"].(bool); !stream {
-		response, err := client.Post(t.Context(), endpoint, "/"+api, body)
+		var response *harness.RawResponse
+		var err error
+		if api == "messages" {
+			response = anthropic.PostMessages(t, &anthropic.Harness{Client: client}, endpoint, body)
+		} else {
+			response, err = client.Post(t.Context(), endpoint, "/"+api, body)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -160,7 +166,13 @@ func postLiveOutput(t *testing.T, client *harness.Client, endpoint harness.Endpo
 		output, _ := response.Body[key].([]any)
 		return output
 	}
-	events, err := client.PostSSE(t.Context(), endpoint, "/"+api, body)
+	var events []*harness.SSEEvent
+	var err error
+	if api == "messages" {
+		events = anthropic.PostMessagesSSE(t, &anthropic.Harness{Client: client}, endpoint, body)
+	} else {
+		events, err = client.PostSSE(t.Context(), endpoint, "/"+api, body)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,9 +182,8 @@ func postLiveOutput(t *testing.T, client *harness.Client, endpoint harness.Endpo
 		switch event.Event {
 		case "error", "response.failed":
 			t.Fatalf("stream error: %v", event.Data)
-		case "response.completed":
-			response, _ := event.Data["response"].(map[string]any)
-			output, _ = response["output"].([]any)
+		case "response.output_item.done":
+			output = append(output, event.Data["item"])
 		case "content_block_start":
 			output = append(output, event.Data["content_block"])
 		case "content_block_delta":

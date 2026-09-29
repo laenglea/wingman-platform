@@ -46,9 +46,9 @@ type ContextManagementEdit struct {
 }
 
 type ThinkingConfig struct {
-	Type         string          `json:"type"`                    // "enabled", "adaptive", or "disabled"
+	Type         string          `json:"type"`                    // "enabled", "adaptive", "disabled", or "between_tools"
 	BudgetTokens int             `json:"budget_tokens,omitempty"` // required when type is "enabled"
-	Display      string          `json:"display,omitempty"`       // "summarized" or "omitted"
+	Display      string          `json:"display,omitempty"`       // "summarized", "omitted", or "updates"
 	BlockBinding json.RawMessage `json:"block_binding,omitempty"`
 }
 
@@ -186,6 +186,8 @@ type Message struct {
 	// Container is the code execution container of the turn. No backend runs
 	// one through the gateway, so it is null, as on turns without one.
 	Container *Container `json:"container"`
+	// No prompt-cache diagnostics are requested by the gateway.
+	Diagnostics json.RawMessage `json:"diagnostics"`
 }
 
 // Container identifies a server-side code execution container.

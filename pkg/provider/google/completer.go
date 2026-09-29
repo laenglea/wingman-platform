@@ -59,7 +59,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		config, err := convertGenerateConfig(c.model, convertInstruction(messages), options)
 
 		if err != nil {
-			yield(nil, err)
+			yield(nil, provider.InvalidRequest(err))
 			return
 		}
 

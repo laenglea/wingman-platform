@@ -1,7 +1,9 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/otel"
 )
@@ -21,7 +23,7 @@ func (s *Server) handleAuth(next http.Handler) http.Handler {
 		}
 
 		if !authorized {
-			w.WriteHeader(http.StatusUnauthorized)
+			writeUnauthorized(w, r)
 			return
 		}
 
@@ -30,4 +32,35 @@ func (s *Server) handleAuth(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// writeUnauthorized answers a failed authentication with the error body of
+// the API the request was made against.
+func writeUnauthorized(w http.ResponseWriter, r *http.Request) {
+	const message = "invalid or missing credentials"
+
+	var body any
+
+	switch path := r.URL.Path; {
+	case strings.HasPrefix(path, "/v1beta/"):
+		body = map[string]any{
+			"error": map[string]any{"code": http.StatusUnauthorized, "message": message, "status": "UNAUTHENTICATED"},
+		}
+
+	case strings.HasPrefix(path, "/v1/messages"):
+		body = map[string]any{
+			"type":  "error",
+			"error": map[string]any{"type": "authentication_error", "message": message},
+		}
+
+	default:
+		body = map[string]any{
+			"error": map[string]any{"type": "invalid_request_error", "code": "invalid_api_key", "message": message},
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+
+	json.NewEncoder(w).Encode(body)
 }

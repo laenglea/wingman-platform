@@ -107,13 +107,15 @@ func TestInputTokensVsReference(t *testing.T) {
 	h := New(cfg)
 
 	for name, body := range scenarios {
+		cfg.RegisterCompleter(body["model"].(string), &optionsCompleter{})
+
 		payload, err := json.Marshal(body)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		reference := openAIReference(t, payload)
 		local := localInputTokens(t, h, payload)
+		reference := openAIReference(t, payload)
 
 		pct := 100 * math.Abs(float64(local)-float64(reference)) / float64(reference)
 		t.Logf("%-24s reference=%-6d wingman=%-6d err=%.1f%%", name, reference, local, pct)

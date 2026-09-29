@@ -92,6 +92,41 @@ func TestConvertConverseInputSteersSchemaToolWithoutForcing(t *testing.T) {
 	}
 }
 
+// TestConverseAdditionalFieldsSendsBetweenTools verifies Claude Sonnet 5.5,
+// which rejects an explicit disable, gets its lowest setting instead, with
+// the effort capped at high.
+func TestConverseAdditionalFieldsSendsBetweenTools(t *testing.T) {
+	c := &Completer{Config: &Config{model: "anthropic.claude-sonnet-5-5"}}
+
+	fields, _ := c.converseAdditionalFields(nil, &provider.CompleteOptions{
+		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortXHigh},
+	})
+
+	if got, _ := fields["thinking"].(map[string]any); got["type"] != "between_tools" || len(got) != 1 {
+		t.Fatalf("thinking: got %v, want between_tools", fields["thinking"])
+	}
+	if got, _ := fields["output_config"].(map[string]any); got["effort"] != "high" {
+		t.Errorf("effort: got %v, want high", fields["output_config"])
+	}
+}
+
+// TestConverseAdditionalFieldsProgressUpdates verifies display "updates" is
+// sent with its beta, which Bedrock requires for the value.
+func TestConverseAdditionalFieldsProgressUpdates(t *testing.T) {
+	c := &Completer{Config: &Config{model: "eu.anthropic.claude-opus-5-5"}}
+
+	fields, _ := c.converseAdditionalFields(nil, &provider.CompleteOptions{
+		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, IncludeUpdates: true},
+	})
+
+	if got, _ := fields["thinking"].(map[string]any); got["display"] != "updates" {
+		t.Fatalf("thinking: got %v, want display updates", fields["thinking"])
+	}
+	if got, _ := fields["anthropic_beta"].([]string); !slices.Contains(got, "thinking-display-updates-2026-08-18") {
+		t.Errorf("anthropic_beta: got %v", fields["anthropic_beta"])
+	}
+}
+
 // TestConvertConverseInputRejectsForcedToolChoice verifies forced tool choice
 // on a model that rejects it returns an explicit error instead of an
 // upstream 400.

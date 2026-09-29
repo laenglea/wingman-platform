@@ -79,3 +79,31 @@ func TestResponsesMapExplicitCacheBreakpoints(t *testing.T) {
 		t.Errorf("response does not echo prompt_cache_options: %s", rec.Body.String())
 	}
 }
+
+// Without a summary, reasoning stays hidden but progress notes are requested.
+func TestResponsesMapReasoningVisibility(t *testing.T) {
+	for _, tc := range []struct {
+		body             string
+		summary, updates bool
+	}{
+		{`{"model":"test","input":"hi","reasoning":{"effort":"high","summary":"auto"}}`, true, false},
+		{`{"model":"test","input":"hi","reasoning":{"effort":"high"}}`, false, true},
+		{`{"model":"test","input":"hi","reasoning":{"effort":"none"}}`, false, true},
+		{`{"model":"test","input":"hi","reasoning":{"effort":"minimal"}}`, false, true},
+		{`{"model":"test","input":"hi","reasoning":{"context":"auto"}}`, false, true},
+		{`{"model":"test","input":"hi","include":["reasoning.encrypted_content"]}`, false, true},
+	} {
+		completer := &optionsCompleter{}
+		cfg := &config.Config{Policy: noop.New()}
+		cfg.RegisterCompleter("test", completer)
+		rec := httptest.NewRecorder()
+		New(cfg).handleResponses(rec, httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(tc.body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("HTTP %d: %s", rec.Code, rec.Body.String())
+		}
+		got := completer.options.ReasoningOptions
+		if got == nil || got.IncludeSummary != tc.summary || got.IncludeUpdates != tc.updates {
+			t.Errorf("%s: reasoning options = %+v", tc.body, got)
+		}
+	}
+}

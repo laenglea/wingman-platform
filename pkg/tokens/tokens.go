@@ -38,14 +38,15 @@ const (
 // Dated snapshots (claude-haiku-4-5-20251001, gpt-4o-2024-08-06) match via
 // their base prefix.
 var familyPrefixes = map[string]Family{
-	"claude-fable-5":  Claude2026,
-	"claude-mythos":   Claude2026,
-	"claude-opus-4-8": Claude2026,
-	"claude-opus-4-7": Claude2026,
-	"claude-opus-5":   Claude2026,
-	"claude-opus-5-5": Claude2026,
-	"claude-sonnet-5": Claude2026,
-	"claude":          ClaudeLegacy,
+	"claude-fable-5":    Claude2026,
+	"claude-mythos":     Claude2026,
+	"claude-opus-4-8":   Claude2026,
+	"claude-opus-4-7":   Claude2026,
+	"claude-opus-5":     Claude2026,
+	"claude-opus-5-5":   Claude2026,
+	"claude-sonnet-5":   Claude2026,
+	"claude-sonnet-5-5": Claude2026,
+	"claude":            ClaudeLegacy,
 
 	"gpt-5":   GPTO200k,
 	"gpt-6":   GPTO200k,

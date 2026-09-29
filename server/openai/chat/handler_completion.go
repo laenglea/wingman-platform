@@ -23,12 +23,12 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	completer, err := h.Completer(req.Model)
 
 	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(req.Model))
 		return
 	}
 
 	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
-		writeError(w, http.StatusNotFound, err)
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(req.Model))
 		return
 	}
 

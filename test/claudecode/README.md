@@ -51,7 +51,7 @@ The suite reuses the existing Anthropic test settings and loads the repository
 | `ANTHROPIC_API_KEY` | Required reference credential |
 | `ANTHROPIC_BASE_URL` | `https://api.anthropic.com/v1` |
 | `TEST_ANTHROPIC_REFERENCE_MODEL` | `claude-sonnet-4-6` |
-| `WINGMAN_BASE_URL` | `http://localhost:8080/v1` |
+| `WINGMAN_BASE_URL` | `http://localhost:4242/v1` |
 | `WINGMAN_API_KEY` | `test-key` |
 | `TEST_ANTHROPIC_MODELS` | Comma-separated models; defaults to the Anthropic test matrix plus `claude-opus-5` |
 | `CLAUDE_CODE_LIVE` | Set to `1` to enable paid tests; checked before loading `.env` |

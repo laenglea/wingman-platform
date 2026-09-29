@@ -808,10 +808,11 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 		if content.Reasoning != nil && !s.SuppressReasoning {
 			r := content.Reasoning
 
-			// A new ID means this delta belongs to a different reasoning item.
-			// Close the in-flight one before starting the new one so each item
-			// gets its own output_item.done with its own encrypted_content.
-			if r.ID != "" && s.hasReasoningItem && s.reasoningID != "" && r.ID != s.reasoningID {
+			// Native IDs identify reasoning items. Anthropic and Bedrock omit
+			// IDs, but a signature ends the previous block; the next delta must
+			// start a new item so each block retains its own signed state.
+			newID := r.ID != "" && s.reasoningID != "" && r.ID != s.reasoningID
+			if s.hasReasoningItem && (newID || (r.ID == "" && s.reasoningSignature != "")) {
 				if err := s.closeReasoning(); err != nil {
 					return err
 				}

@@ -8,15 +8,19 @@ func DefaultMessagesResponseRules() map[string]harness.FieldRule {
 		"id":             harness.FieldPresence,
 		"model":          harness.FieldIgnore,
 		"content.*.text": harness.FieldIgnore,
+		// Models choose different numbers of text and thinking blocks.
+		// Feature tests assert the required text, calls, and signed state.
+		"content": harness.FieldType,
 
-		"usage.input_tokens":                harness.FieldNonEmpty,
-		"usage.output_tokens":               harness.FieldNonEmpty,
-		"usage.output_tokens_details":       harness.FieldPresence,
-		"usage.cache_creation":              harness.FieldIgnore,
-		"usage.cache_creation_input_tokens": harness.FieldPresence,
-		"usage.cache_read_input_tokens":     harness.FieldPresence,
-		"usage.service_tier":                harness.FieldIgnore,
-		"usage.inference_geo":               harness.FieldIgnore,
+		"usage.input_tokens":                          harness.FieldNonEmpty,
+		"usage.output_tokens":                         harness.FieldNonEmpty,
+		"usage.output_tokens_details":                 harness.FieldOptional,
+		"usage.output_tokens_details.thinking_tokens": harness.FieldType,
+		"usage.cache_creation":                        harness.FieldIgnore,
+		"usage.cache_creation_input_tokens":           harness.FieldPresence,
+		"usage.cache_read_input_tokens":               harness.FieldPresence,
+		"usage.service_tier":                          harness.FieldIgnore,
+		"usage.inference_geo":                         harness.FieldIgnore,
 	}
 }
 
@@ -35,10 +39,14 @@ func DefaultMessagesSSERules() map[string]harness.FieldRule {
 
 		"delta.text":         harness.FieldIgnore,
 		"delta.partial_json": harness.FieldIgnore,
+		// Optional thinking blocks shift the text/tool indexes.
+		"index": harness.FieldIgnore,
 
-		"usage.input_tokens":                harness.FieldIgnore,
-		"usage.output_tokens":               harness.FieldIgnore,
-		"usage.cache_creation_input_tokens": harness.FieldIgnore,
-		"usage.cache_read_input_tokens":     harness.FieldIgnore,
+		"usage.input_tokens":                          harness.FieldIgnore,
+		"usage.output_tokens":                         harness.FieldIgnore,
+		"usage.output_tokens_details":                 harness.FieldOptional,
+		"usage.output_tokens_details.thinking_tokens": harness.FieldType,
+		"usage.cache_creation_input_tokens":           harness.FieldIgnore,
+		"usage.cache_read_input_tokens":               harness.FieldIgnore,
 	}
 }

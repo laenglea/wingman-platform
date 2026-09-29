@@ -32,7 +32,7 @@ func testRerank(t *testing.T, model string) {
 
 	ep := harness.Endpoint{
 		Name:    "wingman",
-		BaseURL: env("WINGMAN_BASE_URL", "http://localhost:8080/v1"),
+		BaseURL: env("WINGMAN_BASE_URL", "http://localhost:4242/v1"),
 		APIKey:  env("WINGMAN_API_KEY", "test-key"),
 	}
 

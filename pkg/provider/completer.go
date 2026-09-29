@@ -267,8 +267,7 @@ type ReasoningOptions struct {
 	Effort  Effort
 	Context ReasoningContext
 
-	// IncludeSummary asks for visible reasoning text; IncludeSignature asks
-	// for the opaque state that lets the next turn continue the reasoning.
+	IncludeUpdates   bool
 	IncludeSummary   bool
 	IncludeSignature bool
 }

@@ -31,7 +31,7 @@ func TestResponsesDoNotInventNativePhase(t *testing.T) {
 			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "I will check that now.") {
 				t.Fatalf("response=%s", rec.Body.String())
 			}
-			if strings.Contains(rec.Body.String(), `"phase"`) {
+			if strings.Contains(rec.Body.String(), `"phase":"`) || !strings.Contains(rec.Body.String(), `"phase":null`) {
 				t.Fatalf("invented message phase: %s", rec.Body.String())
 			}
 		})

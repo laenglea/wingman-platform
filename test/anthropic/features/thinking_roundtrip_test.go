@@ -31,8 +31,9 @@ func TestThinkingRoundTripHTTP(t *testing.T) {
 					"type":          "enabled",
 					"budget_tokens": 5000,
 				},
+				"output_config": map[string]any{"effort": "high"},
 				"messages": []map[string]any{
-					{"role": "user", "content": "Count the letter 'e' in 'nevertheless'."},
+					{"role": "user", "content": "Find the smallest positive integer x such that x mod 7 = 3, x mod 11 = 5, and x mod 13 = 7. Show your steps and verify all remainders."},
 				},
 			}
 
@@ -55,10 +56,11 @@ func TestThinkingRoundTripHTTP(t *testing.T) {
 						"type":          "enabled",
 						"budget_tokens": 5000,
 					},
+					"output_config": map[string]any{"effort": "high"},
 					"messages": []map[string]any{
-						{"role": "user", "content": "Count the letter 'e' in 'nevertheless'."},
+						{"role": "user", "content": "Find the smallest positive integer x such that x mod 7 = 3, x mod 11 = 5, and x mod 13 = 7. Show your steps and verify all remainders."},
 						{"role": "assistant", "content": assistant},
-						{"role": "user", "content": "Are you sure? Recount very carefully and tell me the final number."},
+						{"role": "user", "content": "Verify your answer against all three congruences and repeat the integer."},
 					},
 				}
 			}
