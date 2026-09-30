@@ -57,6 +57,7 @@ func TestFamilyFor(t *testing.T) {
 		"claude-haiku-4-5-20251001": ClaudeLegacy,
 		"claude-opus-4-6":           ClaudeLegacy,
 		"gpt-5.6":                   GPTO200k,
+		"gpt-6.1-sol":               GPTO200k,
 		"gpt-6-sol":                 GPTO200k,
 		"gpt-6-luna":                GPTO200k,
 		"gpt-4o-2024-08-06":         GPTO200k,
@@ -126,10 +127,10 @@ func TestOpenAIImage(t *testing.T) {
 	}
 }
 
-// GPT-6 Sol and Luna image sizing follows the documented GPT-6 family
-// patch-based estimate until model-specific measurements are available.
+// GPT-6 Sol, Luna and GPT-6.1 Sol use the GPT-6 family patch-based estimate
+// until model-specific measurements are available.
 func TestGPT6ImageEstimate(t *testing.T) {
-	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+	for _, model := range []string{"gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol"} {
 		if got := OpenAIImage(model, 1024, 1024, false); got != 1229 {
 			t.Errorf("%s high detail = %d, want 1229", model, got)
 		}

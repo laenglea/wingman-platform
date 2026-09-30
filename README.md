@@ -167,6 +167,7 @@ providers:
     token: ${OPENAI_API_KEY}
     models:
       - gpt-6-astra
+      - gpt-6.1-sol
       - gpt-6-sol
       - gpt-6-luna
       - gpt-5.4
@@ -273,6 +274,7 @@ providers:
 
     models:
       - gpt-6-astra
+      - gpt-6.1-sol
       - gpt-6-sol
       - gpt-6-luna
       - gpt-4o
@@ -284,6 +286,8 @@ providers:
       - tts-1
       - tts-1-hd
 ```
+
+GPT-6.1 Sol uses `gpt-6.1-sol`. The `openai` provider uses the Responses API upstream, including for tool calls received through Wingman's Chat Completions and Anthropic endpoints. Reasoning defaults to `medium`; `low`, `high`, `xhigh`, and `max` are also supported. Wingman maps `none` and `minimal` to `low` and omits temperature. OpenAI's Chat Completions endpoint supports this model only without tools. See the [official model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
 
 
 #### Azure OpenAI Service

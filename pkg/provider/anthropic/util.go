@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -382,6 +383,67 @@ func sanitizeStrictSchema(schema map[string]any) map[string]any {
 			result["description"] = desc + " (" + hint + ")"
 		} else {
 			result["description"] = hint
+		}
+	}
+
+	return simplifyNullableEnum(result)
+}
+
+// Anthropic rejects an enum next to a type list. When every enum value
+// already satisfies the nullable type, that type is redundant: removing it
+// preserves the enum and all sibling constraints without introducing anyOf.
+func simplifyNullableEnum(schema map[string]any) map[string]any {
+	types, ok := schema["type"].([]any)
+	if !ok {
+		return schema
+	}
+
+	values, ok := schema["enum"].([]any)
+	if !ok {
+		return schema
+	}
+
+	var others []any
+	nullable := false
+
+	for _, t := range types {
+		if t == "null" {
+			nullable = true
+		} else {
+			others = append(others, t)
+		}
+	}
+
+	if !nullable || len(others) != 1 || len(values) == 0 {
+		return schema
+	}
+
+	for _, v := range values {
+		matches := false
+		switch v := v.(type) {
+		case nil:
+			matches = true
+		case string:
+			matches = others[0] == "string"
+		case bool:
+			matches = others[0] == "boolean"
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			matches = others[0] == "integer" || others[0] == "number"
+		case float64:
+			matches = others[0] == "number" || others[0] == "integer" && math.Trunc(v) == v
+		case float32:
+			matches = others[0] == "number" || others[0] == "integer" && math.Trunc(float64(v)) == float64(v)
+		}
+		if !matches {
+			return schema
+		}
+	}
+
+	result := make(map[string]any, len(schema))
+
+	for key, v := range schema {
+		if key != "type" {
+			result[key] = v
 		}
 	}
 

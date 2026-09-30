@@ -91,8 +91,8 @@ type oaiImageModel struct {
 
 var oaiImagePrefixes = map[string]oaiImageModel{
 	// OpenAI documents 1.2x patch tokens for Astra and the preceding 5.6
-	// tiers; use the same GPT-6 family estimate for Sol and Luna.
-	"gpt-6-":       {patchMult: 1.2, patchBudget: 2500, lowMaxPixels: 512},
+	// tiers; use the same GPT-6 family estimate for Sol, Luna and GPT-6.1 Sol.
+	"gpt-6":        {patchMult: 1.2, patchBudget: 2500, lowMaxPixels: 512},
 	"gpt-4o-mini":  {base: 2833, perTile: 5667},
 	"gpt-4.1-mini": {patchMult: 1.62},
 	"gpt-4.1-nano": {patchMult: 2.46},
