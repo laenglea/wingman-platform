@@ -29,6 +29,7 @@ type Config struct {
 	models map[string]provider.Model
 
 	completer   map[string]provider.Completer
+	decider     map[string]provider.Decider
 	embedder    map[string]provider.Embedder
 	renderer    map[string]provider.Renderer
 	reranker    map[string]provider.Reranker

@@ -328,12 +328,12 @@ curl -X POST -H "Content-Type: application/json" \
   http://localhost:8080/v1/rerank
 ```
 
-## Decisions
+## System One
 
-**Endpoint:** `POST /v1/decisions` (alias: `/v1/systemone`)
+**Endpoint:** `POST /v1/systemone`
 
-Evaluate application state with typed questions using a configured completion or
-embedding model. Requests and responses follow the [TypeSafe System One format](https://docs.typesafe.ai/api).
+Evaluate application state with typed questions using a configured native decision,
+completion, or embedding model. Requests and responses follow the [TypeSafe System One format](https://docs.typesafe.ai/api).
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -354,7 +354,7 @@ JSON, or null.
 Each answer also includes its `type`.
 
 ```bash
-curl http://localhost:8080/v1/decisions \
+curl http://localhost:8080/v1/systemone \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "your-model",
@@ -375,8 +375,10 @@ selects the highest probability, using alphabetical order for ties. Score is a
 zero-based, probability-weighted index: three levels yield a value from 0 to 2,
 including fractions. `legend` retains the input level descriptions.
 
-Probabilities and confidence are adapter estimates, not calibrated accuracy
-guarantees.
+Native `typesafe` providers preserve the upstream answers and usage. Completion
+and embedding adapters estimate probabilities and derive confidence from those
+estimates. Configure the complete upstream evaluation URL to use TypeSafe,
+OpenRouter, or a local System One server; see [TypeSafe configuration](README.md#typesafe--system-one).
 
 ## Segment
 

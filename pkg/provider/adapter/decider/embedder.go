@@ -28,12 +28,12 @@ func (a *EmbedderAdapter) Decide(ctx context.Context, input *provider.DecisionIn
 	if err := input.Validate(); err != nil {
 		return nil, err
 	}
-	// Unwrap the HTTP string/array envelopes for semantic comparison.
-	var stateValue any = input.State
-	if len(input.State) == 1 {
-		if text, ok := input.State["text"].(string); ok {
+	// Also accept the text/items envelopes used by existing provider callers.
+	stateValue := input.State
+	if state, ok := input.State.(map[string]any); ok && len(state) == 1 {
+		if text, ok := state["text"].(string); ok {
 			stateValue = text
-		} else if items, ok := input.State["items"].([]any); ok {
+		} else if items, ok := state["items"].([]any); ok {
 			stateValue = items
 		}
 	}

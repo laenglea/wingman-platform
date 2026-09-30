@@ -14,6 +14,7 @@ func TestDecisionInputValidation(t *testing.T) {
 		"too many options":  {Questions: []DecisionQuestion{{Choice: &ChoiceQuestion{Options: make([]DecisionOption, 256)}}}},
 		"too many levels":   {Questions: []DecisionQuestion{{Score: &ScoreQuestion{Levels: make([]any, 11)}}}},
 		"invalid state":     {State: map[string]any{"bad": make(chan int)}, Questions: []DecisionQuestion{{Noul: &NoulQuestion{}}}},
+		"scalar state":      {State: true, Questions: []DecisionQuestion{{Noul: &NoulQuestion{}}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := input.Validate(); err == nil {

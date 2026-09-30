@@ -69,7 +69,10 @@ func (a *CompleterAdapter) Decide(ctx context.Context, input *provider.DecisionI
 	}
 
 	var acc provider.CompletionAccumulator
-	for completion, err := range a.completer.Complete(ctx, messages, &provider.CompleteOptions{Schema: schema}) {
+	for completion, err := range a.completer.Complete(ctx, messages, &provider.CompleteOptions{
+		Schema:           schema,
+		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled},
+	}) {
 		if err != nil {
 			return nil, err
 		}
