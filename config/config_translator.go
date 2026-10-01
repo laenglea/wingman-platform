@@ -11,6 +11,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/translator/azure"
 	"github.com/adrianliechti/wingman/pkg/translator/custom"
 	"github.com/adrianliechti/wingman/pkg/translator/deepl"
+	"github.com/adrianliechti/wingman/pkg/translator/google"
 	"github.com/adrianliechti/wingman/pkg/translator/llm"
 )
 
@@ -115,6 +116,9 @@ func createTranslator(cfg translatorConfig, context translatorContext) (translat
 	case "deepl":
 		return deeplTranslator(cfg, context)
 
+	case "google":
+		return googleTranslator(cfg, context)
+
 	case "custom":
 		return customTranslator(cfg, context)
 
@@ -161,6 +165,28 @@ func deeplTranslator(cfg translatorConfig, context translatorContext) (translato
 	}
 
 	return deepl.New(cfg.URL, options...)
+}
+
+func googleTranslator(cfg translatorConfig, context translatorContext) (translator.Provider, error) {
+	var options []google.Option
+
+	if cfg.Token != "" {
+		options = append(options, google.WithToken(cfg.Token))
+	}
+
+	if context.Client != nil {
+		options = append(options, google.WithClient(context.Client))
+	}
+
+	if project := cfg.Vars["project"]; project != "" {
+		options = append(options, google.WithProject(project))
+	}
+
+	if location := cfg.Vars["location"]; location != "" {
+		options = append(options, google.WithLocation(location))
+	}
+
+	return google.New(cfg.URL, options...)
 }
 
 func customTranslator(cfg translatorConfig, context translatorContext) (translator.Provider, error) {

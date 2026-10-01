@@ -893,7 +893,7 @@ Summarization is automatically available for any chat model:
 
 #### Translation
 
-Translators back the `/v1/translate` endpoint and the `translator` tool. Types: `deepl`, `azure`, `llm` (use any completer), `custom`.
+Translators back the `/v1/translate` endpoint and the `translator` tool. Types: `deepl`, `azure`, `google`, `llm` (use any completer), `custom`.
 
 ```yaml
 translators:
@@ -902,8 +902,45 @@ translators:
     type: deepl
     token: ${DEEPL_API_KEY}
 
+  google:
+    type: google
+    token: ${GOOGLE_API_KEY}
+
   # Or translate with any configured chat model
   llm:
     type: llm
     model: gpt-5.4-mini
+```
+
+Google uses the official [Cloud Translation v3 Go SDK](https://pkg.go.dev/cloud.google.com/go/translate/apiv3) over REST for OAuth text and [document translation](https://docs.cloud.google.com/translate/docs/advanced/translate-documents). API-key text translation uses [Cloud Translation Basic (v2)](https://docs.cloud.google.com/translate/docs/reference/rest/v2/translate). Both detect the source language automatically and default to English when no target language is supplied. `token` accepts either an API key for text translation or a path to a service account JSON file for both text and files. With no token, the provider uses Application Default Credentials (ADC). Files always use OAuth.
+
+Document translation supports PDF, DOC/DOCX, PPT/PPTX, and XLS/XLSX, preserving the file name and returning the translated file in the original format. MIME types can be supplied explicitly or inferred from the file name. Documents can be up to 20 MB. PDF translation uses Google's mode that supports scanned documents, with automatic rotation correction and a 20-page limit. Scanned PDFs and complex layouts may lose formatting. In PDFs that mix native and scanned content, Google leaves the scanned content untranslated.
+
+[API keys only authenticate v2](https://docs.cloud.google.com/translate/docs/authentication). Enable Cloud Translation in your Google Cloud project with billing enabled, and grant your service account the [Cloud Translation API User role](https://docs.cloud.google.com/translate/docs/access-control) (`roles/cloudtranslate.user`). The identity also needs `serviceusage.services.use` on the billing/quota project, for example through `roles/serviceusage.serviceUsageConsumer`.
+
+For a service account deployment, mount its JSON key file into the running container and configure its path as the token:
+
+```yaml
+translators:
+  google:
+    type: google
+    token: /run/secrets/google-service-account.json
+```
+
+This is enough for both text and files: the project is detected from the JSON file and the location defaults to `global`. Optional `vars.project` and `vars.location` override those values when needed. No PDF mode configuration is required.
+
+Paths are resolved from the server's working directory. Missing paths, invalid JSON, and credential files of another type fail during configuration loading. The path can also come from an environment variable, e.g. `token: ${GOOGLE_TRANSLATE_CREDENTIALS}`. For `.env` loading, run `task server`.
+
+Alternatively, omit `token` and set these environment variables for ADC:
+
+```dotenv
+GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/google-service-account.json
+GOOGLE_CLOUD_PROJECT=your-project-id
+```
+
+Google's authentication library signs the service account's OAuth assertion, obtains access tokens, caches them, and refreshes them automatically. The project is detected from the credential file or ADC; `vars.project` can override it. API-key text translation works without ADC. On Google Cloud, you can attach the service account to the workload and omit `GOOGLE_APPLICATION_CREDENTIALS` to use its managed identity. For local browser login, ADC also supports `gcloud auth application-default login`.
+
+```sh
+curl -X POST -F "model=google" -F "input=Hello world" -F "language=de" http://localhost:4242/v1/translate
+curl -X POST -H "Accept: application/pdf" -F "model=google" -F "file=@document.pdf" -F "language=de" http://localhost:4242/v1/translate -o translated.pdf
 ```
