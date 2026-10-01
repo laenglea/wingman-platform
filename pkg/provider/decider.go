@@ -12,7 +12,7 @@ type Decider interface {
 }
 
 type DecisionInput struct {
-	State     map[string]any
+	State     any
 	Questions []DecisionQuestion
 }
 
@@ -88,6 +88,9 @@ func (input *DecisionInput) Validate() error {
 	}
 	if _, err := json.Marshal(input.State); err != nil {
 		return fmt.Errorf("invalid state: %w", err)
+	}
+	if !decisionEntry(input.State) {
+		return errors.New("state must be a string, object, array, or null")
 	}
 	if len(input.Questions) == 0 {
 		return errors.New("questions must contain at least one question")

@@ -250,13 +250,12 @@ A single ingress speaks four dialects, so existing SDKs work unchanged:
 | **Anthropic** (compatible) | `/v1` | `messages`, `messages/count_tokens` |
 | **Gemini** (compatible) | `/v1beta` | `models/{model}:generateContent`, `:streamGenerateContent`, `:countTokens` |
 | **MCP** (native) | `/v1` | `mcp/{name}` — each configured MCP server, over HTTP-stream or SSE |
-| **Wingman** (native) | `/v1` | `decisions` (`systemone` alias), `extract`, `segment`, `search`, `retrieve`, `research`, `rerank`, `summarize`, `translate`, `render`, `transcribe` |
+| **Wingman** (native) | `/v1` | `systemone`, `extract`, `segment`, `search`, `retrieve`, `research`, `rerank`, `summarize`, `translate`, `render`, `transcribe` |
 
-`POST /v1/decisions` accepts TypeSafe-style state and typed questions with any
-configured completer or embedder as `model`; no TypeSafe provider or key is needed.
-The `/v1/systemone` alias supports TypeSafe SDK evaluation calls when their base
-URL points at Wingman and their default model is set to a configured Wingman model.
-See [Decisions](API.md#decisions) for the request format and response fields.
+`POST /v1/systemone` accepts TypeSafe state and typed questions using a native
+`typesafe` provider or an adapted completion or embedding model. TypeSafe SDKs
+can point their base URL at Wingman and use a configured Wingman model.
+See [System One](API.md#system-one) for the request format and response fields.
 
 
 ## Integrations & Configuration
@@ -486,7 +485,34 @@ providers:
 ```
 
 
-> **Provider interfaces.** Each model serves one of six roles, inferred from its `type` or set explicitly per model: **completer** (chat/reason), **embedder** (vectors), **renderer** (text→image), **synthesizer** (text→speech), **transcriber** (speech→text), **reranker** (relevance). See [`docs/architecture.png`](docs/architecture.png) for the full interface × backend matrix.
+#### TypeSafe / System One
+
+The `typesafe` provider calls a native decision API and preserves its returned
+probabilities, confidence, model, and token usage. `url` is the complete evaluation
+endpoint; it defaults to `https://api.typesafe.ai/v1/systemone`.
+Models under this provider default to the `decider` role.
+
+```yaml
+providers:
+  - type: typesafe
+    url: http://localhost:11434/v1/systemone
+    models:
+      - nimble
+
+  - type: typesafe
+    url: https://openrouter.ai/api/alpha/decisions
+    token: ${OPENROUTER_API_KEY}
+    models:
+      jev-1.13:
+        id: typesafe/jev-1.13
+```
+
+The local endpoint must implement the System One API. To use TypeSafe's hosted
+API, omit `url`, set `token: ${TYPESAFE_API_KEY}`, and configure `jev-latest`.
+Native decision models are listed in `/v1/models` and used through
+`/v1/systemone`. They support `max_retries` at provider or model level.
+
+> **Provider interfaces.** Each model serves one of seven roles, inferred from its `type` or set explicitly per model: **completer** (chat/reason), **decider** (typed decisions), **embedder** (vectors), **renderer** (text→image), **synthesizer** (text→speech), **transcriber** (speech→text), **reranker** (relevance). See [`docs/architecture.png`](docs/architecture.png) for the interface × backend matrix.
 
 
 ### Routers

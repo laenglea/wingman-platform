@@ -49,6 +49,10 @@ func (cfg *Config) registerProviders(f *configFile) error {
 				m.ID = id
 			}
 
+			if m.Type == "" && strings.EqualFold(p.Type, "typesafe") {
+				m.Type = ModelTypeDecider
+			}
+
 			if m.Type == "" {
 				m.Type = DetectModelType(m.ID)
 			}
@@ -85,6 +89,16 @@ func (cfg *Config) registerProviders(f *configFile) error {
 			}
 
 			switch context.Type {
+			case ModelTypeDecider:
+				decider, err := createDecider(p, context)
+				if err != nil {
+					return err
+				}
+				if _, ok := decider.(otel.Decider); !ok {
+					decider = otel.NewDecider(p.Type, id, decider)
+				}
+				cfg.RegisterDecider(id, decider)
+
 			case ModelTypeCompleter:
 				completer, err := createCompleter(p, context)
 

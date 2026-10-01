@@ -50,6 +50,7 @@ type ModelType string
 const (
 	ModelTypeAuto        ModelType = ""
 	ModelTypeCompleter   ModelType = "completer"
+	ModelTypeDecider     ModelType = "decider"
 	ModelTypeEmbedder    ModelType = "embedder"
 	ModelTypeRenderer    ModelType = "renderer"
 	ModelTypeReranker    ModelType = "reranker"

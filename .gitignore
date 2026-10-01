@@ -1,5 +1,8 @@
 /config.yaml
 
+/benchmark-results/
+__pycache__/
+
 node_modules
 
 .env

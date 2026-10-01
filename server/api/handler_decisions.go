@@ -105,18 +105,7 @@ func (r DecisionsRequest) input() (*provider.DecisionInput, error) {
 	if err := decoder.Decode(&state); err != nil {
 		return nil, err
 	}
-	input := &provider.DecisionInput{}
-	switch state := state.(type) {
-	case map[string]any:
-		input.State = state
-	case string:
-		input.State = map[string]any{"text": state}
-	case []any:
-		input.State = map[string]any{"items": state}
-	case nil:
-	default:
-		return nil, errors.New("state must be a string, object, array, or null")
-	}
+	input := &provider.DecisionInput{State: state}
 
 	for _, id := range slices.Sorted(maps.Keys(r.Questions)) {
 		question := r.Questions[id]

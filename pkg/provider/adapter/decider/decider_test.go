@@ -43,6 +43,9 @@ func TestCompleterDecision(t *testing.T) {
 		if opts.Schema == nil || opts.Schema.Strict == nil || !*opts.Schema.Strict {
 			t.Fatal("expected strict structured output")
 		}
+		if opts.ReasoningOptions == nil || opts.ReasoningOptions.Type != provider.ReasoningTypeDisabled {
+			t.Fatal("decisions must explicitly disable reasoning")
+		}
 		prompt := messages[1].Text()
 		for _, expected := range []string{"9007199254740993", `"examples":["payment"]`, `"question":"Is it urgent?"`, `"Rate severity"`} {
 			if !strings.Contains(prompt, expected) {

@@ -68,47 +68,43 @@ func decisionsServer(t *testing.T, backend *decisionCompleter) (*config.Config, 
 }
 
 func TestDecisionsRoutes(t *testing.T) {
-	for _, path := range []string{"/v1/decisions", "/v1/systemone"} {
-		t.Run(path, func(t *testing.T) {
-			backend := &decisionCompleter{output: `{"q0":{"0":0.5,"1":0.5},"q1":{"0":0,"1":1},"q2":{"0":1,"1":0}}`}
-			_, s := decisionsServer(t, backend)
-			body := `{"model":"chat","state":{"ticket":"hello","id":9007199254740993},"questions":{
-				"choice":{"type":"choice","instructions":{"ask":"Which team?"},"criteria":{"billing":null,"sales":["Plans"]}},
-				"noul":{"type":"noul","instructions":"Is it urgent?","criteria":{"true":{"meaning":"Act now"},"false":null}},
-				"score":{"type":"score","instructions":["Rate severity"],"criteria":[null,{"meaning":"High","id":9007199254740993}]}
-			}}`
-			w := httptest.NewRecorder()
-			s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
-			if w.Code != http.StatusOK {
-				t.Fatalf("status %d: %s", w.Code, w.Body.String())
-			}
-			var result struct {
-				Model   string
-				Answers map[string]map[string]json.RawMessage
-				Usage   map[string]int
-			}
-			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
-				t.Fatal(err)
-			}
-			if result.Model != "actual-model" || result.Usage["input_tokens"] != 50 || result.Usage["output_tokens"] != 20 || backend.calls != 1 {
-				t.Fatalf("response: %s, calls %d", w.Body.String(), backend.calls)
-			}
-			if string(result.Answers["noul"]["noul"]) != "0" || len(result.Answers["noul"]) != 2 {
-				t.Fatalf("noul must preserve zero and omit other variant fields: %s", w.Body.String())
-			}
-			if string(result.Answers["score"]["score"]) != "0" || string(result.Answers["choice"]["confidence"]) != "0" {
-				t.Fatalf("missing zero values: %s", w.Body.String())
-			}
-			if !strings.Contains(string(result.Answers["score"]["legend"]), `"id":9007199254740993`) || !strings.Contains(backend.prompt, `"id":9007199254740993`) {
-				t.Fatalf("large integers lost: %s", w.Body.String())
-			}
-		})
+	backend := &decisionCompleter{output: `{"q0":{"0":0.5,"1":0.5},"q1":{"0":0,"1":1},"q2":{"0":1,"1":0}}`}
+	_, s := decisionsServer(t, backend)
+	body := `{"model":"chat","state":{"ticket":"hello","id":9007199254740993},"questions":{
+		"choice":{"type":"choice","instructions":{"ask":"Which team?"},"criteria":{"billing":null,"sales":["Plans"]}},
+		"noul":{"type":"noul","instructions":"Is it urgent?","criteria":{"true":{"meaning":"Act now"},"false":null}},
+		"score":{"type":"score","instructions":["Rate severity"],"criteria":[null,{"meaning":"High","id":9007199254740993}]}
+	}}`
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/systemone", strings.NewReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var result struct {
+		Model   string
+		Answers map[string]map[string]json.RawMessage
+		Usage   map[string]int
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Model != "actual-model" || result.Usage["input_tokens"] != 50 || result.Usage["output_tokens"] != 20 || backend.calls != 1 {
+		t.Fatalf("response: %s, calls %d", w.Body.String(), backend.calls)
+	}
+	if string(result.Answers["noul"]["noul"]) != "0" || len(result.Answers["noul"]) != 2 {
+		t.Fatalf("noul must preserve zero and omit other variant fields: %s", w.Body.String())
+	}
+	if string(result.Answers["score"]["score"]) != "0" || string(result.Answers["choice"]["confidence"]) != "0" {
+		t.Fatalf("missing zero values: %s", w.Body.String())
+	}
+	if !strings.Contains(string(result.Answers["score"]["legend"]), `"id":9007199254740993`) || !strings.Contains(backend.prompt, `"id":9007199254740993`) {
+		t.Fatalf("large integers lost: %s", w.Body.String())
 	}
 }
 
 func TestDecisionsStateForms(t *testing.T) {
 	for _, tc := range []struct{ state, want string }{
-		{`"hello"`, `{"text":"hello"}`}, {`["hello",9007199254740993]`, `{"items":["hello",9007199254740993]}`},
+		{`"hello"`, `"hello"`}, {`["hello",9007199254740993]`, `["hello",9007199254740993]`},
 		{`{"text":"hello"}`, `{"text":"hello"}`}, {`null`, `null`},
 	} {
 		t.Run(tc.state, func(t *testing.T) {
@@ -116,7 +112,7 @@ func TestDecisionsStateForms(t *testing.T) {
 			_, s := decisionsServer(t, backend)
 			body := `{"model":"chat","state":` + tc.state + `,"questions":{"q":{"type":"noul"}}}`
 			w := httptest.NewRecorder()
-			s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/decisions", strings.NewReader(body)))
+			s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/systemone", strings.NewReader(body)))
 			if w.Code != http.StatusOK || !strings.HasSuffix(backend.prompt, "State:\n"+tc.want) {
 				t.Fatalf("status %d: %s; prompt %s", w.Code, w.Body.String(), backend.prompt)
 			}
@@ -128,7 +124,7 @@ func TestDecisionsEmbedder(t *testing.T) {
 	backend := &decisionCompleter{}
 	_, s := decisionsServer(t, backend)
 	w := httptest.NewRecorder()
-	s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/decisions", strings.NewReader(
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/systemone", strings.NewReader(
 		`{"model":"embedding","state":"payment","questions":{"q":{"type":"choice","criteria":{"billing":null,"sales":null}}}}`,
 	)))
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"choice":"billing"`) || backend.calls != 0 {
@@ -157,7 +153,7 @@ func TestDecisionsValidation(t *testing.T) {
 			backend := &decisionCompleter{}
 			_, s := decisionsServer(t, backend)
 			w := httptest.NewRecorder()
-			s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/decisions", strings.NewReader(body)))
+			s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/systemone", strings.NewReader(body)))
 			if w.Code != http.StatusBadRequest || backend.calls != 0 || !json.Valid(w.Body.Bytes()) {
 				t.Fatalf("status %d: %s, calls %d", w.Code, w.Body.String(), backend.calls)
 			}
@@ -194,7 +190,7 @@ func TestDecisionsAccessAndErrors(t *testing.T) {
 				cfg.Authorizers = []auth.Provider{authorizer}
 			}
 			w := httptest.NewRecorder()
-			s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/decisions", strings.NewReader(body)))
+			s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/systemone", strings.NewReader(body)))
 			if w.Code != tc.code {
 				t.Fatalf("status %d, want %d: %s", w.Code, tc.code, w.Body.String())
 			}
