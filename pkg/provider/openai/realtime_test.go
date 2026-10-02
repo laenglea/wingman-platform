@@ -1,10 +1,91 @@
 package openai
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+
+	"github.com/gorilla/websocket"
 )
+
+// newOpenAIWireCapture returns a session whose outgoing events are readable
+// from the returned channel.
+func newOpenAIWireCapture(t *testing.T) (*openAIRealtimeSession, <-chan map[string]any) {
+	t.Helper()
+	messages := make(chan map[string]any, 16)
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		conn, err := upgrader.Upgrade(w, request, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			var message map[string]any
+			if err := conn.ReadJSON(&message); err != nil {
+				return
+			}
+			messages <- message
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return &openAIRealtimeSession{conn: conn}, messages
+}
+
+func readCaptured(t *testing.T, messages <-chan map[string]any) map[string]any {
+	t.Helper()
+	select {
+	case message := <-messages:
+		return message
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for a captured event")
+		return nil
+	}
+}
+
+func TestOpenAIRealtimeConversationItemEditing(t *testing.T) {
+	session, captured := newOpenAIWireCapture(t)
+	ctx := t.Context()
+
+	message := provider.Message{ID: "ctx_12345", Role: provider.MessageRoleSystem, Content: []provider.Content{provider.TextContent("context")}}
+	if err := session.SendMessage(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+	created := readCaptured(t, captured)
+	item, _ := created["item"].(map[string]any)
+	if created["type"] != "conversation.item.create" || item["id"] != "ctx_12345" {
+		t.Fatalf("create event = %#v, want the caller's item id", created)
+	}
+
+	if err := session.SendMessage(ctx, provider.Message{Role: provider.MessageRoleUser, Content: []provider.Content{provider.TextContent("hi")}}); err != nil {
+		t.Fatal(err)
+	}
+	item, _ = readCaptured(t, captured)["item"].(map[string]any)
+	if _, ok := item["id"]; ok {
+		t.Fatalf("create event item = %#v, want no id when the caller supplied none", item)
+	}
+
+	if err := session.DeleteItem(ctx, "ctx_12345"); err != nil {
+		t.Fatal(err)
+	}
+	deleted := readCaptured(t, captured)
+	if deleted["type"] != "conversation.item.delete" || deleted["item_id"] != "ctx_12345" {
+		t.Fatalf("delete event = %#v", deleted)
+	}
+	if err := session.DeleteItem(ctx, ""); err == nil {
+		t.Fatal("DeleteItem accepted an empty id")
+	}
+}
 
 func TestValidateOpenAIRealtimeAudioFormats(t *testing.T) {
 	defaults := (&Realtime{}).Defaults()

@@ -220,7 +220,13 @@ func (s *openAISession) handleClientEvent(ctx context.Context, data []byte) erro
 			err = s.upstream.Interrupt(ctx)
 		}
 
-	case "conversation.item.delete", "conversation.item.retrieve", "output_audio_buffer.clear":
+	case "conversation.item.delete":
+		err = s.deleteConversationItem(ctx, event.ItemID)
+		if err == nil {
+			return s.write(map[string]any{"type": "conversation.item.deleted", "item_id": event.ItemID})
+		}
+
+	case "conversation.item.retrieve", "output_audio_buffer.clear":
 		err = fmt.Errorf("client event %q is not supported by this realtime provider", event.Type)
 
 	case "":
@@ -450,6 +456,41 @@ func (s *openAISession) createConversationItem(ctx context.Context, data json.Ra
 	default:
 		return fmt.Errorf("conversation item type %q is unsupported", item.Type)
 	}
+}
+
+// deleteConversationItem removes a client-created item. Before the provider
+// session exists the item is still queued locally; afterwards the provider
+// must support conversation editing.
+func (s *openAISession) deleteConversationItem(ctx context.Context, itemID string) error {
+	if itemID == "" {
+		return errors.New("conversation item id is required")
+	}
+
+	if s.upstream == nil {
+		index := slices.IndexFunc(s.queued, func(message provider.Message) bool { return message.ID == itemID })
+		if index < 0 {
+			return fmt.Errorf("conversation item %q does not exist", itemID)
+		}
+		s.queued = slices.Delete(s.queued, index, index+1)
+		s.forgetItem(itemID)
+		return nil
+	}
+
+	if err := s.upstream.DeleteItem(ctx, itemID); err != nil {
+		if errors.Is(err, provider.ErrRealtimeUnsupported) {
+			return errors.New(`client event "conversation.item.delete" is not supported by this realtime provider`)
+		}
+		return err
+	}
+	s.forgetItem(itemID)
+	return nil
+}
+
+// forgetItem lets a deleted id be created again with fresh lifecycle events.
+func (s *openAISession) forgetItem(itemID string) {
+	delete(s.itemStarted, itemID)
+	delete(s.itemDone, itemID)
+	delete(s.itemPrevious, itemID)
 }
 
 func (s *openAISession) createResponse(ctx context.Context, data json.RawMessage) error {

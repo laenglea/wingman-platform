@@ -26,6 +26,7 @@ type RealtimeSession interface {
 	SendMessage(ctx context.Context, message Message) error
 	SendToolResult(ctx context.Context, id, output string) error
 	TruncateOutput(ctx context.Context, itemID string, audioEnd time.Duration) error
+	DeleteItem(ctx context.Context, itemID string) error
 
 	Respond(ctx context.Context, options *RealtimeResponseOptions) error
 	Interrupt(ctx context.Context) error

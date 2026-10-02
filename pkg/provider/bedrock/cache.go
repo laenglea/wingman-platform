@@ -1,6 +1,8 @@
 package bedrock
 
 import (
+	"slices"
+
 	"github.com/adrianliechti/wingman/pkg/provider"
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
@@ -46,4 +48,24 @@ func newCachePolicy(messages []provider.Message, options *provider.CompleteOptio
 
 func cachePoint() types.CachePointBlock {
 	return types.CachePointBlock{Type: types.CachePointTypeDefault}
+}
+
+// Bedrock's Claude translation rejects cachePoint immediately after a non-PDF
+// document. Cache the preceding prefix instead, leaving the documents intact.
+// A trailing text block or native PDF can still cache the entire message.
+// https://github.com/strands-agents/harness-sdk/issues/1966
+func appendMessageCachePoint(content []types.ContentBlock) []types.ContentBlock {
+	index := len(content)
+	for index > 0 {
+		document, ok := content[index-1].(*types.ContentBlockMemberDocument)
+		if !ok || document.Value.Format == types.DocumentFormatPdf {
+			break
+		}
+		index--
+	}
+	if index == 0 {
+		return content
+	}
+	var checkpoint types.ContentBlock = &types.ContentBlockMemberCachePoint{Value: cachePoint()}
+	return slices.Insert(content, index, checkpoint)
 }

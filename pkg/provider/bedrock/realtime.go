@@ -629,6 +629,11 @@ func (s *realtimeSession) SendToolResult(ctx context.Context, id, output string)
 	})
 }
 
+func (s *realtimeSession) DeleteItem(context.Context, string) error {
+	// Nova Sonic has no operation that removes earlier conversation turns.
+	return provider.UnsupportedRealtimeOperation("conversation.item.delete")
+}
+
 func (s *realtimeSession) TruncateOutput(context.Context, string, time.Duration) error {
 	// Nova's native interruption updates its conversation at the VAD boundary.
 	return nil

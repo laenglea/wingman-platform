@@ -11,6 +11,10 @@ type Completer interface {
 }
 
 type Message struct {
+	// ID identifies the message as an item of a stateful realtime session so
+	// a client can refer to it later, e.g. to delete it. Empty elsewhere.
+	ID string
+
 	Role MessageRole
 
 	// Phase labels an assistant message item (commentary or final answer) in

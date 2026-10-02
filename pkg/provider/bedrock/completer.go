@@ -988,11 +988,7 @@ func (c *Completer) convertMessagesPolicy(messages []provider.Message, cache cac
 	if isClaudeModel(c.model) && !cache.explicit && len(result) > 0 {
 		for i := len(result) - 1; i >= 0; i-- {
 			if result[i].Role == types.ConversationRoleUser {
-				result[i].Content = append(result[i].Content, &types.ContentBlockMemberCachePoint{
-					Value: types.CachePointBlock{
-						Type: types.CachePointTypeDefault,
-					},
-				})
+				result[i].Content = appendMessageCachePoint(result[i].Content)
 				break
 			}
 		}

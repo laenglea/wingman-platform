@@ -56,7 +56,9 @@ type itemContent struct {
 
 func (item *conversationItem) normalize() {
 	if item.ID == "" {
-		item.ID = newID("item")
+		// Generated ids are forwarded to the provider; OpenAI caps item ids at
+		// 32 characters, so keep "item_" plus 27 hex characters.
+		item.ID = newID("item")[:32]
 	}
 
 	if item.Object == "" {
@@ -97,7 +99,7 @@ func (item conversationItem) message() (provider.Message, error) {
 		}
 	}
 
-	return provider.Message{Role: role, Content: content}, nil
+	return provider.Message{ID: item.ID, Role: role, Content: content}, nil
 }
 
 func (item conversationItem) audio() string {

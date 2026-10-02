@@ -155,7 +155,7 @@ func TestTranslateDefaultEndpointAndContext(t *testing.T) {
 
 	client, err := google.New("", google.WithToken("test-key"), google.WithClient(&http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			if r.URL.String() != "https://translation.googleapis.com/language/translate/v2" {
+			if r.URL.String() != "https://translate.googleapis.com/language/translate/v2" {
 				t.Errorf("default endpoint = %s", r.URL)
 			}
 			if r.Context().Err() != context.Canceled {

@@ -357,6 +357,15 @@ providers:
 
 #### AWS Bedrock
 
+Claude models use the Converse API, which supports inline PDF, Word (`doc`/`docx`),
+Excel (`xls`/`xlsx`), CSV, HTML, text, and Markdown documents. Include a related
+text prompt with the document. See the [AWS document-input reference](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_DocumentBlock.html).
+
+The automatic message cache checkpoint precedes trailing non-PDF documents:
+Bedrock's Claude translation rejects a checkpoint immediately after those
+documents. Document bytes and formats are preserved; a trailing text block or
+PDF still allows caching the entire message. See the [upstream Bedrock report](https://github.com/strands-agents/harness-sdk/issues/1966).
+
 ```yaml
 providers:
   - type: bedrock

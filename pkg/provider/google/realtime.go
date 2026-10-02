@@ -561,6 +561,11 @@ func (s *geminiRealtimeSession) SendToolResult(ctx context.Context, id, output s
 	return nil
 }
 
+func (s *geminiRealtimeSession) DeleteItem(context.Context, string) error {
+	// The Live API has no operation that removes earlier conversation turns.
+	return provider.UnsupportedRealtimeOperation("conversation.item.delete")
+}
+
 func (s *geminiRealtimeSession) TruncateOutput(context.Context, string, time.Duration) error {
 	// Gemini applies barge-in to its conversation when realtime activity starts.
 	return nil
