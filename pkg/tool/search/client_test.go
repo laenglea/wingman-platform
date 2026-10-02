@@ -188,7 +188,7 @@ func TestFormatResults_Timestamp(t *testing.T) {
 	ts := time.Date(2026, 5, 1, 9, 30, 0, 0, time.UTC)
 	got := formatResults([]searcher.Result{
 		{Source: "https://go.dev/x", Title: "Go", Content: "body", Timestamp: &ts},
-	})
+	}, 400)
 	if !strings.Contains(got, "— 2026-05-01\n") {
 		t.Errorf("missing timestamp in:\n%s", got)
 	}
@@ -218,5 +218,14 @@ func TestResult_PassesThroughText(t *testing.T) {
 	out := c.Result(ToolName, "some markdown")
 	if len(out.Parts) != 1 || out.Parts[0].Text != "some markdown" {
 		t.Errorf("got %+v", out)
+	}
+}
+
+func TestExecute_ConfigurableExcerptPreservesLateEvidence(t *testing.T) {
+	f := &fakeSearcher{results: []searcher.Result{{Content: strings.Repeat("background ", 60) + "Calibration: VX-7319."}}}
+	c, _ := New(f, WithMaxSnippetChars(1500))
+	got, err := c.Execute(context.Background(), ToolName, map[string]any{"query": "calibration"})
+	if err != nil || !strings.Contains(got.(string), "VX-7319") {
+		t.Fatalf("got=%v err=%v", got, err)
 	}
 }
