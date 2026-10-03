@@ -1,5 +1,7 @@
 # OpenAI Compatible API
 
+Temperature, top-p, and top-k controls are unsupported across all endpoints; models use their default sampling behavior.
+
 OpenAI-compatible endpoints. See [OpenAI API Reference](https://platform.openai.com/docs/api-reference) for full documentation.
 
 ## Models
@@ -18,7 +20,6 @@ List available models or get a specific model by ID.
 | `messages`               | Array        | Conversation messages                               |
 | `stream`                 | Boolean      | Enable streaming                                    |
 | `stream_options`         | Object       | Streaming options (`include_usage`)                 |
-| `temperature`            | Float        | Sampling temperature                                |
 | `max_completion_tokens`  | Integer      | Maximum tokens to generate                          |
 | `stop`                   | String/Array | Stop sequences                                      |
 | `tools`                  | Array        | Available tools/functions                           |
@@ -42,7 +43,6 @@ Prompt caching is on by default on every backend that supports it: the stable pr
 | `model`                | String       | Model ID                                            |
 | `input`                | String/Array | Input text or conversation messages                 |
 | `stream`               | Boolean      | Enable streaming                                    |
-| `temperature`          | Float        | Sampling temperature                                |
 | `max_output_tokens`    | Integer      | Maximum tokens to generate                          |
 | `tools`                | Array        | Available tools/functions                           |
 | `tool_choice`          | String/Object| Tool selection mode (auto, none, required)          |
@@ -146,7 +146,6 @@ Anthropic-compatible endpoints. See [Anthropic API Reference](https://docs.anthr
 | `system`              | String/Array | System prompt                                  |
 | `max_tokens`          | Integer      | Maximum tokens to generate                     |
 | `stream`              | Boolean      | Enable streaming                               |
-| `temperature`         | Float        | Sampling temperature                           |
 | `stop_sequences`      | Array        | Stop sequences                                 |
 | `tools`               | Array        | Available tools/functions                      |
 | `tool_choice`         | Object       | Tool selection (auto, any, tool, none)         |
@@ -192,9 +191,6 @@ Gemini-compatible endpoints. See [Gemini API Reference](https://ai.google.dev/ap
 | Parameter            | Type    | Description                                 |
 |----------------------|---------|---------------------------------------------|
 | `stopSequences`      | Array   | Stop sequences                              |
-| `temperature`        | Float   | Sampling temperature                        |
-| `topP`               | Float   | Nucleus sampling                            |
-| `topK`               | Integer | Top-k sampling                              |
 | `maxOutputTokens`    | Integer | Maximum tokens to generate                  |
 | `candidateCount`     | Integer | Number of candidates to generate            |
 | `responseMimeType`   | String  | Response MIME type                          |

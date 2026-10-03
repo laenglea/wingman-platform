@@ -16,7 +16,8 @@ import (
 )
 
 // Defaults captured from gpt-5.4-mini on 2026-09-28. Generated content,
-// usage, timestamps, and provider-specific storage/billing are excluded.
+// usage, timestamps, provider-specific storage/billing, and removed sampling
+// controls are excluded.
 func TestResponseEnvelopeMatchesReference(t *testing.T) {
 	data, err := os.ReadFile("testdata/reference_defaults.json")
 	if err != nil {
@@ -25,6 +26,9 @@ func TestResponseEnvelopeMatchesReference(t *testing.T) {
 	var reference map[string]any
 	if err := json.Unmarshal(data, &reference); err != nil {
 		t.Fatal(err)
+	}
+	for _, field := range []string{"temperature", "top_p", "top_k"} {
+		delete(reference, field)
 	}
 	for _, stream := range []bool{false, true} {
 		t.Run(map[bool]string{false: "json", true: "stream"}[stream], func(t *testing.T) {
@@ -49,6 +53,11 @@ func TestResponseEnvelopeMatchesReference(t *testing.T) {
 			}
 			check := func(response map[string]any) {
 				t.Helper()
+				for _, field := range []string{"temperature", "top_p", "top_k"} {
+					if _, ok := response[field]; ok {
+						t.Errorf("response includes removed sampling field %q", field)
+					}
+				}
 				for key, want := range reference {
 					got, ok := response[key]
 					if key == "reasoning" && response["status"] == "in_progress" {

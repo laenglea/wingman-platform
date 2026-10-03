@@ -104,18 +104,12 @@ func (a *Summarizer) completeAll(ctx context.Context, prompt string, inputs []st
 }
 
 func (a *Summarizer) complete(ctx context.Context, prompt, input string) (string, error) {
-	temperature := float32(0.3)
-
-	options := &provider.CompleteOptions{
-		Temperature: &temperature,
-	}
-
 	acc := provider.CompletionAccumulator{}
 
 	for completion, err := range a.completer.Complete(ctx, []provider.Message{
 		provider.SystemMessage(prompt),
 		provider.UserMessage(input),
-	}, options) {
+	}, nil) {
 		if err != nil {
 			return "", err
 		}

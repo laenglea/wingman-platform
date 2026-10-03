@@ -7,7 +7,7 @@ import (
 	"iter"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/adrianliechti/wingman/pkg/provider/toolid"
+	"github.com/adrianliechti/wingman/pkg/provider/internal/toolid"
 )
 
 var _ provider.Completer = (*Completer)(nil)

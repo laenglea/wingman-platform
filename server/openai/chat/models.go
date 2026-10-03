@@ -52,9 +52,8 @@ type ChatCompletionRequest struct {
 	ToolChoice        *ToolChoice `json:"tool_choice,omitempty"`
 	ParallelToolCalls *bool       `json:"parallel_tool_calls,omitempty"`
 
-	Temperature         *float32 `json:"temperature,omitempty"`
-	MaxCompletionTokens *int     `json:"max_completion_tokens,omitempty"`
-	MaxTokens           *int     `json:"max_tokens,omitempty"` // deprecated alias of max_completion_tokens
+	MaxCompletionTokens *int `json:"max_completion_tokens,omitempty"`
+	MaxTokens           *int `json:"max_tokens,omitempty"` // deprecated alias of max_completion_tokens
 
 	ResponseFormat *ChatCompletionResponseFormat `json:"response_format,omitempty"`
 
@@ -74,8 +73,6 @@ type ChatCompletionRequest struct {
 	// n *int
 
 	// seed *int
-
-	// top_p *float32
 
 	// user string
 }

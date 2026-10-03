@@ -287,8 +287,7 @@ const (
 type CompleteOptions struct {
 	Stop []string
 
-	MaxTokens   *int
-	Temperature *float32
+	MaxTokens *int
 
 	Tools       []Tool
 	ToolOptions *ToolOptions

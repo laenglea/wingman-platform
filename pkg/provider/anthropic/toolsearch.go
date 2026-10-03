@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/adrianliechti/wingman/pkg/provider/toolid"
+	"github.com/adrianliechti/wingman/pkg/provider/internal/toolid"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/toolsearch"
 	"github.com/anthropics/anthropic-sdk-go"
 )

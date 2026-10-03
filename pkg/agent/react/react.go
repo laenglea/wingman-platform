@@ -51,8 +51,6 @@ type Agent struct {
 	effort    provider.Effort
 	verbosity provider.Verbosity
 
-	temperature *float32
-
 	observer ToolObserver
 }
 
@@ -104,12 +102,6 @@ func WithVerbosity(verbosity provider.Verbosity) Option {
 	}
 }
 
-func WithTemperature(temperature float32) Option {
-	return func(c *Agent) {
-		c.temperature = &temperature
-	}
-}
-
 func WithToolObserver(observer ToolObserver) Option {
 	return func(c *Agent) {
 		c.observer = observer
@@ -139,10 +131,6 @@ func (c *Agent) Complete(ctx context.Context, messages []provider.Message, optio
 			}
 			reasoning.Effort = c.effort
 			opts.ReasoningOptions = &reasoning
-		}
-
-		if opts.Temperature == nil {
-			opts.Temperature = c.temperature
 		}
 
 		if len(c.messages) > 0 {
@@ -189,8 +177,7 @@ func (c *Agent) Complete(ctx context.Context, messages []provider.Message, optio
 			OutputOptions:    opts.OutputOptions,
 			ReasoningOptions: opts.ReasoningOptions,
 
-			MaxTokens:   opts.MaxTokens,
-			Temperature: opts.Temperature,
+			MaxTokens: opts.MaxTokens,
 
 			Schema: opts.Schema,
 		}

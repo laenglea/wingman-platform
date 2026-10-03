@@ -151,6 +151,15 @@ func TestNova2StartEventSequenceAndToolSchema(t *testing.T) {
 	}
 
 	sessionStart := eventPayload(t, stream.inputs[0], "sessionStart")
+	inference := sessionStart["inferenceConfiguration"].(map[string]any)
+	if inference["maxTokens"] != float64(*defaults.MaxTokens) {
+		t.Errorf("maxTokens = %v, want %d", inference["maxTokens"], *defaults.MaxTokens)
+	}
+	for _, field := range []string{"temperature", "topP", "topK"} {
+		if _, ok := inference[field]; ok {
+			t.Errorf("inferenceConfiguration includes removed sampling field %q", field)
+		}
+	}
 	turn := sessionStart["turnDetectionConfiguration"].(map[string]any)
 	if got := turn["endpointingSensitivity"]; got != "HIGH" {
 		t.Errorf("endpointingSensitivity = %v, want HIGH", got)

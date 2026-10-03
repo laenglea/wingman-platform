@@ -99,8 +99,6 @@ func NewRealtime(model string, options ...Option) (*Realtime, error) {
 
 func (r *Realtime) Defaults() provider.RealtimeOptions {
 	maxTokens := 1024
-	temperature := float32(0.7)
-	topP := float32(0.9)
 
 	voice := r.voice
 	if voice == "" {
@@ -124,9 +122,7 @@ func (r *Realtime) Defaults() provider.RealtimeOptions {
 			Channels:   1,
 		},
 
-		MaxTokens:   &maxTokens,
-		Temperature: &temperature,
-		TopP:        &topP,
+		MaxTokens: &maxTokens,
 
 		ToolChoice: provider.ToolChoiceAuto,
 
@@ -215,12 +211,6 @@ func mergeRealtimeOptions(defaults provider.RealtimeOptions, options *provider.R
 	if result.MaxTokens == nil {
 		result.MaxTokens = defaults.MaxTokens
 	}
-	if result.Temperature == nil {
-		result.Temperature = defaults.Temperature
-	}
-	if result.TopP == nil {
-		result.TopP = defaults.TopP
-	}
 	if result.ToolChoice == "" {
 		result.ToolChoice = defaults.ToolChoice
 	}
@@ -280,12 +270,6 @@ func (s *realtimeSession) start(ctx context.Context) error {
 	configuration := map[string]any{}
 	if s.options.MaxTokens != nil {
 		configuration["maxTokens"] = *s.options.MaxTokens
-	}
-	if s.options.TopP != nil {
-		configuration["topP"] = *s.options.TopP
-	}
-	if s.options.Temperature != nil {
-		configuration["temperature"] = *s.options.Temperature
 	}
 
 	session := map[string]any{

@@ -198,7 +198,6 @@ func (h *Handler) parseGenerateRequest(r *http.Request) (provider.Completer, []p
 
 	if req.GenerationConfig != nil {
 		options.Stop = req.GenerationConfig.StopSequences
-		options.Temperature = req.GenerationConfig.Temperature
 		options.MaxTokens = req.GenerationConfig.MaxOutputTokens
 
 		// Structured output via responseJsonSchema (JSON Schema) or

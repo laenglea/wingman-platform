@@ -22,8 +22,6 @@ type Agent struct {
 
 	effort    provider.Effort
 	verbosity provider.Verbosity
-
-	temperature *float32
 }
 
 type Option func(*Agent)
@@ -68,12 +66,6 @@ func WithVerbosity(verbosity provider.Verbosity) Option {
 	}
 }
 
-func WithTemperature(temperature float32) Option {
-	return func(a *Agent) {
-		a.temperature = &temperature
-	}
-}
-
 func (a *Agent) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	return func(yield func(*provider.Completion, error) bool) {
 		var opts provider.CompleteOptions
@@ -94,10 +86,6 @@ func (a *Agent) Complete(ctx context.Context, messages []provider.Message, optio
 			}
 			reasoning.Effort = a.effort
 			opts.ReasoningOptions = &reasoning
-		}
-
-		if opts.Temperature == nil {
-			opts.Temperature = a.temperature
 		}
 
 		if len(a.messages) > 0 {

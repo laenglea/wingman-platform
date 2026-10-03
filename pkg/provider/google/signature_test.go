@@ -4,46 +4,41 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"google.golang.org/genai"
 )
 
-// Gemini signatures are arbitrary bytes. Through the provider they must
-// survive a JSON string, which the OpenAI and Anthropic surfaces use to carry
-// them, and come back byte-identical for the Gemini wire.
 func TestThoughtSignatureSurvivesJSON(t *testing.T) {
 	raw := []byte{0x12, 0xff, 0x01, '\n', 0xe2, 0x82, 0x00, 0xc3}
-
-	content := toContent(&genai.Content{Role: "model", Parts: []*genai.Part{{Text: "why", Thought: true, ThoughtSignature: raw}}}, nil, nil)
-	if len(content) != 1 || content[0].Reasoning == nil || !utf8.ValidString(content[0].Reasoning.Signature) {
-		t.Fatalf("signature is not wire-safe text: %+v", content)
-	}
-
-	data, err := json.Marshal(content[0].Reasoning.Signature)
+	signature := EncodeThoughtSignature(raw)
+	message := provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ReasoningContent(provider.Reasoning{Summary: "why", Signature: signature})}}
+	data, err := json.Marshal(message)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var wire string
-	if err := json.Unmarshal(data, &wire); err != nil {
+	var replay provider.Message
+	if err := json.Unmarshal(data, &replay); err != nil {
 		t.Fatal(err)
 	}
-
-	message := provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ReasoningContent(provider.Reasoning{Text: "why", Signature: wire})}}
-	parts := convertContent(message, nil)
-	if len(parts.Parts) != 1 || !bytes.Equal(parts.Parts[0].ThoughtSignature, raw) {
-		t.Fatalf("signature changed through JSON: %q, want %q", parts.Parts[0].ThoughtSignature, raw)
+	steps, err := convertMessages([]provider.Message{replay})
+	if err != nil || len(steps) != 1 || steps[0].ThoughtStep == nil || !bytes.Equal(DecodeThoughtSignature(value(steps[0].ThoughtStep.Signature)), raw) {
+		t.Fatalf("signature changed: %+v, %v", steps, err)
 	}
 }
 
-// Histories built before signatures were encoded hold the raw bytes; they
-// still reach Gemini unchanged.
 func TestDecodeThoughtSignatureAcceptsRawBytes(t *testing.T) {
 	if got := DecodeThoughtSignature("REAL_SIG"); string(got) != "REAL_SIG" {
 		t.Fatalf("raw signature altered: %q", got)
 	}
 	if got := DecodeThoughtSignature(EncodeThoughtSignature([]byte{0xff, 0x00})); !bytes.Equal(got, []byte{0xff, 0x00}) {
 		t.Fatalf("encoded signature not restored: %q", got)
+	}
+}
+
+func TestStripToolIDSignature(t *testing.T) {
+	for _, test := range []struct{ input, want string }{{"c1", "c1"}, {"c1::lookup", "c1::lookup"}, {"c1::lookup::Ev8BAA==", "c1::lookup"}, {"c1::lookup::", "c1::lookup"}} {
+		if got := StripToolIDSignature(test.input); got != test.want {
+			t.Errorf("StripToolIDSignature(%q) = %q, want %q", test.input, got, test.want)
+		}
 	}
 }

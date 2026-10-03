@@ -28,7 +28,7 @@ belong.
       constraints, schema mutual exclusion.
 - [ ] **API-key auth.** Accept `key=` and `x-goog-api-key` when an authorizer
       is configured (`pkg/auth/static` accepts Bearer only).
-- [ ] **Sampling.** Carry `topP`, `topK`, `seed`, `presencePenalty`,
+- [ ] **Sampling.** Carry `seed`, `presencePenalty`,
       `frequencyPenalty` (add to `CompleteOptions`) or reject them; honor
       `candidateCount` or reject values other than 1.
 - [ ] **`responseMimeType`.** Reject anything but JSON (`text/x.enum` and

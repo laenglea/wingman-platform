@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/adrianliechti/wingman/pkg/provider/toolid"
+	"github.com/adrianliechti/wingman/pkg/provider/internal/toolid"
 )
 
 // OpenAI call ids are limited to 64 characters. Ids that arrive from other

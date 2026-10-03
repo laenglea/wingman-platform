@@ -557,6 +557,9 @@ func TestRealtimeTruncationAndMetadataParsing(t *testing.T) {
 
 func TestRealtimeSessionRejectsIgnoredFields(t *testing.T) {
 	for _, raw := range []string{
+		`{"type":"realtime","temperature":0.7}`,
+		`{"type":"realtime","top_p":0.9}`,
+		`{"type":"realtime","top_k":20}`,
 		`{"type":"realtime","parallel_tool_calls":true}`,
 		`{"type":"realtime","audio":{"output":{"speed":1.25}}}`,
 		`{"type":"realtime","audio":{"input":{"transcription":{"model":"gpt-live-transcribe","keywords":["Wingman"]}}}}`,

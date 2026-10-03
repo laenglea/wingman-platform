@@ -22,8 +22,7 @@ type ResponsesRequest struct {
 
 	Text *TextConfig `json:"text,omitempty"`
 
-	MaxOutputTokens *int     `json:"max_output_tokens,omitempty"`
-	Temperature     *float32 `json:"temperature,omitempty"`
+	MaxOutputTokens *int `json:"max_output_tokens,omitempty"`
 
 	Reasoning *ReasoningConfig `json:"reasoning,omitempty"`
 
@@ -954,7 +953,6 @@ type Response struct {
 
 	ServiceTier      string  `json:"service_tier"`
 	Store            bool    `json:"store"`
-	Temperature      float32 `json:"temperature"`
 	FrequencyPenalty float32 `json:"frequency_penalty"`
 	PresencePenalty  float32 `json:"presence_penalty"`
 
@@ -964,9 +962,8 @@ type Response struct {
 	Tools      []any     `json:"tools"`
 	ToolUsage  ToolUsage `json:"tool_usage"`
 
-	TopLogprobs int     `json:"top_logprobs"`
-	TopP        float32 `json:"top_p"`
-	Truncation  string  `json:"truncation"`
+	TopLogprobs int    `json:"top_logprobs"`
+	Truncation  string `json:"truncation"`
 
 	PromptCacheKey       *string             `json:"prompt_cache_key"`
 	PromptCacheRetention *string             `json:"prompt_cache_retention"`

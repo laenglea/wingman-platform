@@ -85,8 +85,7 @@ func toCompleteOptions(req ChatCompletionRequest, tools []provider.Tool) *provid
 
 		ToolOptions: toToolOptions(req.ToolChoice),
 
-		MaxTokens:   maxTokens,
-		Temperature: req.Temperature,
+		MaxTokens: maxTokens,
 
 		CacheOptions: shared.CacheOptions(req.PromptCacheKey, req.PromptCacheRetention, req.PromptCacheOptions.mode()),
 	}

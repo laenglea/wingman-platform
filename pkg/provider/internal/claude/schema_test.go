@@ -1,4 +1,4 @@
-package anthropic
+package claude
 
 import (
 	"encoding/json"
@@ -57,7 +57,7 @@ func TestSanitizeStrictSchema(t *testing.T) {
 
 	before, _ := json.Marshal(schema)
 
-	result := sanitizeStrictSchema(schema)
+	result := SanitizeSchema(schema)
 
 	after, _ := json.Marshal(schema)
 	if string(before) != string(after) {
@@ -133,7 +133,7 @@ func TestSanitizeStrictSchemaNullableEnum(t *testing.T) {
 		"additionalProperties": false,
 	}
 
-	props := sanitizeStrictSchema(schema)["properties"].(map[string]any)
+	props := SanitizeSchema(schema)["properties"].(map[string]any)
 
 	got, _ := json.Marshal(props["output_mode"])
 	want := `{"default":"files_with_matches","description":"Output mode","enum":["content","files_with_matches","count",null]}`
@@ -205,7 +205,7 @@ func TestSanitizeStrictSchemaNullableEnumConstraints(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			after, err := json.Marshal(sanitizeStrictSchema(schema))
+			after, err := json.Marshal(SanitizeSchema(schema))
 			if err != nil {
 				t.Fatal(err)
 			}

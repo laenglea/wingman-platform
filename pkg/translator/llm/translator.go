@@ -69,15 +69,9 @@ func (a *Translator) Translate(ctx context.Context, input translator.Input, opti
 		},
 	}
 
-	temperature := float32(0)
-
-	completeOptions := &provider.CompleteOptions{
-		Temperature: &temperature,
-	}
-
 	acc := provider.CompletionAccumulator{}
 
-	for completion, err := range a.completer.Complete(ctx, messages, completeOptions) {
+	for completion, err := range a.completer.Complete(ctx, messages, nil) {
 		if err != nil {
 			return nil, err
 		}

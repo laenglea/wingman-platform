@@ -13,7 +13,9 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/adrianliechti/wingman/pkg/provider/toolid"
+	"github.com/adrianliechti/wingman/pkg/provider/internal/claude"
+	"github.com/adrianliechti/wingman/pkg/provider/internal/schema"
+	"github.com/adrianliechti/wingman/pkg/provider/internal/toolid"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/computeruse"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/custom"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
@@ -539,15 +541,15 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 }
 
 func (c *Completer) convertMessageRequest(input []provider.Message, options *provider.CompleteOptions) (*anthropic.BetaMessageNewParams, error) {
-	midSystem := matchesModel(c.model, []string{"fable-5", "mythos-5", "opus-4-8", "opus-5", "sonnet-5-5"})
+	midSystem := claude.MatchesModel(c.model, []string{"fable-5", "mythos-5", "opus-4-8", "opus-5", "sonnet-5-5"})
 	if !midSystem {
 		input = provider.ResolveInstructions(input)
 	}
 	// between_tools pins the effort for the conversation, so per-message
 	// updates are lowered to the request instead.
-	betweenTools := matchesModel(c.model, BetweenToolsModels) && options != nil &&
+	betweenTools := claude.MatchesModel(c.model, claude.BetweenToolsModels) && options != nil &&
 		options.ReasoningOptions != nil && options.ReasoningOptions.Type == provider.ReasoningTypeDisabled
-	if betweenTools || !matchesModel(c.model, []string{"fable-5-1", "mythos-5-1", "opus-5", "sonnet-5-5"}) {
+	if betweenTools || !claude.MatchesModel(c.model, []string{"fable-5-1", "mythos-5-1", "opus-5", "sonnet-5-5"}) {
 		input, options = provider.ResolveConfigurationUpdates(input, options)
 	}
 	if options == nil {
@@ -566,7 +568,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			}
 		}
 	}
-	if options.CompactionOptions != nil && matchesModel(c.model, LegacyModels) {
+	if options.CompactionOptions != nil && claude.MatchesModel(c.model, LegacyModels) {
 		return nil, fmt.Errorf("anthropic: model %s does not support compaction", c.model)
 	}
 
@@ -583,7 +585,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	}
 	mark := cacheBreakpoints(input, explicitCache)
 
-	if !matchesModel(c.model, LegacyModels) {
+	if !claude.MatchesModel(c.model, LegacyModels) {
 		req.MaxTokens = 128000
 	}
 
@@ -1046,7 +1048,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 		// strict validation rejects constraint keywords other providers accept
 		if t.Strict != nil && *t.Strict {
-			params = sanitizeStrictSchema(params)
+			params = claude.SanitizeSchema(params)
 		}
 
 		var schema anthropic.BetaToolInputSchemaParam
@@ -1096,7 +1098,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 	if options.Schema != nil && options.Schema.Properties != nil {
 		req.OutputConfig.Format = anthropic.BetaJSONOutputFormatParam{
-			Schema: ensureAdditionalPropertiesFalse(sanitizeStrictSchema(options.Schema.Properties)),
+			Schema: schema.CloseObjects(claude.SanitizeSchema(options.Schema.Properties)),
 		}
 	} else if options.Schema != nil {
 		// JSON mode without a schema (OpenAI json_object, Gemini
@@ -1160,7 +1162,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			req.ToolChoice = anthropic.BetaToolChoiceUnionParam{OfAuto: p}
 
 		case provider.ToolChoiceAny:
-			if matchesModel(c.model, NoForcedToolChoiceModels) {
+			if claude.MatchesModel(c.model, claude.NoForcedToolChoiceModels) {
 				return nil, fmt.Errorf("anthropic: model %s does not support forced tool_choice; use auto or none", c.model)
 			}
 
@@ -1188,7 +1190,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		}
 	}
 
-	thinking := c.resolveThinking(input, options, forcesTool)
+	thinking := c.resolveThinking(options, forcesTool)
 
 	if thinking.Enabled {
 		display := anthropic.BetaThinkingConfigAdaptiveDisplayOmitted
@@ -1203,7 +1205,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		req.Thinking = anthropic.BetaThinkingConfigParamUnion{
 			OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{Display: display},
 		}
-	} else if thinking.Disabled && matchesModel(c.model, BetweenToolsModels) {
+	} else if thinking.Disabled && claude.MatchesModel(c.model, claude.BetweenToolsModels) {
 		req.Thinking = anthropic.BetaThinkingConfigParamUnion{
 			OfBetweenTools: &anthropic.BetaThinkingConfigBetweenToolsParam{},
 		}
@@ -1214,7 +1216,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	}
 	// Retention is meaningful only with active thinking; a forced tool call
 	// can disable it above.
-	if options.ReasoningOptions != nil && (thinking.Enabled || matchesModel(c.model, AlwaysThinkingModels)) {
+	if options.ReasoningOptions != nil && (thinking.Enabled || claude.MatchesModel(c.model, claude.AlwaysThinkingModels)) {
 		var keep anthropic.BetaClearThinking20251015EditKeepUnionParam
 		switch options.ReasoningOptions.Context {
 		case provider.ReasoningContextAllTurns:
@@ -1233,10 +1235,6 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 
 	if thinking.Effort != "" {
 		req.OutputConfig.Effort = thinking.Effort
-	}
-
-	if options.Temperature != nil && !thinking.Enabled && !matchesModel(c.model, NoSamplingModels) {
-		req.Temperature = anthropic.Float(float64(*options.Temperature))
 	}
 
 	if len(messages) > 0 {

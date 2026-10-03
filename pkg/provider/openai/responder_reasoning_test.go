@@ -33,8 +33,7 @@ func TestRequiredReasoningRequestCompatibility(t *testing.T) {
 	for _, model := range []string{"gpt-6-astra", "gpt-6.1-sol", "GPT-6.1-SOL"} {
 		for _, tt := range tests {
 			t.Run(model+"/"+tt.name, func(t *testing.T) {
-				temperature := float32(0.7)
-				options := &provider.CompleteOptions{ReasoningOptions: tt.reasoning, Temperature: &temperature}
+				options := &provider.CompleteOptions{ReasoningOptions: tt.reasoning}
 
 				responder, err := NewResponder("", model)
 				if err != nil {
@@ -64,7 +63,6 @@ func TestGPT6SolAndLunaRequestCompatibility(t *testing.T) {
 	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
 		t.Run(model, func(t *testing.T) {
 			messages := []provider.Message{provider.UserMessage("hi")}
-			temperature := float32(0.7)
 			responder, err := NewResponder("", model)
 			if err != nil {
 				t.Fatal(err)
@@ -72,7 +70,7 @@ func TestGPT6SolAndLunaRequestCompatibility(t *testing.T) {
 
 			high := &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortHigh}
 			responsesRequest, err := responder.convertResponsesRequest(messages, &provider.CompleteOptions{
-				ReasoningOptions: high, Temperature: &temperature,
+				ReasoningOptions: high,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -83,12 +81,12 @@ func TestGPT6SolAndLunaRequestCompatibility(t *testing.T) {
 
 			none := &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled}
 			responsesRequest, err = responder.convertResponsesRequest(messages, &provider.CompleteOptions{
-				ReasoningOptions: none, Temperature: &temperature,
+				ReasoningOptions: none,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if responsesRequest.Reasoning.Effort != "none" || !responsesRequest.Temperature.Valid() {
+			if responsesRequest.Reasoning.Effort != "none" || responsesRequest.Temperature.Valid() {
 				t.Fatalf("Responses none request: effort=%q temperature=%v", responsesRequest.Reasoning.Effort, responsesRequest.Temperature)
 			}
 		})
@@ -117,8 +115,10 @@ func assertRequiredReasoningRequest(t *testing.T, request any, wantEffort string
 	if effort != wantEffort {
 		t.Fatalf("reasoning effort = %q, want %q; request=%s", effort, wantEffort, data)
 	}
-	if _, ok := payload["temperature"]; ok {
-		t.Fatalf("reasoning request unexpectedly includes temperature: %s", data)
+	for _, field := range []string{"temperature", "top_p", "top_k"} {
+		if _, ok := payload[field]; ok {
+			t.Fatalf("reasoning request unexpectedly includes %s: %s", field, data)
+		}
 	}
 }
 

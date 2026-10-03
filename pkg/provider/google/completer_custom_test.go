@@ -1,83 +1,50 @@
 package google
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/custom"
-
-	"google.golang.org/genai"
 )
 
-// Gemini has no freeform tool type, so a custom tool is emulated as a function
-// declaration with a single string parameter.
 func TestConvertTools_CustomEmulated(t *testing.T) {
-	tools, err := convertTools([]provider.Tool{
-		{Kind: provider.ToolKindCustom, Name: "run_python", Description: "Run a script."},
-	})
-
+	tools, err := convertTools([]provider.Tool{{Kind: provider.ToolKindCustom, Name: "run_python", Description: "Run a script."}})
 	if err != nil {
-		t.Fatalf("a custom tool must be emulated, not rejected: %v", err)
+		t.Fatal(err)
 	}
-
-	if len(tools) != 1 || len(tools[0].FunctionDeclarations) != 1 {
-		t.Fatalf("expected one function declaration, got %+v", tools)
+	if len(tools) != 1 || tools[0].Function == nil || value(tools[0].Function.Name) != "run_python" {
+		t.Fatalf("tool lost: %+v", tools)
 	}
-
-	declaration := tools[0].FunctionDeclarations[0]
-
-	if declaration.Name != "run_python" {
-		t.Fatalf("expected the tool to keep its name, got %q", declaration.Name)
-	}
-
-	// Gemini takes the raw JSON schema, not the typed genai.Schema.
-	schema, _ := declaration.ParametersJsonSchema.(map[string]any)
+	schema, _ := tools[0].Function.Parameters.(map[string]any)
 	props, _ := schema["properties"].(map[string]any)
-
-	if len(props) != 1 {
-		t.Fatalf("expected exactly one parameter, got %v", props)
-	}
-
 	input, _ := props[custom.InputParameter].(map[string]any)
-
-	if input == nil || input["type"] != "string" {
-		t.Fatalf("expected a string %q parameter, got %v", custom.InputParameter, props)
+	if len(props) != 1 || input["type"] != "string" {
+		t.Fatalf("custom input schema lost: %+v", schema)
 	}
 }
 
-// Gemini delivers complete arguments, so the emulated wrapper is unwrapped in
-// place — the client must see freeform text, not {"input": ...}.
-func TestToContent_CustomToolCallUnwrapsInput(t *testing.T) {
+func TestComplete_CustomToolUnwrapsStreamedInput(t *testing.T) {
 	source := "print(\"alpha — beta\")\n"
-
-	content := &genai.Content{
-		Parts: []*genai.Part{
-			{FunctionCall: &genai.FunctionCall{
-				Name: "run_python",
-				Args: map[string]any{custom.InputParameter: source},
-			}},
-		},
+	arguments := custom.Wrap(source)
+	events := []string{createdEvent, `{"event_type":"step.start","index":0,"step":{"type":"function_call","id":"c1","name":"scripts_run_python","arguments":{}}}`}
+	for _, fragment := range []string{arguments[:8], arguments[8:]} {
+		data, _ := json.Marshal(map[string]any{"event_type": "step.delta", "index": 0, "delta": map[string]any{"type": "arguments_delta", "arguments": fragment}})
+		events = append(events, string(data))
 	}
-
-	parts := toContent(content, nil, []provider.Tool{
-		{Kind: provider.ToolKindCustom, Name: "run_python"},
-	})
-
-	for _, p := range parts {
-		if p.ToolCall == nil {
-			continue
-		}
-
-		if p.ToolCall.Kind != provider.ToolKindCustom {
-			t.Errorf("expected the call to be tagged custom, got %q", p.ToolCall.Kind)
-		}
-
-		if p.ToolCall.Arguments != source {
-			t.Fatalf("expected unwrapped freeform input:\n want %q\n got  %q", source, p.ToolCall.Arguments)
-		}
-
-		return
+	events = append(events, `{"event_type":"step.stop","index":0}`, `{"event_type":"interaction.completed","interaction":{"id":"r1","status":"requires_action"}}`)
+	options := &provider.CompleteOptions{Tools: []provider.Tool{{Name: "scripts", Tools: []provider.Tool{{Name: "run_python", Kind: provider.ToolKindCustom}}}}}
+	deltas, err := completeAll(t, interactionEvents(events...), options)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	t.Fatal("no tool call in the converted content")
+	result := accumulated(deltas)
+	calls := result.Message.ToolCalls()
+	if len(calls) != 1 || calls[0].Kind != provider.ToolKindCustom || calls[0].Name != "run_python" || calls[0].Namespace != "scripts" || calls[0].Arguments != source {
+		t.Fatalf("custom input lost: %+v", calls)
+	}
+	steps, err := convertMessages([]provider.Message{*result.Message})
+	if err != nil || len(steps) != 1 || steps[0].FunctionCallStep.Name != "scripts_run_python" || steps[0].FunctionCallStep.Arguments[custom.InputParameter] != source {
+		t.Fatalf("custom tool does not replay: %+v / %v", steps, err)
+	}
 }

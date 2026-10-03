@@ -96,7 +96,7 @@ func TestConvertConverseInput_DictionarySchemaFallback(t *testing.T) {
 				choice, ok := req.ToolConfig.ToolChoice.(*types.ToolChoiceMemberTool)
 				require.True(t, ok, "schema tool must be forced")
 				require.Equal(t, "labels", aws.ToString(choice.Value.Name))
-				_, thinking := c.converseAdditionalFields(nil, opts)
+				_, thinking := c.converseAdditionalFields(opts)
 				require.False(t, thinking.Enabled, "forced tools cannot use adaptive thinking")
 				after, err := json.Marshal(schema)
 				require.NoError(t, err)

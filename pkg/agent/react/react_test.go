@@ -136,15 +136,12 @@ func TestNew(t *testing.T) {
 			WithTools(toolProvider),
 			WithEffort(provider.EffortHigh),
 			WithVerbosity(provider.VerbosityMedium),
-			WithTemperature(0.7),
 		)
 
 		require.NoError(t, err)
 		require.NotNil(t, chain)
 		require.Equal(t, provider.EffortHigh, chain.effort)
 		require.Equal(t, provider.VerbosityMedium, chain.verbosity)
-		require.NotNil(t, chain.temperature)
-		require.Equal(t, float32(0.7), *chain.temperature)
 		require.Len(t, chain.messages, 1)
 		require.Len(t, chain.tools, 1)
 	})
@@ -244,7 +241,7 @@ func TestComplete_Basic(t *testing.T) {
 }
 
 // =============================================================================
-// TestComplete_WithOptions - Effort, Verbosity, Temperature propagation
+// TestComplete_WithOptions - Effort and Verbosity propagation
 // =============================================================================
 
 func TestComplete_WithOptions(t *testing.T) {
@@ -259,7 +256,6 @@ func TestComplete_WithOptions(t *testing.T) {
 			WithCompleter(completer),
 			WithEffort(provider.EffortHigh),
 			WithVerbosity(provider.VerbosityMedium),
-			WithTemperature(0.8),
 		)
 		require.NoError(t, err)
 
@@ -276,8 +272,6 @@ func TestComplete_WithOptions(t *testing.T) {
 		require.Equal(t, provider.EffortHigh, opts.ReasoningOptions.Effort)
 		require.NotNil(t, opts.OutputOptions)
 		require.Equal(t, provider.VerbosityMedium, opts.OutputOptions.Verbosity)
-		require.NotNil(t, opts.Temperature)
-		require.Equal(t, float32(0.8), *opts.Temperature)
 	})
 
 	t.Run("call-time options override chain defaults", func(t *testing.T) {
@@ -294,11 +288,9 @@ func TestComplete_WithOptions(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		callTemp := float32(0.5)
 		callOpts := &provider.CompleteOptions{
 			OutputOptions:    &provider.OutputOptions{Verbosity: provider.VerbosityHigh},
 			ReasoningOptions: &provider.ReasoningOptions{Effort: provider.EffortHigh},
-			Temperature:      &callTemp,
 		}
 
 		_, err = collectCompletions(chain.Complete(context.Background(), nil, callOpts))
@@ -310,7 +302,6 @@ func TestComplete_WithOptions(t *testing.T) {
 		require.NotNil(t, opts.ReasoningOptions)
 		require.Equal(t, provider.EffortHigh, opts.ReasoningOptions.Effort)
 		require.Equal(t, provider.VerbosityHigh, opts.OutputOptions.Verbosity)
-		require.Equal(t, float32(0.5), *opts.Temperature)
 	})
 
 	t.Run("stop sequences and max tokens propagate", func(t *testing.T) {
@@ -1281,7 +1272,6 @@ func TestComplete_MixedToolTurn(t *testing.T) {
 			WithCompleter(completer),
 			WithEffort(provider.EffortHigh),
 			WithVerbosity(provider.VerbosityMedium),
-			WithTemperature(0.7),
 		)
 		require.NoError(t, err)
 
@@ -1294,7 +1284,6 @@ func TestComplete_MixedToolTurn(t *testing.T) {
 
 		require.Nil(t, opts.OutputOptions, "chain mutated caller's OutputOptions")
 		require.Nil(t, opts.ReasoningOptions, "chain mutated caller's ReasoningOptions")
-		require.Nil(t, opts.Temperature, "chain mutated caller's Temperature")
 
 		// But the downstream completer must still see the chain's defaults.
 		downstream := completer.capturedOptions[0]
@@ -1302,8 +1291,6 @@ func TestComplete_MixedToolTurn(t *testing.T) {
 		require.Equal(t, provider.VerbosityMedium, downstream.OutputOptions.Verbosity)
 		require.NotNil(t, downstream.ReasoningOptions)
 		require.Equal(t, provider.EffortHigh, downstream.ReasoningOptions.Effort)
-		require.NotNil(t, downstream.Temperature)
-		require.Equal(t, float32(0.7), *downstream.Temperature)
 	})
 
 	t.Run("no agent tools: caller's ToolOptions pass through unchanged", func(t *testing.T) {

@@ -328,12 +328,6 @@ func geminiSetup(model string, options provider.RealtimeOptions) map[string]any 
 	if options.MaxTokens != nil {
 		generation["maxOutputTokens"] = *options.MaxTokens
 	}
-	if options.Temperature != nil {
-		generation["temperature"] = *options.Temperature
-	}
-	if options.TopP != nil {
-		generation["topP"] = *options.TopP
-	}
 	if slices.Contains(options.OutputModalities, provider.RealtimeModalityAudio) && options.Voice != "" {
 		generation["speechConfig"] = map[string]any{
 			"voiceConfig": map[string]any{"prebuiltVoiceConfig": map[string]any{"voiceName": voiceForGemini(options.Voice)}},
