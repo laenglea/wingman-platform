@@ -14,8 +14,11 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	// Core semconv v1.42 removed GenAI conventions; v1.41 is the last Go package
+	// providing these attributes and metric helpers. Keep it separate from core semconv.
 	"go.opentelemetry.io/otel/semconv/v1.41.0"
 	"go.opentelemetry.io/otel/semconv/v1.41.0/genaiconv"
+	coresemconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -48,7 +51,7 @@ func RecordError(span trace.Span, err error) {
 
 	span.RecordError(err)
 	span.SetStatus(codes.Error, err.Error())
-	span.SetAttributes(attribute.String(string(semconv.ErrorTypeKey), normalizeErrorType(err)))
+	span.SetAttributes(attribute.String(string(coresemconv.ErrorTypeKey), normalizeErrorType(err)))
 }
 
 func ErrorTypeAttr(err error) genaiconv.ErrorTypeAttr {

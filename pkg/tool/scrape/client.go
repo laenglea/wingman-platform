@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/scraper"
@@ -66,7 +68,16 @@ func (c *Client) Tools(ctx context.Context) ([]tool.Tool, error) {
 					"start_index": map[string]any{
 						"type":        "integer",
 						"minimum":     0,
-						"description": "Character offset to continue reading a page whose previous fetch ended with a truncation notice. Omit for a first fetch.",
+						"description": "Character offset in the original page for sequential reading. A positive offset overrides query; 0 or omitted allows query-focused reading.",
+					},
+					"query": map[string]any{
+						"maxLength":   500,
+						"type":        "string",
+						"description": "Keywords for the facts needed. Locally selects verbatim passages from long pages, with original character offsets; no generated summary. Omit to read sequentially.",
+					},
+					"max_chars": map[string]any{
+						"type": "integer", "minimum": 1, "maximum": c.maxChars,
+						"description": "Maximum returned page characters. Omit for the configured default.",
 					},
 				},
 
@@ -96,19 +107,48 @@ func (c *Client) Execute(ctx context.Context, name string, parameters map[string
 		return nil, ErrURLNotAllowed
 	}
 
-	start := 0
-	if n, ok := parameters["start_index"].(float64); ok && n > 0 {
-		start = int(n)
+	start, err := integerParameter(parameters, "start_index", 0, 0, int(^uint(0)>>1))
+	if err != nil {
+		return nil, err
+	}
+	maxChars, err := integerParameter(parameters, "max_chars", c.maxChars, 1, c.maxChars)
+	if err != nil {
+		return nil, err
+	}
+
+	query, _ := parameters["query"].(string)
+	if parameters["query"] != nil {
+		if _, ok := parameters["query"].(string); !ok || utf8.RuneCountInString(query) > 500 {
+			return nil, errors.New("scrape: query must be a string of at most 500 characters")
+		}
 	}
 
 	doc, err := c.scraper.Scrape(ctx, raw, &scraper.ScrapeOptions{})
 	if err != nil {
 		return nil, err
 	}
+	if doc == nil {
+		return nil, errors.New("scrape: empty document")
+	}
 
-	text := paginate(doc.Text, start, c.maxChars)
+	text := paginate(doc.Text, start, maxChars)
+	if start == 0 && strings.TrimSpace(query) != "" {
+		text = focusedText(doc.Text, query, maxChars)
+	}
 
 	return formatDocument(raw, text), nil
+}
+
+func integerParameter(params map[string]any, key string, fallback, minimum, maximum int) (int, error) {
+	value, exists := params[key]
+	if !exists || value == nil {
+		return fallback, nil
+	}
+	n, ok := value.(float64)
+	if !ok || math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) || n < float64(minimum) || n >= float64(int(^uint(0)>>1)) {
+		return 0, fmt.Errorf("scrape: invalid %s", key)
+	}
+	return min(int(n), maximum), nil
 }
 
 // Result implements tool.Resulter so the agent chain sees the same markdown

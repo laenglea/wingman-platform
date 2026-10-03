@@ -90,7 +90,7 @@ func TestServiceAccountFileTranslation(t *testing.T) {
 				t.Errorf("service account assertion claims = %+v", claims)
 			}
 			body = `{"access_token":"service-account-token","token_type":"Bearer","expires_in":3600}`
-		case "translation.googleapis.com":
+		case "translate.googleapis.com":
 			if r.Header.Get("Authorization") != "Bearer service-account-token" || r.Header.Get("X-Goog-Api-Key") != "" {
 				t.Error("translation must use the service account OAuth token")
 			}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -374,6 +375,104 @@ func TestRealtimeFailedResponseAndMetadataContract(t *testing.T) {
 	}
 }
 
+func TestRealtimeConversationItemDelete(t *testing.T) {
+	t.Run("queued items are dropped before the provider session exists", func(t *testing.T) {
+		upstream := newFakeRealtime()
+		conn := openTestRealtime(t, upstream)
+		readThrough(t, conn, "conversation.created")
+		writeWireEvent(t, conn, wingmanSessionUpdate(false))
+		assertEventType(t, readWireEvent(t, conn), "session.updated")
+
+		for _, id := range []string{"ctx_first", "ctx_second"} {
+			writeWireEvent(t, conn, map[string]any{
+				"type": "conversation.item.create",
+				"item": map[string]any{
+					"id": id, "type": "message", "role": "system",
+					"content": []map[string]any{{"type": "input_text", "text": "context " + id}},
+				},
+			})
+			readThrough(t, conn, "conversation.item.done")
+		}
+
+		writeWireEvent(t, conn, map[string]any{"type": "conversation.item.delete", "item_id": "ctx_first"})
+		deleted := readWireEvent(t, conn)
+		assertEventType(t, deleted, "conversation.item.deleted")
+		if got := deleted["item_id"]; got != "ctx_first" {
+			t.Fatalf("item_id = %v, want ctx_first", got)
+		}
+
+		writeWireEvent(t, conn, map[string]any{"type": "conversation.item.delete", "item_id": "ctx_missing"})
+		missing := readWireEvent(t, conn)
+		assertEventType(t, missing, "error")
+
+		writeWireEvent(t, conn, map[string]any{"type": "response.create"})
+		waitSignal(t, upstream.session.responded, "response.create")
+		upstream.mu.Lock()
+		history := upstream.options[0].History
+		upstream.mu.Unlock()
+		if len(history) != 1 || history[0].ID != "ctx_second" {
+			t.Fatalf("history = %#v, want only ctx_second", history)
+		}
+	})
+
+	t.Run("live items are deleted through the provider and keep their ids", func(t *testing.T) {
+		upstream := newFakeRealtime()
+		conn := openTestRealtime(t, upstream)
+		readThrough(t, conn, "conversation.created")
+		writeWireEvent(t, conn, wingmanSessionUpdate(false))
+		assertEventType(t, readWireEvent(t, conn), "session.updated")
+		writeWireEvent(t, conn, map[string]any{"type": "response.create"})
+		waitSignal(t, upstream.session.responded, "response.create")
+
+		writeWireEvent(t, conn, map[string]any{
+			"type": "conversation.item.create",
+			"item": map[string]any{
+				"id": "ctx_live", "type": "message", "role": "system",
+				"content": []map[string]any{{"type": "input_text", "text": "late context"}},
+			},
+		})
+		readThrough(t, conn, "conversation.item.done")
+		if got := upstream.session.messagesSnapshot(); len(got) != 1 || got[0].ID != "ctx_live" {
+			t.Fatalf("provider messages = %#v, want the item id forwarded", got)
+		}
+
+		writeWireEvent(t, conn, map[string]any{"type": "conversation.item.delete", "item_id": "ctx_live"})
+		assertEventType(t, readWireEvent(t, conn), "conversation.item.deleted")
+		if got := upstream.session.deletedSnapshot(); !slices.Equal(got, []string{"ctx_live"}) {
+			t.Fatalf("provider deletions = %v, want [ctx_live]", got)
+		}
+
+		// A deleted id can be created again with a full lifecycle.
+		writeWireEvent(t, conn, map[string]any{
+			"type": "conversation.item.create",
+			"item": map[string]any{
+				"id": "ctx_live", "type": "message", "role": "system",
+				"content": []map[string]any{{"type": "input_text", "text": "newer context"}},
+			},
+		})
+		assertEventType(t, readWireEvent(t, conn), "conversation.item.created")
+	})
+
+	t.Run("providers without conversation editing report an unsupported event", func(t *testing.T) {
+		upstream := newFakeRealtime()
+		upstream.session.deleteErr = provider.UnsupportedRealtimeOperation("conversation.item.delete")
+		conn := openTestRealtime(t, upstream)
+		readThrough(t, conn, "conversation.created")
+		writeWireEvent(t, conn, wingmanSessionUpdate(false))
+		assertEventType(t, readWireEvent(t, conn), "session.updated")
+		writeWireEvent(t, conn, map[string]any{"type": "response.create"})
+		waitSignal(t, upstream.session.responded, "response.create")
+
+		writeWireEvent(t, conn, map[string]any{"type": "conversation.item.delete", "item_id": "ctx_any"})
+		failure := readWireEvent(t, conn)
+		assertEventType(t, failure, "error")
+		message, _ := failure["error"].(map[string]any)["message"].(string)
+		if !strings.Contains(message, `"conversation.item.delete" is not supported`) {
+			t.Fatalf("error message = %q, want an unsupported-event message", message)
+		}
+	})
+}
+
 func TestRealtimeAudioFormatParsing(t *testing.T) {
 	current := provider.RealtimeAudioFormat{
 		Encoding: provider.RealtimeAudioPCM, SampleRate: 16000, SampleSize: 16, Channels: 1,
@@ -631,9 +730,12 @@ type fakeRealtimeSession struct {
 	updated        chan struct{}
 	interrupted    chan struct{}
 
+	deleteErr error
+
 	mu          sync.Mutex
 	messages    []provider.Message
 	toolResults []recordedToolResult
+	deleted     []string
 }
 
 func newFakeRealtimeSession() *fakeRealtimeSession {
@@ -680,6 +782,22 @@ func (s *fakeRealtimeSession) SendToolResult(_ context.Context, id, output strin
 func (s *fakeRealtimeSession) TruncateOutput(context.Context, string, time.Duration) error {
 	s.truncated <- struct{}{}
 	return nil
+}
+
+func (s *fakeRealtimeSession) DeleteItem(_ context.Context, itemID string) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
+	s.mu.Lock()
+	s.deleted = append(s.deleted, itemID)
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *fakeRealtimeSession) deletedSnapshot() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.deleted)
 }
 
 func (s *fakeRealtimeSession) Respond(context.Context, *provider.RealtimeResponseOptions) error {

@@ -21,7 +21,8 @@ var (
 type Client struct {
 	provider searcher.Provider
 
-	limit int
+	limit           int
+	maxSnippetChars int
 }
 
 func New(p searcher.Provider, options ...Option) (*Client, error) {
@@ -30,8 +31,9 @@ func New(p searcher.Provider, options ...Option) (*Client, error) {
 	}
 
 	c := &Client{
-		provider: p,
-		limit:    5,
+		provider:        p,
+		limit:           5,
+		maxSnippetChars: 400,
 	}
 
 	for _, option := range options {
@@ -88,7 +90,7 @@ func (c *Client) Tools(ctx context.Context) ([]tool.Tool, error) {
 	return []tool.Tool{
 		{
 			Name:        ToolName,
-			Description: "Search the public web and return ranked sources (title, URL, snippet, publication date when known). Use for current events, named entities, or anything that may have changed since training. Start with one broad query, then narrower follow-ups for unresolved facets; independent queries can be issued in parallel. Snippets are short — fetch a promising URL to read the full page.",
+			Description: "Search the public web for ranked sources, excerpts and publication dates. Use a focused query; independent lookups can run in parallel. Answer from excerpts when sufficient; fetch only for missing facts, context or quotations.",
 
 			Parameters: map[string]any{
 				"type":       "object",
@@ -136,7 +138,7 @@ func (c *Client) Execute(ctx context.Context, name string, parameters map[string
 		return nil, err
 	}
 
-	return formatResults(hits), nil
+	return formatResults(hits, c.maxSnippetChars), nil
 }
 
 // Result implements tool.Resulter so the agent chain sees the same markdown
@@ -148,7 +150,7 @@ func (c *Client) Result(name string, value any) provider.ToolResult {
 	}
 }
 
-func formatResults(hits []searcher.Result) string {
+func formatResults(hits []searcher.Result, maxChars int) string {
 	if len(hits) == 0 {
 		return "No results."
 	}
@@ -165,7 +167,7 @@ func formatResults(hits []searcher.Result) string {
 			fmt.Fprintf(&b, " — %s", h.Timestamp.Format("2006-01-02"))
 		}
 		b.WriteString("\n")
-		if s := snippet(h.Content, 400); s != "" {
+		if s := snippet(h.Content, maxChars); s != "" {
 			fmt.Fprintf(&b, "   %s\n", s)
 		}
 	}

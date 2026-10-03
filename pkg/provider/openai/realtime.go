@@ -480,12 +480,25 @@ func (s *openAIRealtimeSession) SendMessage(ctx context.Context, message provide
 	if message.Role == provider.MessageRoleAssistant {
 		contentType = "output_text"
 	}
+	item := map[string]any{
+		"type": "message", "role": string(message.Role),
+		"content": []map[string]any{{"type": contentType, "text": text}},
+	}
+	// Keeping the caller's item id lets it address the item later.
+	if message.ID != "" {
+		item["id"] = message.ID
+	}
 	return s.send(ctx, map[string]any{
-		"type": "conversation.item.create", "event_id": realtimeID("event"),
-		"item": map[string]any{
-			"type": "message", "role": string(message.Role),
-			"content": []map[string]any{{"type": contentType, "text": text}},
-		},
+		"type": "conversation.item.create", "event_id": realtimeID("event"), "item": item,
+	})
+}
+
+func (s *openAIRealtimeSession) DeleteItem(ctx context.Context, itemID string) error {
+	if itemID == "" {
+		return errors.New("openai realtime: conversation item id is required")
+	}
+	return s.send(ctx, map[string]any{
+		"type": "conversation.item.delete", "event_id": realtimeID("event"), "item_id": itemID,
 	})
 }
 

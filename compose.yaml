@@ -14,6 +14,11 @@ services:
 
     environment:
       - WINGMAN_URL=http://platform:8080
+      - CHAT_MODEL=qwen3.5
+      - CHAT_INSTRUCTIONS=You are Wingman, a helpful assistant.
+      - CHAT_COMPACTION_ENABLED=true
+      - VISION_ENABLED=true
+      - EXTRACTOR_ENABLED=true
       - INTERNET_ENABLED=true
       - INTERNET_SCRAPER=web
       - INTERNET_SEARCHER=web
@@ -23,28 +28,26 @@ services:
       - ARTIFACTS_ENABLED=true
       - REPOSITORY_ENABLED=true
       - REPOSITORY_EMBEDDER=qwen3-embedding
-
-    configs:
-      - source: models
-        target: /app/models.yaml
+      - MEMORY_ENABLED=true
 
   platform:
     image: ghcr.io/adrianliechti/wingman-platform
-    
+
     models:
       - llm
       - embedding
-    
+
     configs:
       - source: platform
         target: /config.yaml
 
 models:
   llm:
-    model: ai/qwen3
-  
+    model: ai/qwen3.5:4b
+    context_size: 32768
+
   embedding:
-    model: ai/qwen3-embedding
+    model: ai/qwen3-embedding:0.6b
 
 configs:
   caddyfile:
@@ -57,7 +60,7 @@ configs:
         handle /v1/* {
           reverse_proxy http://platform:8080
         }
-        
+
         handle {
           reverse_proxy http://chat:8000
         }
@@ -70,7 +73,7 @@ configs:
           url: $${LLM_URL}
 
           models:
-            qwen3:
+            qwen3.5:
               id: $${LLM_MODEL}
 
         - type: openai-compatible
@@ -79,53 +82,31 @@ configs:
           models:
             qwen3-embedding:
               id: $${EMBEDDING_MODEL}
-      
+
       scrapers:
         web:
           type: fetch
-      
+
       searchers:
         web:
           type: duckduckgo
-      
+
       researchers:
         web:
-          type: llm
-          model: qwen3
+          type: agent
+          model: qwen3.5
           scraper: web
           searcher: web
-      
+
       extractors:
-        text:
-          type: text
-      
+        default:
+          type: default
+
       segmenters:
         default:
           type: text
-      
+
       translators:
         default:
           type: llm
-          model: qwen3
-      
-      chains:
-        wingman:
-          type: agent
-          model: qwen3
-
-          messages:
-            - role: system
-              content: |
-                You are Wingman, a large language model.
-                
-                - Use GitHub Flavored Markdown to format text
-                - Visualize Data as Markdown Tables
-                - Format Code in Markdown Blocks using triple backticks and the language name
-          
-                Current date: {{ now | date "2006-01-02" }}
-  
-  models:
-    content: |
-      - id: wingman
-        name: Wingman
-        description: Smart, efficient model for everyday use
+          model: qwen3.5

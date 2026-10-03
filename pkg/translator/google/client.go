@@ -39,7 +39,7 @@ type Client struct {
 
 func New(url string, options ...Option) (*Client, error) {
 	if url == "" {
-		url = "https://translation.googleapis.com"
+		url = "https://translate.googleapis.com"
 	}
 
 	c := &Client{
