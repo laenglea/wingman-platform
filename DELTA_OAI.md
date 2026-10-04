@@ -26,7 +26,6 @@ format) → `pkg/provider` (shared types) → `pkg/provider/*` (backends).
       `param: "tool_choice"`; add it.
 - [ ] **Enum / nested validation.** Reject invalid enum values and missing
       required nested fields instead of falling back to defaults.
-- [ ] **`top_p`.** Carry it to the provider (add to `CompleteOptions`).
 - [ ] **`stream_options.include_obfuscation`.** Honor (emit `obfuscation` on
       delta events) or reject.
 - [ ] **URL downloads.** Bound size and time in `server/files.FromURL`
@@ -48,7 +47,7 @@ format) → `pkg/provider` (shared types) → `pkg/provider/*` (backends).
 - [ ] **Programmatic tool calling.** Carry function `caller` data so it
       round-trips.
 - [ ] **Response fields.** Honor non-default penalties and function
-      `output_schema`. Echo the requested `service_tier`, `top_p`,
+      `output_schema`. Echo the requested `service_tier`,
       `top_logprobs`, `metadata`, `max_tool_calls`, `safety_identifier`,
       `moderation` instead of fixed values.
 - [ ] **Shell events.** Emit `response.shell_call_command.added/delta/done`

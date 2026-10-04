@@ -311,10 +311,6 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 		}
 	}
 
-	if options.Temperature != nil && !requiresReasoning(c.model) {
-		req.Temperature = openai.Float(float64(*options.Temperature))
-	}
-
 	if strings.Contains(c.url, "api.mistral.ai") {
 		req.StreamOptions = openai.ChatCompletionStreamOptionsParam{}
 

@@ -119,9 +119,7 @@ type sessionConfig struct {
 	InputAudio  provider.RealtimeAudioFormat
 	OutputAudio provider.RealtimeAudioFormat
 
-	MaxTokens   *int
-	Temperature *float32
-	TopP        *float32
+	MaxTokens *int
 
 	Tools      []provider.Tool
 	ToolChoice provider.ToolChoice
@@ -146,9 +144,7 @@ func newSessionConfig(defaults provider.RealtimeOptions) sessionConfig {
 		InputAudio:  defaults.InputAudio,
 		OutputAudio: defaults.OutputAudio,
 
-		MaxTokens:   defaults.MaxTokens,
-		Temperature: defaults.Temperature,
-		TopP:        defaults.TopP,
+		MaxTokens: defaults.MaxTokens,
 
 		Tools:      slices.Clone(defaults.Tools),
 		ToolChoice: defaults.ToolChoice,
@@ -169,9 +165,7 @@ func (c sessionConfig) options(history []provider.Message) provider.RealtimeOpti
 		InputAudio:  c.InputAudio,
 		OutputAudio: c.OutputAudio,
 
-		MaxTokens:   c.MaxTokens,
-		Temperature: c.Temperature,
-		TopP:        c.TopP,
+		MaxTokens: c.MaxTokens,
 
 		Tools:      slices.Clone(c.Tools),
 		ToolChoice: c.ToolChoice,
@@ -206,7 +200,7 @@ func (c *sessionConfig) apply(data json.RawMessage) error {
 	if err := validateObjectFields("session", fields,
 		"type", "instructions", "voice", "input_audio_format", "output_audio_format",
 		"input_audio_transcription", "turn_detection", "audio", "output_modalities", "modalities",
-		"max_output_tokens", "max_response_output_tokens", "temperature", "top_p", "tools",
+		"max_output_tokens", "max_response_output_tokens", "tools",
 		"tool_choice", "truncation", "tracing",
 	); err != nil {
 		return err
@@ -299,22 +293,6 @@ func (c *sessionConfig) apply(data json.RawMessage) error {
 			return err
 		}
 		updated.MaxTokens = maxTokens
-	}
-
-	if raw, ok := fields["temperature"]; ok {
-		var value float32
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return errors.New("session.temperature must be a number")
-		}
-		updated.Temperature = &value
-	}
-
-	if raw, ok := fields["top_p"]; ok {
-		var value float32
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return errors.New("session.top_p must be a number")
-		}
-		updated.TopP = &value
 	}
 
 	if raw, ok := fields["tools"]; ok {

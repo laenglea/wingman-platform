@@ -357,37 +357,6 @@ func nullableSchema(schema map[string]any) map[string]any {
 	return result
 }
 
-// ensureAdditionalPropertiesFalse recursively adds additionalProperties: false
-// to all object schemas. Required by OpenAI's strict JSON schema validation.
-func ensureAdditionalPropertiesFalse(schema map[string]any) map[string]any {
-	if schema == nil {
-		return schema
-	}
-
-	schemaType, _ := schema["type"].(string)
-	if schemaType == "object" {
-		if _, ok := schema["additionalProperties"]; !ok {
-			schema["additionalProperties"] = false
-		}
-
-		if props, ok := schema["properties"].(map[string]any); ok {
-			for key, val := range props {
-				if propSchema, ok := val.(map[string]any); ok {
-					props[key] = ensureAdditionalPropertiesFalse(propSchema)
-				}
-			}
-		}
-	}
-
-	if schemaType == "array" {
-		if items, ok := schema["items"].(map[string]any); ok {
-			schema["items"] = ensureAdditionalPropertiesFalse(items)
-		}
-	}
-
-	return schema
-}
-
 var LegacyModels = []string{
 	// GPT 3.5 Family
 	"gpt-3.5-turbo",
@@ -421,11 +390,6 @@ func isLegacyModel(model string) bool {
 func requiresReasoning(model string) bool {
 	m := strings.ToLower(model)
 	return strings.HasPrefix(m, "gpt-6-astra") || strings.HasPrefix(m, "gpt-6.1-sol")
-}
-
-func isGPT6SolOrLuna(model string) bool {
-	m := strings.ToLower(model)
-	return strings.HasPrefix(m, "gpt-6-sol") || strings.HasPrefix(m, "gpt-6-luna")
 }
 
 // normalizedReasoningEffort applies model-specific compatibility rules before

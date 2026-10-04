@@ -233,7 +233,7 @@ func TestEffortAndStrictToolsAcrossProvidersE2E(t *testing.T) {
 				case "chat":
 					effort = sent["reasoning_effort"]
 				case "gemini":
-					effort = strings.ToLower(sent["generationConfig"].(map[string]any)["thinkingConfig"].(map[string]any)["thinkingLevel"].(string))
+					effort = sent["generation_config"].(map[string]any)["thinking_level"]
 				case "xai":
 					effort = sent["reasoning"].(map[string]any)["effort"]
 				case "bedrock":
@@ -248,9 +248,12 @@ func TestEffortAndStrictToolsAcrossProvidersE2E(t *testing.T) {
 						t.Fatalf("lost strict tool: %v", tool)
 					}
 				} else if backend == "gemini" {
-					mode := sent["toolConfig"].(map[string]any)["functionCallingConfig"].(map[string]any)["mode"]
-					if mode != "VALIDATED" {
+					mode := sent["generation_config"].(map[string]any)["tool_choice"]
+					if mode != "validated" {
 						t.Fatalf("strict tools need validated function calling: %v", mode)
+					}
+					if sent["store"] != false {
+						t.Fatal("Gemini interactions must disable storage")
 					}
 				} else {
 					tool := sent["tools"].([]any)[0].(map[string]any)
@@ -314,7 +317,17 @@ func featureBackend(t *testing.T, backend string, capture func(*http.Request, ma
 	case "chat":
 		wire = "data: {\"id\":\"chatcmpl_test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
 	case "gemini":
-		wire = "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"done\"}]},\"finishReason\":\"STOP\"}]}\n\n"
+		wire = `data: {"event_type":"interaction.created","interaction":{"id":"int_test","model":"gemini-3.8-flash","status":"in_progress"}}
+
+data: {"event_type":"step.start","index":0,"step":{"type":"model_output"}}
+
+data: {"event_type":"step.delta","index":0,"delta":{"type":"text","text":"done"}}
+
+data: {"event_type":"step.stop","index":0}
+
+data: {"event_type":"interaction.completed","interaction":{"id":"int_test","status":"completed"}}
+
+`
 	case "bedrock":
 		var buffer bytes.Buffer
 		encoder := eventstream.NewEncoder()

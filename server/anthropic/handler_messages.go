@@ -82,8 +82,7 @@ func toCompleteOptions(req MessageRequest) (*provider.CompleteOptions, error) {
 	options := &provider.CompleteOptions{
 		Tools: tools,
 
-		Stop:        req.StopSequences,
-		Temperature: req.Temperature,
+		Stop: req.StopSequences,
 	}
 
 	if req.ToolChoice != nil {

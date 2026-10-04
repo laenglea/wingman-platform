@@ -287,10 +287,6 @@ func RequestOptionAttrs(options *provider.CompleteOptions) []KeyValue {
 
 	var attrs []KeyValue
 
-	if options.Temperature != nil {
-		attrs = append(attrs, semconv.GenAIRequestTemperature(float64(*options.Temperature)))
-	}
-
 	if options.MaxTokens != nil {
 		attrs = append(attrs, semconv.GenAIRequestMaxTokens(*options.MaxTokens))
 	}

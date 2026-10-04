@@ -122,7 +122,7 @@ func TestConvertConverseInput_SchemaWithoutPropertiesForcesTool(t *testing.T) {
 func TestConverseAdditionalFields_NativeSchemaKeepsThinking(t *testing.T) {
 	c := &Completer{Config: &Config{model: "anthropic.claude-sonnet-4-6"}}
 
-	fields, thinking := c.converseAdditionalFields(nil, &provider.CompleteOptions{
+	fields, thinking := c.converseAdditionalFields(&provider.CompleteOptions{
 		Schema:           &provider.Schema{Name: "classify", Properties: testSchema},
 		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive},
 	})

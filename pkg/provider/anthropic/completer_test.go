@@ -540,36 +540,17 @@ func TestConvertRequest_AssistantTrailingWhitespaceTrimmed(t *testing.T) {
 	}
 }
 
-// TestConvertRequest_TemperatureDroppedForNoSamplingModel verifies
-// temperature is never forwarded to models that reject sampling parameters
-// outright (Sonnet 5, Opus 4.7/4.8, Fable 5), even when thinking is left at
-// its default.
-func TestConvertRequest_TemperatureDroppedForNoSamplingModel(t *testing.T) {
-	completer, _ := NewCompleter("http://localhost", "claude-sonnet-5")
-
-	temp := float32(0.5)
-	body := requestBody(t, completer, []provider.Message{provider.UserMessage("hi")}, &provider.CompleteOptions{
-		Temperature: &temp,
-	})
-
-	if _, present := body["temperature"]; present {
-		t.Errorf("expected temperature dropped, got %v", body["temperature"])
-	}
-}
-
-// TestConvertRequest_TemperatureKeptForMidTierModel verifies temperature
-// still passes through for models without the blanket sampling-parameter
-// restriction (e.g. Opus 4.6) when thinking isn't active.
-func TestConvertRequest_TemperatureKeptForMidTierModel(t *testing.T) {
-	completer, _ := NewCompleter("http://localhost", "claude-opus-4-6")
-
-	temp := float32(0.5)
-	body := requestBody(t, completer, []provider.Message{provider.UserMessage("hi")}, &provider.CompleteOptions{
-		Temperature: &temp,
-	})
-
-	if got, ok := body["temperature"].(float64); !ok || got != 0.5 {
-		t.Errorf("temperature: got %v, want 0.5", body["temperature"])
+func TestConvertRequest_OmitsSamplingParameters(t *testing.T) {
+	for _, model := range []string{"claude-sonnet-5", "claude-opus-4-6"} {
+		t.Run(model, func(t *testing.T) {
+			completer, _ := NewCompleter("http://localhost", model)
+			body := requestBody(t, completer, []provider.Message{provider.UserMessage("hi")}, nil)
+			for _, field := range []string{"temperature", "top_p", "top_k"} {
+				if _, present := body[field]; present {
+					t.Errorf("request unexpectedly includes %s", field)
+				}
+			}
+		})
 	}
 }
 

@@ -406,12 +406,6 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 	if err != nil {
 		return nil, err
 	}
-	if !isLegacyModel(r.model) && options.Temperature != nil &&
-		(!isGPT6SolOrLuna(r.model) || normalizedReasoningEffort(r.model, options.ReasoningOptions) != "none") {
-		optsCopy := *options
-		optsCopy.Temperature = nil
-		options = &optsCopy
-	}
 
 	hasConfigurationUpdate := containsConfigurationUpdate(messages)
 	if hasConfigurationUpdate && options.CompactionOptions != nil && options.CompactionOptions.Threshold > 0 {
@@ -550,10 +544,6 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 
 	if options.MaxTokens != nil {
 		req.MaxOutputTokens = openai.Int(int64(*options.MaxTokens))
-	}
-
-	if options.Temperature != nil {
-		req.Temperature = openai.Float(float64(*options.Temperature))
 	}
 
 	return req, nil

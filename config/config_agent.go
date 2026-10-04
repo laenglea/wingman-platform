@@ -34,8 +34,6 @@ type agentConfig struct {
 
 	Effort    string `yaml:"effort"`
 	Verbosity string `yaml:"verbosity"`
-
-	Temperature *float32 `yaml:"temperature"`
 }
 
 type agentContext struct {
@@ -47,8 +45,6 @@ type agentContext struct {
 
 	Effort    provider.Effort
 	Verbosity provider.Verbosity
-
-	Temperature *float32
 }
 
 func (cfg *Config) registerAgents(f *configFile) error {
@@ -74,8 +70,6 @@ func (cfg *Config) registerAgents(f *configFile) error {
 
 			Effort:    provider.Effort(config.Effort),
 			Verbosity: provider.Verbosity(config.Verbosity),
-
-			Temperature: config.Temperature,
 		}
 
 		if config.Model != "" {
@@ -152,10 +146,6 @@ func reactAgent(cfg agentConfig, context agentContext) (provider.Completer, erro
 		options = append(options, react.WithVerbosity(context.Verbosity))
 	}
 
-	if context.Temperature != nil {
-		options = append(options, react.WithTemperature(*context.Temperature))
-	}
-
 	return react.New(cfg.Model, options...)
 }
 
@@ -176,10 +166,6 @@ func assistantAgent(cfg agentConfig, context agentContext) (provider.Completer, 
 
 	if context.Verbosity != "" {
 		options = append(options, assistant.WithVerbosity(context.Verbosity))
-	}
-
-	if context.Temperature != nil {
-		options = append(options, assistant.WithTemperature(*context.Temperature))
 	}
 
 	return assistant.New(cfg.Model, options...)

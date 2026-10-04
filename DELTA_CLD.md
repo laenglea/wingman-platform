@@ -32,8 +32,8 @@ Out of scope: Files/Skills, Managed Agents, admin endpoints, advisor pairings.
       flattened to text markers today (`convert.go`, `webSearchResultMarker`,
       `webFetchResultMarker`).
 - [ ] **Validation.** Reject `thinking.type: "enabled"` without
-      `budget_tokens`, out-of-range `budget_tokens`, and out-of-range sampling
-      values (`handler_messages.go`, `validateMessageRequest`).
+      `budget_tokens` and out-of-range `budget_tokens`
+      (`handler_messages.go`, `validateMessageRequest`).
 - [ ] **Mid-conversation `role: "system"`.** Validate placement (after a user
       turn, last or followed by assistant, never first) and reject it for
       models without support instead of folding it into `system`.

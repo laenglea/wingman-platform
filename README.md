@@ -262,6 +262,10 @@ See [System One](API.md#system-one) for the request format and response fields.
 
 ### LLM Providers
 
+Wingman uses each model's default sampling behavior. Temperature, top-p, and
+top-k are not configurable through provider options, agent configuration, or API
+requests. Use reasoning effort to control reasoning where the model supports it.
+
 #### OpenAI Platform
 
 https://platform.openai.com/docs/api-reference
@@ -286,7 +290,7 @@ providers:
       - tts-1-hd
 ```
 
-GPT-6.1 Sol uses `gpt-6.1-sol`. The `openai` provider uses the Responses API upstream, including for tool calls received through Wingman's Chat Completions and Anthropic endpoints. Reasoning defaults to `medium`; `low`, `high`, `xhigh`, and `max` are also supported. Wingman maps `none` and `minimal` to `low` and omits temperature. OpenAI's Chat Completions endpoint supports this model only without tools. See the [official model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
+GPT-6.1 Sol uses `gpt-6.1-sol`. The `openai` provider uses the Responses API upstream, including for tool calls received through Wingman's Chat Completions and Anthropic endpoints. Reasoning defaults to `medium`; `low`, `high`, `xhigh`, and `max` are also supported. Wingman maps `none` and `minimal` to `low`. OpenAI's Chat Completions endpoint supports this model only without tools. See the [official model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
 
 
 #### Azure OpenAI Service
@@ -336,6 +340,23 @@ providers:
 
 
 #### Google Gemini
+
+Gemini completions use the [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview)
+with full conversation history and `store=false`. Tool calls, results, and thought
+signatures are replayed as execution steps. Reasoning effort maps to thinking
+levels: `minimal`, `low`, and disabled thinking use `low`, `medium` stays `medium`, and
+`high`, `xhigh`, and `max` use `high`. Omitted effort keeps the model default.
+Sampling parameters are omitted, following the current
+[Gemini migration guidance](https://ai.google.dev/gemini-api/docs/latest-model#migration-checklist).
+Embeddings, image rendering, transcription, speech synthesis, and Live
+realtime retain their dedicated integrations.
+
+To compare Interactions against `generateContent` with real API calls, run
+`WINGMAN_GOOGLE_LIVE=1 go test -v ./pkg/provider/google -run TestComplete_LiveComparison -count=1`.
+The suite uses `GEMINI_API_KEY` from the environment or `.env` and defaults to
+`gemini-3.8-flash`; `WINGMAN_GOOGLE_LIVE_MODELS` accepts a comma-separated list.
+Live checks on Gemini 2.5 Flash found that Interactions rejects `medium` and
+does not enforce the current structured-output format on that model.
 
 ```yaml
 providers:
@@ -738,7 +759,6 @@ agents:
 
     effort: medium          # reasoning effort: minimal · low · medium · high
     verbosity: medium       # output verbosity: low · medium · high
-    # temperature: 0.7
 
     tools:
       - web_search

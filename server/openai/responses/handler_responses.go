@@ -59,8 +59,7 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		Tools:       tools,
 		ToolOptions: toToolOptions(req.ToolChoice),
 
-		MaxTokens:   req.MaxOutputTokens,
-		Temperature: req.Temperature,
+		MaxTokens: req.MaxOutputTokens,
 
 		CacheOptions: shared.CacheOptions(req.PromptCacheKey, req.PromptCacheRetention, req.PromptCacheOptions.mode()),
 	}
@@ -315,12 +314,6 @@ func responseDefaults(resp *Response, req ResponsesRequest, completion *provider
 		resp.ParallelToolCalls = *req.ParallelToolCalls
 	}
 
-	resp.Temperature = 1.0
-	if req.Temperature != nil {
-		resp.Temperature = *req.Temperature
-	}
-
-	resp.TopP = 0.98
 	resp.TopLogprobs = 0
 	if req.Truncation != "" {
 		resp.Truncation = req.Truncation

@@ -13,7 +13,9 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/adrianliechti/wingman/pkg/provider/toolid"
+	"github.com/adrianliechti/wingman/pkg/provider/internal/claude"
+	"github.com/adrianliechti/wingman/pkg/provider/internal/schema"
+	"github.com/adrianliechti/wingman/pkg/provider/internal/toolid"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/computeruse"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/custom"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/shell"
@@ -55,18 +57,6 @@ func NewCompleter(model string, options ...Option) (*Completer, error) {
 		configOptions = append(configOptions, config.WithHTTPClient(cfg.client))
 	}
 
-	// Configure adaptive retry mode for throttle-based rate limiting
-	// Keep attempts low to reduce the risk of duplicate billing on retries for streaming requests
-
-	// configOptions = append(configOptions, config.WithRetryer(func() aws.Retryer {
-	// 	return retry.NewAdaptiveMode(func(o *retry.AdaptiveModeOptions) {
-	// 		o.StandardOptions = append(o.StandardOptions, func(so *retry.StandardOptions) {
-	// 			so.MaxAttempts = 3
-	// 			so.MaxBackoff = 20 * time.Second
-	// 		})
-	// 	})
-	// }))
-
 	config, err := config.LoadDefaultConfig(context.Background(), configOptions...)
 
 	if err != nil {
@@ -93,7 +83,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			return
 		}
 
-		_, thinking := c.converseAdditionalFields(messages, options)
+		_, thinking := c.converseAdditionalFields(options)
 		notes := c.progressNotes(thinking)
 
 		params := &bedrockruntime.ConverseStreamInput{
@@ -639,16 +629,16 @@ func isBedrockContentFilterMessage(message string) bool {
 // no native mapping for. The effort stays here as well: the typed
 // outputConfig.effort field is rejected by Claude 4.6 ("This model doesn't
 // support the effort field"), while output_config.effort in the additional
-// fields is accepted. The resolved thinking configuration is returned too,
-// since temperature must be cleared while thinking is enabled.
-func (c *Completer) converseAdditionalFields(messages []provider.Message, options *provider.CompleteOptions) (map[string]any, thinking) {
+// fields is accepted. The resolved thinking configuration is returned for
+// selecting reasoning output in the stream.
+func (c *Completer) converseAdditionalFields(options *provider.CompleteOptions) (map[string]any, thinking) {
 	// Forced tool calls (emulated schema mode, tool choice "any") are
 	// incompatible with thinking on Anthropic models over Bedrock. Models
 	// without forced tool choice steer the schema tool automatically instead.
-	forced := !matchesModel(c.model, NoForcedToolChoiceModels) && (c.schemaAsTool(options) ||
+	forced := !claude.MatchesModel(c.model, claude.NoForcedToolChoiceModels) && (c.schemaAsTool(options) ||
 		(options.ToolOptions != nil && options.ToolOptions.Choice == provider.ToolChoiceAny))
 
-	thinking := c.resolveThinking(messages, options, forced)
+	thinking := c.resolveThinking(options, forced)
 
 	fields := map[string]any{}
 
@@ -664,9 +654,9 @@ func (c *Completer) converseAdditionalFields(messages []provider.Message, option
 		}
 
 		fields["thinking"] = map[string]any{"type": "adaptive", "display": display}
-	} else if thinking.Disabled && matchesModel(c.model, BetweenToolsModels) {
+	} else if thinking.Disabled && claude.MatchesModel(c.model, claude.BetweenToolsModels) {
 		fields["thinking"] = map[string]any{"type": "between_tools"}
-	} else if thinking.Disabled && matchesModel(c.model, DefaultThinkingModels) {
+	} else if thinking.Disabled && claude.MatchesModel(c.model, claude.DefaultThinkingModels) {
 		// Bedrock only accepts the explicit disable on models that think
 		// by default; the others are off when the field is omitted.
 		fields["thinking"] = map[string]any{"type": "disabled"}
@@ -691,7 +681,7 @@ func (c *Completer) schemaAsTool(options *provider.CompleteOptions) bool {
 	}
 	// Native grammars reject dictionaries. Preserve their schema with the
 	// existing non-strict tool emulation instead of closing or rejecting them.
-	return (options.Schema.Strict == nil || !*options.Schema.Strict) && schemaAllowsAdditionalProperties(options.Schema.Properties)
+	return (options.Schema.Strict == nil || !*options.Schema.Strict) && schema.AllowsAdditionalProperties(options.Schema.Properties)
 }
 
 // resolveInput lowers the shared conversation features Converse has no
@@ -709,7 +699,7 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 		mode := options.ReasoningOptions.Context
 		// Converse cannot configure retention. Claude Code's keep-all request
 		// is already satisfied by models that preserve all thinking by default.
-		keepAll := mode == provider.ReasoningContextAllTurns && matchesModel(c.model, PreservedThinkingModels)
+		keepAll := mode == provider.ReasoningContextAllTurns && claude.MatchesModel(c.model, PreservedThinkingModels)
 		if mode != "" && mode != provider.ReasoningContextAuto && !keepAll {
 			return nil, &provider.ProviderError{
 				Code:    400,
@@ -751,9 +741,9 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 	// meet the strict-mode subset like a strict tool does. Everything else
 	// exposes the schema as a tool and forces its use.
 	if options.Schema != nil && !c.schemaAsTool(options) {
-		schema := ensureAdditionalPropertiesFalse(sanitizeStrictSchema(options.Schema.Properties))
+		properties := schema.CloseObjects(claude.SanitizeSchema(options.Schema.Properties))
 
-		data, err := json.Marshal(schema)
+		data, err := json.Marshal(properties)
 
 		if err != nil {
 			return nil, err
@@ -805,14 +795,14 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 		// keywords other providers accept.
 		if options.Schema.Strict != nil && *options.Schema.Strict && supportsStrictTools(c.model) {
 			tool.Strict = options.Schema.Strict
-			properties = ensureAdditionalPropertiesFalse(sanitizeStrictSchema(properties))
+			properties = schema.CloseObjects(claude.SanitizeSchema(properties))
 		}
 
 		tool.InputSchema = &types.ToolInputSchemaMemberJson{
 			Value: document.NewLazyDocument(properties),
 		}
 
-		if matchesModel(c.model, NoForcedToolChoiceModels) {
+		if claude.MatchesModel(c.model, claude.NoForcedToolChoiceModels) {
 			// The model rejects forced tool choice: steer toward the schema
 			// tool from its description and let the model select it.
 			tool.Description = aws.String(strings.TrimSpace(aws.ToString(tool.Description) + " " + schemaToolInstruction))
@@ -820,7 +810,7 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 
 		config.Tools = append(config.Tools, &types.ToolMemberToolSpec{Value: tool})
 
-		if matchesModel(c.model, NoForcedToolChoiceModels) {
+		if claude.MatchesModel(c.model, claude.NoForcedToolChoiceModels) {
 			config.ToolChoice = &types.ToolChoiceMemberAuto{}
 		} else if len(config.Tools) > 1 && !none {
 			// Client tools stay callable: the model must call some tool, and
@@ -846,10 +836,6 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 		inference.MaxTokens = aws.Int32(int32(*options.MaxTokens))
 	}
 
-	if options.Temperature != nil && !matchesModel(c.model, NoSamplingModels) {
-		inference.Temperature = options.Temperature
-	}
-
 	if len(options.Stop) > 0 {
 		inference.StopSequences = options.Stop
 	}
@@ -866,11 +852,7 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 		OutputConfig:    output,
 	}
 
-	fields, thinking := c.converseAdditionalFields(input, options)
-
-	if thinking.Enabled {
-		inference.Temperature = nil
-	}
+	fields, _ := c.converseAdditionalFields(options)
 
 	if len(fields) > 0 {
 		req.AdditionalModelRequestFields = document.NewLazyDocument(fields)
@@ -1190,7 +1172,7 @@ func (c *Completer) convertToolConfigPolicy(tools []provider.Tool, options *prov
 		// keywords other providers accept, so sanitize only when it is sent.
 		if t.Strict != nil && *t.Strict && supportsStrictTools(c.model) {
 			tool.Strict = t.Strict
-			params = sanitizeStrictSchema(params)
+			params = claude.SanitizeSchema(params)
 		}
 
 		if len(params) > 0 {
@@ -1222,7 +1204,7 @@ func (c *Completer) convertToolConfigPolicy(tools []provider.Tool, options *prov
 			}
 
 		case provider.ToolChoiceAny:
-			if matchesModel(c.model, NoForcedToolChoiceModels) {
+			if claude.MatchesModel(c.model, claude.NoForcedToolChoiceModels) {
 				return nil, &provider.ProviderError{
 					Code:    400,
 					Type:    "invalid_request_error",

@@ -14,7 +14,6 @@ type MessageRequest struct {
 	System            any                `json:"system,omitempty"` // string or text blocks
 	MaxTokens         *int               `json:"max_tokens"`
 	Stream            bool               `json:"stream,omitempty"`
-	Temperature       *float32           `json:"temperature,omitempty"`
 	StopSequences     []string           `json:"stop_sequences,omitempty"`
 	Tools             []ToolParam        `json:"tools,omitempty"`
 	ToolChoice        *ToolChoice        `json:"tool_choice,omitempty"`

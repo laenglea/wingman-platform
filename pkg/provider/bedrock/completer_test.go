@@ -2,6 +2,7 @@ package bedrock
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"slices"
 	"testing"
 
@@ -83,7 +84,7 @@ func TestConvertConverseInputSteersSchemaToolWithoutForcing(t *testing.T) {
 		t.Fatalf("expected auto tool choice, got %T", req.ToolConfig.ToolChoice)
 	}
 
-	fields, thinking := c.converseAdditionalFields(nil, options)
+	fields, thinking := c.converseAdditionalFields(options)
 	if !thinking.Enabled || thinking.Disabled {
 		t.Fatalf("expected thinking to stay enabled, got %+v", thinking)
 	}
@@ -98,7 +99,7 @@ func TestConvertConverseInputSteersSchemaToolWithoutForcing(t *testing.T) {
 func TestConverseAdditionalFieldsSendsBetweenTools(t *testing.T) {
 	c := &Completer{Config: &Config{model: "anthropic.claude-sonnet-5-5"}}
 
-	fields, _ := c.converseAdditionalFields(nil, &provider.CompleteOptions{
+	fields, _ := c.converseAdditionalFields(&provider.CompleteOptions{
 		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortXHigh},
 	})
 
@@ -115,7 +116,7 @@ func TestConverseAdditionalFieldsSendsBetweenTools(t *testing.T) {
 func TestConverseAdditionalFieldsProgressUpdates(t *testing.T) {
 	c := &Completer{Config: &Config{model: "eu.anthropic.claude-opus-5-5"}}
 
-	fields, _ := c.converseAdditionalFields(nil, &provider.CompleteOptions{
+	fields, _ := c.converseAdditionalFields(&provider.CompleteOptions{
 		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, IncludeUpdates: true},
 	})
 
@@ -151,7 +152,7 @@ func TestConvertConverseInputRejectsForcedToolChoice(t *testing.T) {
 func TestConverseAdditionalFields_SchemaDisablesThinking(t *testing.T) {
 	c := &Completer{Config: &Config{model: "eu.anthropic.claude-sonnet-5"}}
 
-	fields, thinking := c.converseAdditionalFields(nil, &provider.CompleteOptions{
+	fields, thinking := c.converseAdditionalFields(&provider.CompleteOptions{
 		Schema: &provider.Schema{Name: "classify", Properties: testSchema},
 	})
 
@@ -171,7 +172,7 @@ func TestConverseAdditionalFields_SchemaDisablesThinking(t *testing.T) {
 func TestConverseAdditionalFields_SchemaOmitsThinkingForOlderModels(t *testing.T) {
 	c := &Completer{Config: &Config{model: "eu.anthropic.claude-opus-4-8"}}
 
-	fields, _ := c.converseAdditionalFields(nil, &provider.CompleteOptions{
+	fields, _ := c.converseAdditionalFields(&provider.CompleteOptions{
 		Schema: &provider.Schema{Name: "classify", Properties: testSchema},
 	})
 
@@ -187,7 +188,7 @@ func TestConverseAdditionalFields_ThinkingDisplay(t *testing.T) {
 	c := &Completer{Config: &Config{model: "eu.anthropic.claude-opus-5-5"}}
 
 	for _, summarized := range []bool{true, false} {
-		fields, _ := c.converseAdditionalFields(nil, &provider.CompleteOptions{
+		fields, _ := c.converseAdditionalFields(&provider.CompleteOptions{
 			ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, IncludeSummary: summarized},
 		})
 
@@ -209,7 +210,7 @@ func TestConverseAdditionalFields_ThinkingDisplay(t *testing.T) {
 func TestConverseAdditionalFields_DisabledThinkingCapsEffort(t *testing.T) {
 	c := &Completer{Config: &Config{model: "eu.anthropic.claude-opus-5"}}
 
-	fields, _ := c.converseAdditionalFields(nil, &provider.CompleteOptions{
+	fields, _ := c.converseAdditionalFields(&provider.CompleteOptions{
 		Schema:           &provider.Schema{Name: "classify", Properties: testSchema},
 		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortXHigh},
 	})
@@ -225,13 +226,13 @@ func TestConverseAdditionalFields_DisabledThinkingCapsEffort(t *testing.T) {
 	}
 }
 
-// TestConverseAdditionalFields_UnsignedToolHistoryDisablesThinking verifies
+// TestConvertConverseInput_UnsignedToolHistoryKeepsThinking verifies
 // adaptive thinking stays on when the last assistant message carries tool
 // calls without a signed thinking block (e.g. signatures stripped for
 // portability): the unsigned reasoning is not replayed, adaptive thinking
 // accepts a tool turn without a thinking block, and a stable thinking
 // parameter keeps the prompt cache prefix intact across turns.
-func TestConverseAdditionalFields_UnsignedToolHistoryKeepsThinking(t *testing.T) {
+func TestConvertConverseInput_UnsignedToolHistoryKeepsThinking(t *testing.T) {
 	c := &Completer{Config: &Config{model: "eu.anthropic.claude-sonnet-5"}}
 
 	options := &provider.CompleteOptions{
@@ -255,15 +256,26 @@ func TestConverseAdditionalFields_UnsignedToolHistoryKeepsThinking(t *testing.T)
 		},
 	}
 
-	fields, thinking := c.converseAdditionalFields(stripped, options)
-
-	if !thinking.Enabled {
-		t.Error("expected thinking enabled for unsigned history")
+	checkThinking := func(messages []provider.Message) {
+		t.Helper()
+		req, err := c.convertConverseInput(messages, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := req.AdditionalModelRequestFields.MarshalSmithyDocument()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(data, &fields); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := fields["thinking"].(map[string]any)
+		if got["type"] != "adaptive" {
+			t.Fatalf("thinking: got %v, want adaptive", fields["thinking"])
+		}
 	}
-	got, _ := fields["thinking"].(map[string]any)
-	if got["type"] != "adaptive" {
-		t.Fatalf("thinking: got %v, want adaptive", fields["thinking"])
-	}
+	checkThinking(stripped)
 
 	signed := append([]provider.Message{}, stripped...)
 	signed[1] = provider.Message{
@@ -274,15 +286,7 @@ func TestConverseAdditionalFields_UnsignedToolHistoryKeepsThinking(t *testing.T)
 		},
 	}
 
-	fields, thinking = c.converseAdditionalFields(signed, options)
-
-	if !thinking.Enabled {
-		t.Error("expected thinking enabled for signed history")
-	}
-	got, _ = fields["thinking"].(map[string]any)
-	if got["type"] != "adaptive" {
-		t.Fatalf("signed history thinking: got %v, want adaptive", fields["thinking"])
-	}
+	checkThinking(signed)
 }
 
 // TestConvertAssistantContent_KeepsOrder verifies blocks replay in the order

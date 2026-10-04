@@ -1,260 +1,175 @@
 package google
 
 import (
-	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"google.golang.org/genai"
+	"google.golang.org/genai/interactions/models/interactions"
 )
 
-func TestStripToolIDSignature(t *testing.T) {
-	signed := formatToolID("call_1", "search", []byte("SECRET_SIG"))
-
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"call_1", "call_1"},
-		{"call_1::search", "call_1::search"},
-		{signed, "call_1::search"},
-		{"call_1::search::", "call_1::search"},
+func TestComplete_InteractionRequest(t *testing.T) {
+	var request interactions.CreateModelInteraction
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/v1beta/interactions" {
+			t.Errorf("unexpected endpoint: %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("x-goog-api-key") != "test-token" {
+			t.Error("missing authentication")
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		interactionEvents(createdEvent, completedEvent)(w, r)
 	}
-
-	for _, tt := range tests {
-		if got := StripToolIDSignature(tt.input); got != tt.want {
-			t.Errorf("StripToolIDSignature(%q) = %q, want %q", tt.input, got, tt.want)
+	c, err := NewCompleter("models/gemini-3.8-flash", WithToken("test-token"), WithClient(newTestClient(t, handler)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := []provider.Message{
+		provider.SystemMessage("You are helpful."), provider.SystemMessage("Be brief."),
+		provider.UserMessage("question"),
+		{Role: provider.MessageRoleAssistant, Content: []provider.Content{
+			provider.ReasoningContent(provider.Reasoning{Summary: "thinking", Signature: "Ev8BAA=="}),
+			provider.ToolCallContent(provider.ToolCall{ID: "c1", Name: "lookup", Namespace: "weather", Arguments: `{"city":"Zurich"}`}),
+		}},
+		{Role: provider.MessageRoleUser, Content: []provider.Content{provider.ToolResultContent(provider.ToolResult{
+			ID: "c1", IsError: true, Parts: []provider.Part{{Text: `{"error":"unavailable"}`}, {File: &provider.File{Content: []byte("image"), ContentType: "image/png"}}},
+		})}},
+		{Role: provider.MessageRoleUser, Content: []provider.Content{provider.FileContent(&provider.File{Content: []byte("pdf"), ContentType: "application/pdf"})}},
+	}
+	options := &provider.CompleteOptions{
+		MaxTokens: new(1024), Stop: []string{"STOP"},
+		Tools:            []provider.Tool{{Name: "weather", Tools: []provider.Tool{{Name: "lookup", Strict: new(true), Parameters: map[string]any{"type": "object"}}}}},
+		ReasoningOptions: &provider.ReasoningOptions{Effort: provider.EffortXHigh, IncludeSummary: true},
+		Schema:           &provider.Schema{Properties: map[string]any{"type": "object", "properties": map[string]any{"answer": map[string]any{"type": "string"}}}},
+	}
+	for _, err := range c.Complete(context.Background(), messages, options) {
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
-}
-
-func TestConvertContent_DummyThoughtSignature(t *testing.T) {
-	message := provider.Message{
-		Role: provider.MessageRoleAssistant,
-		Content: []provider.Content{
-			provider.ToolCallContent(provider.ToolCall{
-				ID:        "call_1",
-				Name:      "search",
-				Arguments: `{"query":"test"}`,
-			}),
-		},
+	if request.Store == nil || *request.Store || request.Stream == nil || !*request.Stream || request.PreviousInteractionID != nil {
+		t.Fatalf("request is not stateless: %+v", request)
 	}
-
-	content := convertContent(message, nil)
-
-	if len(content.Parts) != 1 || content.Parts[0].FunctionCall == nil {
-		t.Fatalf("expected 1 function call part, got %+v", content.Parts)
+	if request.Model != "gemini-3.8-flash" || value(request.SystemInstruction) != "You are helpful.\n\nBe brief." {
+		t.Fatalf("incorrect model/instructions: %+v", request)
 	}
-
-	if !bytes.Equal(content.Parts[0].ThoughtSignature, dummyThoughtSignature) {
-		t.Errorf("expected dummy thought signature, got %q", content.Parts[0].ThoughtSignature)
+	config := request.GenerationConfig
+	if value(config.MaxOutputTokens) != 1024 || !reflect.DeepEqual(config.StopSequences, []string{"STOP"}) || value(config.ThinkingLevel) != interactions.ThinkingLevelHigh || value(config.ThinkingSummaries) != interactions.ThinkingSummariesAuto {
+		t.Fatalf("configuration lost: %+v", config)
 	}
-}
-
-func TestConvertContent_RealSignaturePreferred(t *testing.T) {
-	message := provider.Message{
-		Role: provider.MessageRoleAssistant,
-		Content: []provider.Content{
-			provider.ToolCallContent(provider.ToolCall{
-				ID:        formatToolID("call_1", "search", []byte("REAL_SIG")),
-				Name:      "search",
-				Arguments: `{}`,
-			}),
-		},
+	if config.Temperature != nil || config.TopP != nil {
+		t.Fatal("Gemini sampling parameters must be omitted")
 	}
-
-	content := convertContent(message, nil)
-
-	if len(content.Parts) != 1 || content.Parts[0].FunctionCall == nil {
-		t.Fatalf("expected 1 function call part, got %+v", content.Parts)
+	if config.ToolChoice == nil || value(config.ToolChoice.ToolChoiceType) != interactions.ToolChoiceTypeValidated || len(request.Tools) != 1 || value(request.Tools[0].Function.Name) != "weather_lookup" {
+		t.Fatalf("tools lost: %+v", request.Tools)
 	}
-
-	if got := string(content.Parts[0].ThoughtSignature); got != "REAL_SIG" {
-		t.Errorf("expected round-tripped signature REAL_SIG, got %q", got)
+	if request.ResponseFormat == nil || request.ResponseFormat.ResponseFormat.TextResponseFormat.Schema["type"] != "object" || value(request.ResponseFormat.ResponseFormat.TextResponseFormat.MimeType) != "application/json" {
+		t.Fatalf("schema lost: %+v", request.ResponseFormat)
+	}
+	steps := request.Input.ArrayOfStep
+	if len(steps) != 5 || steps[0].UserInputStep.Content[0].TextContent.Text != "question" || value(steps[1].ThoughtStep.Signature) != "Ev8BAA==" || steps[2].FunctionCallStep.Name != "weather_lookup" || steps[3].FunctionResultStep.CallID != "c1" || !value(steps[3].FunctionResultStep.IsError) {
+		t.Fatalf("history lost: %+v", steps)
+	}
+	parts := steps[3].FunctionResultStep.Result.ArrayOfFunctionResultSubcontent
+	if len(parts) != 2 || parts[0].TextContent.Text != `{"error":"unavailable"}` || value(parts[1].ImageContent.Data) != base64.StdEncoding.EncodeToString([]byte("image")) {
+		t.Fatalf("tool result lost: %+v", parts)
+	}
+	if value(steps[4].UserInputStep.Content[0].DocumentContent.Data) != base64.StdEncoding.EncodeToString([]byte("pdf")) {
+		t.Fatal("PDF lost")
 	}
 }
 
-func TestConvertContent_PendingSignaturePreferred(t *testing.T) {
-	message := provider.Message{
-		Role: provider.MessageRoleAssistant,
-		Content: []provider.Content{
-			provider.ReasoningContent(provider.Reasoning{
-				Signature: "PENDING_SIG",
-			}),
-			provider.ToolCallContent(provider.ToolCall{
-				ID:        "call_1",
-				Name:      "search",
-				Arguments: `{}`,
-			}),
-		},
-	}
-
-	content := convertContent(message, nil)
-
-	if len(content.Parts) != 1 || content.Parts[0].FunctionCall == nil {
-		t.Fatalf("expected 1 function call part, got %+v", content.Parts)
-	}
-
-	if got := string(content.Parts[0].ThoughtSignature); got != "PENDING_SIG" {
-		t.Errorf("expected pending signature PENDING_SIG, got %q", got)
-	}
-}
-
-func TestConvertContent_ToolResultError(t *testing.T) {
-	message := provider.Message{
-		Role: provider.MessageRoleUser,
-		Content: []provider.Content{
-			provider.ToolResultContent(provider.ToolResult{
-				ID:      "call_1::search",
-				IsError: true,
-				Parts:   []provider.Part{{Text: `{"code":"permission_denied"}`}},
-			}),
-		},
-	}
-
-	content := convertContent(message, map[string]string{"call_1": "search"})
-
-	if len(content.Parts) != 1 || content.Parts[0].FunctionResponse == nil {
-		t.Fatalf("expected 1 function response part, got %+v", content.Parts)
-	}
-
-	response := content.Parts[0].FunctionResponse.Response
-	errorValue, ok := response["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error response: got %#v", response)
-	}
-	if errorValue["code"] != "permission_denied" {
-		t.Fatalf("error code: got %v", errorValue["code"])
-	}
-}
-
-// TestToCompletionUsage_ReasoningAndCacheInclusive verifies that Gemini's
-// thoughts tokens are exposed as ReasoningTokens and folded into the
-// reasoning-inclusive OutputTokens, and that PromptTokenCount (already
-// cache-inclusive) maps to InputTokens with the cached subset preserved.
-func TestToCompletionUsage_ReasoningAndCacheInclusive(t *testing.T) {
-	usage := toCompletionUsage(&genai.GenerateContentResponseUsageMetadata{
-		PromptTokenCount:        100,
-		CachedContentTokenCount: 40,
-		CandidatesTokenCount:    14,
-		ThoughtsTokenCount:      6,
-	})
-
-	if usage == nil {
-		t.Fatal("expected usage")
-	}
-	if usage.InputTokens != 100 {
-		t.Errorf("InputTokens = %d, want 100 (cache-inclusive prompt count)", usage.InputTokens)
-	}
-	if usage.OutputTokens != 20 {
-		t.Errorf("OutputTokens = %d, want 20 (14 visible + 6 thinking)", usage.OutputTokens)
-	}
-	if usage.ReasoningTokens == nil {
-		t.Fatal("expected reasoning token count")
-	}
-	if *usage.ReasoningTokens != 6 {
-		t.Errorf("ReasoningTokens = %d, want 6", *usage.ReasoningTokens)
-	}
-	if usage.CacheReadInputTokens != 40 {
-		t.Errorf("CacheReadInputTokens = %d, want 40", usage.CacheReadInputTokens)
-	}
-	if *usage.ReasoningTokens > usage.OutputTokens {
-		t.Errorf("reasoning tokens (%d) exceed OutputTokens (%d)", *usage.ReasoningTokens, usage.OutputTokens)
-	}
-}
-
-func TestToContent_EmptyFunctionCallArgs(t *testing.T) {
-	content := &genai.Content{
-		Parts: []*genai.Part{
-			{FunctionCall: &genai.FunctionCall{Name: "get_time"}},
-			{FunctionCall: &genai.FunctionCall{Name: "get_weather", Args: map[string]any{"location": "Paris"}}},
-		},
-	}
-
-	var calls []provider.ToolCall
-
-	for _, c := range toContent(content, nil, nil) {
-		if c.ToolCall != nil {
-			calls = append(calls, *c.ToolCall)
-		}
-	}
-
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 tool calls, got %d: %+v", len(calls), calls)
-	}
-	if calls[0].Arguments != "{}" {
-		t.Errorf("empty args: got %q, want {}", calls[0].Arguments)
-	}
-	if calls[1].Arguments != `{"location":"Paris"}` {
-		t.Errorf("args: got %q", calls[1].Arguments)
-	}
-}
-
-func TestApplyFinishReason(t *testing.T) {
-	tests := []struct {
-		name        string
-		reason      genai.FinishReason
-		sawToolCall bool
-
-		stopReason provider.StopReason
-		status     provider.CompletionStatus
-	}{
-		{name: "stop", reason: genai.FinishReasonStop, stopReason: provider.StopReasonEndTurn},
-		{name: "stop with tool call", reason: genai.FinishReasonStop, sawToolCall: true, stopReason: provider.StopReasonToolUse},
-		{name: "max tokens", reason: genai.FinishReasonMaxTokens, stopReason: provider.StopReasonMaxTokens, status: provider.CompletionStatusIncomplete},
-		{name: "safety", reason: genai.FinishReasonSafety, stopReason: provider.StopReasonRefusal, status: provider.CompletionStatusRefused},
-		{name: "recitation", reason: genai.FinishReasonRecitation, stopReason: provider.StopReasonRefusal, status: provider.CompletionStatusRefused},
-		{name: "malformed function call", reason: genai.FinishReasonMalformedFunctionCall, status: provider.CompletionStatusFailed},
-		{name: "mid-stream chunk", reason: ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			delta := &provider.Completion{}
-			applyFinishReason(delta, tt.reason, tt.sawToolCall)
-
-			if delta.StopReason != tt.stopReason {
-				t.Errorf("StopReason = %q, want %q", delta.StopReason, tt.stopReason)
-			}
-			if delta.Status != tt.status {
-				t.Errorf("Status = %q, want %q", delta.Status, tt.status)
-			}
-			if tt.status == provider.CompletionStatusRefused && (delta.StopDetails == nil || delta.StopDetails.Category != string(tt.reason)) {
-				t.Errorf("StopDetails = %+v, want refusal with category %q", delta.StopDetails, tt.reason)
-			}
-		})
-	}
-}
-
-func TestConvertThinkingConfig(t *testing.T) {
-	tests := []struct {
+func TestConvertInteraction_ThinkingAndToolChoice(t *testing.T) {
+	for _, test := range []struct {
 		name      string
-		model     string
 		reasoning provider.ReasoningOptions
-
-		level  genai.ThinkingLevel
-		budget *int32
+		level     interactions.ThinkingLevel
+		summary   interactions.ThinkingSummaries
 	}{
-		{name: "gemini 3 effort", model: "gemini-3.8-flash", reasoning: provider.ReasoningOptions{Effort: provider.EffortLow}, level: genai.ThinkingLevelLow},
-		{name: "gemini 3 xhigh", model: "gemini-3.8-flash", reasoning: provider.ReasoningOptions{Effort: provider.EffortXHigh}, level: genai.ThinkingLevelHigh},
-		{name: "gemini 3 disabled", model: "gemini-3.8-flash", reasoning: provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortHigh}, level: genai.ThinkingLevelMinimal},
-		{name: "gemini 3 default", model: "gemini-3.8-flash", reasoning: provider.ReasoningOptions{}},
-		{name: "gemini 2 effort", model: "gemini-2.5-flash", reasoning: provider.ReasoningOptions{Effort: provider.EffortMedium}, budget: new(int32(8192))},
-		{name: "gemini 2 disabled", model: "models/gemini-2.5-flash", reasoning: provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled}, budget: new(int32(0))},
-		{name: "gemini 2 default", model: "gemini-2.5-pro", reasoning: provider.ReasoningOptions{}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			config := convertThinkingConfig(tt.model, &tt.reasoning)
-
-			if config.ThinkingLevel != tt.level {
-				t.Errorf("ThinkingLevel = %q, want %q", config.ThinkingLevel, tt.level)
+		{"default", provider.ReasoningOptions{}, "", interactions.ThinkingSummariesNone},
+		{"minimal", provider.ReasoningOptions{Effort: provider.EffortMinimal}, interactions.ThinkingLevelLow, interactions.ThinkingSummariesNone},
+		{"low", provider.ReasoningOptions{Effort: provider.EffortLow}, interactions.ThinkingLevelLow, interactions.ThinkingSummariesNone},
+		{"medium", provider.ReasoningOptions{Effort: provider.EffortMedium}, interactions.ThinkingLevelMedium, interactions.ThinkingSummariesNone},
+		{"high", provider.ReasoningOptions{Effort: provider.EffortHigh}, interactions.ThinkingLevelHigh, interactions.ThinkingSummariesNone},
+		{"xhigh", provider.ReasoningOptions{Effort: provider.EffortXHigh}, interactions.ThinkingLevelHigh, interactions.ThinkingSummariesNone},
+		{"maximum", provider.ReasoningOptions{Effort: provider.EffortMax, IncludeSummary: true}, interactions.ThinkingLevelHigh, interactions.ThinkingSummariesAuto},
+		{"disabled", provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortHigh, IncludeSummary: true}, interactions.ThinkingLevelLow, interactions.ThinkingSummariesNone},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := convertInteraction("gemini-2.5-flash", nil, &provider.CompleteOptions{ReasoningOptions: &test.reasoning})
+			if err != nil {
+				t.Fatal(err)
 			}
-
-			if (config.ThinkingBudget == nil) != (tt.budget == nil) || (tt.budget != nil && *config.ThinkingBudget != *tt.budget) {
-				t.Errorf("ThinkingBudget = %v, want %v", config.ThinkingBudget, tt.budget)
+			if value(request.GenerationConfig.ThinkingLevel) != test.level || value(request.GenerationConfig.ThinkingSummaries) != test.summary {
+				t.Fatalf("thinking not translated: %+v", request.GenerationConfig)
 			}
 		})
+	}
+	for _, choice := range []provider.ToolChoice{provider.ToolChoiceAuto, provider.ToolChoiceNone, provider.ToolChoiceAny} {
+		request, err := convertInteraction("gemini-3.8-flash", nil, &provider.CompleteOptions{Tools: []provider.Tool{{Name: "lookup"}}, ToolOptions: &provider.ToolOptions{Choice: choice, Allowed: []string{"lookup"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		selection := request.GenerationConfig.ToolChoice
+		if choice == provider.ToolChoiceAny {
+			allowed := selection.ToolChoiceConfig.AllowedTools
+			if value(allowed.Mode) != interactions.ToolChoiceTypeAny || !reflect.DeepEqual(allowed.Tools, []string{"lookup"}) {
+				t.Fatalf("allowed tools lost: %+v", allowed)
+			}
+		} else if value(selection.ToolChoiceType) != interactions.ToolChoiceType(choice) {
+			t.Fatalf("choice lost: %+v", selection)
+		}
+	}
+}
+
+func TestConvertMessages_PreservesInterleavingAndLegacyIDs(t *testing.T) {
+	messages := []provider.Message{{Role: provider.MessageRoleAssistant, Content: []provider.Content{
+		provider.TextContent("first "), provider.ReasoningContent(provider.Reasoning{Summary: "think", Signature: "opaque_signature"}),
+		provider.ToolCallContent(provider.ToolCall{ID: "c1::lookup::Ev8BAA==", Name: "lookup", Arguments: `{}`}), provider.TextContent(" last"),
+	}}, provider.ToolMessage("c1::lookup::Ev8BAA==", "ok")}
+	steps, err := convertMessages(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 6 || steps[0].ModelOutputStep.Content[0].TextContent.Text != "first " || value(steps[1].ThoughtStep.Signature) != "opaque_signature" || value(steps[2].ThoughtStep.Signature) != "Ev8BAA==" || steps[3].FunctionCallStep.ID != "c1" || steps[4].ModelOutputStep.Content[0].TextContent.Text != " last" || steps[5].FunctionResultStep.CallID != "c1" {
+		t.Fatalf("history order changed: %+v", steps)
+	}
+}
+
+func TestConvertMessages_PreservesNumericArgumentsAndTextResults(t *testing.T) {
+	arguments := `{"id":9007199254740993,"decimal":0.1234567890123456789}`
+	steps, err := convertMessages([]provider.Message{
+		{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ToolCallContent(provider.ToolCall{ID: "c1", Name: "lookup", Arguments: arguments})}},
+		{Role: provider.MessageRoleUser, Content: []provider.Content{provider.ToolResultContent(provider.ToolResult{ID: "c1", IsError: true, Parts: []provider.Part{{Text: "first"}, {Text: " second"}}})}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(steps[0].FunctionCallStep.Arguments)
+	if err != nil || string(encoded) != `{"decimal":0.1234567890123456789,"id":9007199254740993}` {
+		t.Fatalf("tool argument precision lost: %s (%v)", encoded, err)
+	}
+	result := steps[1].FunctionResultStep
+	if result.Result.Str == nil || *result.Result.Str != "first second" || !value(result.IsError) || value(result.Name) != "lookup" {
+		t.Fatalf("plain-text result lost: %+v", result)
+	}
+}
+
+func TestConvertMessages_RejectsInvalidContent(t *testing.T) {
+	for _, messages := range [][]provider.Message{
+		{{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ToolCallContent(provider.ToolCall{ID: "c1", Name: "lookup", Arguments: `[1]`})}}},
+		{{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ToolCallContent(provider.ToolCall{ID: "c1", Name: "lookup", Arguments: `{} {}`})}}},
+		{{Role: provider.MessageRoleUser, Content: []provider.Content{provider.FileContent(&provider.File{ContentType: "application/octet-stream", Content: []byte("binary")})}}},
+		{{Role: provider.MessageRoleUser, Content: []provider.Content{provider.ToolResultContent(provider.ToolResult{ID: "c1", Parts: []provider.Part{{File: &provider.File{ContentType: "audio/wav", Content: []byte("audio")}}}})}}},
+	} {
+		if _, err := convertMessages(messages); err == nil {
+			t.Fatal("expected explicit invalid request")
+		}
 	}
 }

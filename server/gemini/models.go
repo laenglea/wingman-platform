@@ -121,9 +121,6 @@ type FunctionCallingConfig struct {
 // GenerationConfig contains generation parameters
 type GenerationConfig struct {
 	StopSequences      []string        `json:"stopSequences,omitempty"`
-	Temperature        *float32        `json:"temperature,omitempty"`
-	TopP               *float32        `json:"topP,omitempty"`
-	TopK               *int            `json:"topK,omitempty"`
 	MaxOutputTokens    *int            `json:"maxOutputTokens,omitempty"`
 	CandidateCount     *int            `json:"candidateCount,omitempty"`
 	Seed               *int            `json:"seed,omitempty"`
