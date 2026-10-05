@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"context"
 	"encoding/json"
 	"maps"
 	"net/http"
@@ -699,6 +700,11 @@ func setOutputStatus(o *ResponseOutput, status string) {
 }
 
 func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, req ResponsesRequest, completer provider.Completer, messages []provider.Message, options *provider.CompleteOptions) {
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	stopKeepalive := func() {}
+	defer func() { stopKeepalive() }()
+
 	headersSent := false
 
 	sendHeaders := func() {
@@ -706,7 +712,9 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-cache")
 			w.Header().Set("Connection", "keep-alive")
+			w.Header().Set("X-Accel-Buffering", "no")
 			headersSent = true
+			w, stopKeepalive = keepResponseStreamAlive(ctx, cancel, w)
 		}
 	}
 
@@ -1431,7 +1439,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 	failed := false
 
 	// Iterate over completions from the provider
-	for completion, err := range completer.Complete(r.Context(), messages, options) {
+	for completion, err := range completer.Complete(ctx, messages, options) {
 		if err != nil {
 			if !headersSent {
 				writeError(w, http.StatusBadGateway, err)

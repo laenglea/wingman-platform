@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"iter"
 	"strings"
 
@@ -82,6 +83,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 		}
 
 		stream := r.responses.NewStreaming(ctx, *req)
+		defer stream.Close()
 
 		// Maps item ID → call ID for function tool calls.
 		// ResponseFunctionCallArgumentsDeltaEvent uses item_id, but downstream
@@ -351,9 +353,8 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 					status = provider.CompletionStatusIncomplete
 				}
 
-				if !emitStatus(status, toResponseUsage(event.Response.Usage)) {
-					return
-				}
+				emitStatus(status, toResponseUsage(event.Response.Usage))
+				return
 
 			case responses.ResponseFailedEvent:
 				errCode := string(event.Response.Error.Code)
@@ -375,9 +376,8 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 				return
 
 			case responses.ResponseIncompleteEvent:
-				if !emitStatus(provider.CompletionStatusIncomplete, toResponseUsage(event.Response.Usage)) {
-					return
-				}
+				emitStatus(provider.CompletionStatusIncomplete, toResponseUsage(event.Response.Usage))
+				return
 
 			default:
 				// Tolerate unknown/vendor-extension events silently
@@ -387,6 +387,9 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 		if err := stream.Err(); err != nil && (stops == nil || !stops.done) {
 			yield(nil, convertError(err))
 			return
+		}
+		if stops == nil || !stops.done {
+			yield(nil, fmt.Errorf("openai: response stream ended without a terminal event: %w", io.ErrUnexpectedEOF))
 		}
 	}
 }
