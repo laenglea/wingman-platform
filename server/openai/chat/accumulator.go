@@ -193,7 +193,9 @@ func (s *StreamingAccumulator) Complete(includeUsage bool) error {
 	case provider.CompletionStatusIncomplete:
 		s.finishReason = FinishReasonLength
 	case provider.CompletionStatusRefused:
-		s.finishReason = FinishReasonContentFilter
+		if result.Message == nil || result.Message.Refusal() == "" {
+			s.finishReason = FinishReasonContentFilter
+		}
 	}
 
 	// Calls that streamed no argument bytes must still deliver parseable

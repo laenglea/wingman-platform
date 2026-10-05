@@ -368,11 +368,12 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 					}
 				}
 
-				yield(nil, &provider.ProviderError{
-					Code:    statusCodeFromResponseErrorCode(errCode),
-					Type:    errCode,
-					Message: msg,
-				})
+				retryAfter := parseRetryHeaders(json.RawMessage(event.Response.Error.JSON.ExtraFields["headers"].Raw()))
+				statusCode := statusCodeFromResponseErrorCode(errCode)
+				providerErr := newProviderError("", errCode, msg, statusCode, retryAfter, nil)
+				// Keep the Responses error classifications, including terminal failures.
+				providerErr.Code = statusCode
+				yield(nil, providerErr)
 				return
 
 			case responses.ResponseIncompleteEvent:
@@ -870,6 +871,11 @@ func (r *Responder) convertResponsesInput(messages []provider.Message, freeformP
 						OfOutputText: &responses.ResponseOutputTextParam{
 							Text: c.Text,
 						},
+					})
+				}
+				if c.Refusal != "" {
+					message.Content = append(message.Content, responses.ResponseOutputMessageContentUnionParam{
+						OfRefusal: &responses.ResponseOutputRefusalParam{Refusal: c.Refusal},
 					})
 				}
 

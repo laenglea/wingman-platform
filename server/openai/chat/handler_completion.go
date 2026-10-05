@@ -230,7 +230,9 @@ func (h *Handler) handleChatCompletionComplete(w http.ResponseWriter, r *http.Re
 		case provider.CompletionStatusIncomplete:
 			reason = FinishReasonLength
 		case provider.CompletionStatusRefused:
-			reason = FinishReasonContentFilter
+			if message.Refusal == nil {
+				reason = FinishReasonContentFilter
+			}
 		default:
 			if len(calls) > 0 {
 				reason = FinishReasonToolCalls

@@ -3,9 +3,12 @@ package responses
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"github.com/adrianliechti/wingman/test/harness"
 	"iter"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -19,6 +22,79 @@ const refusalTestModel = "refusal-test-model"
 // refusalCompleter streams a refusal in pieces, ending with a refused status.
 type refusalCompleter struct {
 	chunks []string
+}
+
+type mixedRefusalCompleter struct{ parts []provider.Content }
+
+func (c mixedRefusalCompleter) Complete(_ context.Context, _ []provider.Message, _ *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
+	return func(yield func(*provider.Completion, error) bool) {
+		for _, part := range c.parts {
+			if !yield(&provider.Completion{Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{part}}}, nil) {
+				return
+			}
+		}
+		yield(&provider.Completion{Status: provider.CompletionStatusCompleted}, nil)
+	}
+}
+
+func TestMixedRefusalSnapshotMatchesStream(t *testing.T) {
+	for _, refusalFirst := range []bool{false, true} {
+		parts := []provider.Content{{MessageID: "msg_mixed", Text: "partial"}, {MessageID: "msg_mixed", Refusal: "Cannot continue."}}
+		if refusalFirst {
+			parts[0], parts[1] = parts[1], parts[0]
+		}
+		cfg := &config.Config{Policy: noop.New()}
+		cfg.RegisterCompleter(refusalTestModel, mixedRefusalCompleter{parts: parts})
+		var nonstream map[string]any
+		rec := httptest.NewRecorder()
+		New(cfg).handleResponses(rec, httptest.NewRequest("POST", "/responses", strings.NewReader(`{"model":"`+refusalTestModel+`","input":"x"}`)))
+		if err := json.Unmarshal(rec.Body.Bytes(), &nonstream); err != nil {
+			t.Fatal(err)
+		}
+		rec = httptest.NewRecorder()
+		New(cfg).handleResponses(rec, httptest.NewRequest("POST", "/responses", strings.NewReader(`{"model":"`+refusalTestModel+`","stream":true,"input":"x"}`)))
+		events, err := harness.ParseSSE(rec.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var done, snapshot map[string]any
+		addedParts := map[float64]string{}
+		for _, e := range events {
+			switch e.Event {
+			case "response.content_part.added":
+				idx := e.Data["content_index"].(float64)
+				if addedParts[idx] != "" {
+					t.Fatal("reused content_index")
+				}
+				addedParts[idx] = e.Data["part"].(map[string]any)["type"].(string)
+			case "response.refusal.delta", "response.refusal.done", "response.output_text.delta", "response.output_text.done":
+				kind := "output_text"
+				if strings.Contains(e.Event, "refusal") {
+					kind = "refusal"
+				}
+				if addedParts[e.Data["content_index"].(float64)] != kind {
+					t.Fatal("content_index changed during the stream")
+				}
+			case "response.output_item.done":
+				done = e.Data["item"].(map[string]any)
+			case "response.completed":
+				snapshot = e.Data["response"].(map[string]any)["output"].([]any)[0].(map[string]any)
+			}
+		}
+		for label, item := range map[string]map[string]any{"done": done, "snapshot": snapshot, "nonstream": nonstream["output"].([]any)[0].(map[string]any)} {
+			if item == nil || len(item["content"].([]any)) != 2 {
+				t.Fatalf("%s lost mixed message content", label)
+			}
+			if !reflect.DeepEqual(item["content"], done["content"]) {
+				t.Fatalf("%s disagrees with streamed item", label)
+			}
+			for idx, raw := range item["content"].([]any) {
+				if raw.(map[string]any)["type"] != addedParts[float64(idx)] {
+					t.Fatalf("%s content order disagrees with stream", label)
+				}
+			}
+		}
+	}
 }
 
 func (c refusalCompleter) Complete(_ context.Context, _ []provider.Message, _ *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {

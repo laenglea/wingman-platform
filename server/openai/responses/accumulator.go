@@ -69,7 +69,8 @@ type StreamEvent struct {
 	Text string
 
 	// For refusal events
-	RefusalText string
+	RefusalText  string
+	RefusalFirst bool
 
 	// For function call events
 	ToolCallID        string
@@ -188,6 +189,7 @@ type streamMessage struct {
 	hasOutputItem      bool
 	hasContentPart     bool
 	hasRefusalPart     bool
+	refusalFirst       bool
 	messageClosed      bool
 	messageOutputIndex int
 	streamedText       strings.Builder
@@ -287,8 +289,9 @@ func (s *StreamingAccumulator) ensureMessageContentPart() error {
 	s.message.hasContentPart = true
 
 	return s.emitEvent(StreamEvent{
-		Type:        StreamEventContentPartAdded,
-		OutputIndex: s.message.messageOutputIndex,
+		Type:         StreamEventContentPartAdded,
+		OutputIndex:  s.message.messageOutputIndex,
+		ContentIndex: s.textContentIndex(),
 	})
 }
 
@@ -306,9 +309,18 @@ func (s *StreamingAccumulator) ensureMessageRefusalPart() error {
 	})
 }
 
-// refusalContentIndex places the refusal part after the text part when the
-// message carries both.
+func (s *StreamingAccumulator) textContentIndex() int {
+	if s.message.refusalFirst {
+		return 1
+	}
+	return 0
+}
+
+// Content indexes retain the order in which parts first arrived.
 func (s *StreamingAccumulator) refusalContentIndex() int {
+	if s.message.refusalFirst {
+		return 0
+	}
 	if s.message.hasContentPart || s.message.streamedText.Len() > 0 {
 		return 1
 	}
@@ -642,17 +654,19 @@ func (s *StreamingAccumulator) closeMessage() error {
 
 	if s.message.streamedText.Len() > 0 {
 		if err := s.emitEvent(StreamEvent{
-			Type:        StreamEventTextDone,
-			Text:        text,
-			OutputIndex: s.message.messageOutputIndex,
+			Type:         StreamEventTextDone,
+			Text:         text,
+			OutputIndex:  s.message.messageOutputIndex,
+			ContentIndex: s.textContentIndex(),
 		}); err != nil {
 			return err
 		}
 
 		if err := s.emitEvent(StreamEvent{
-			Type:        StreamEventContentPartDone,
-			Text:        text,
-			OutputIndex: s.message.messageOutputIndex,
+			Type:         StreamEventContentPartDone,
+			Text:         text,
+			OutputIndex:  s.message.messageOutputIndex,
+			ContentIndex: s.textContentIndex(),
 		}); err != nil {
 			return err
 		}
@@ -682,6 +696,7 @@ func (s *StreamingAccumulator) closeMessage() error {
 		Type:         StreamEventOutputItemDone,
 		Text:         text,
 		RefusalText:  refusal,
+		RefusalFirst: s.message.refusalFirst,
 		OutputIndex:  s.message.messageOutputIndex,
 		Incomplete:   s.status == provider.CompletionStatusIncomplete || s.contentFiltered(),
 		MessagePhase: s.message.phase,
@@ -890,6 +905,9 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 				return err
 			}
 
+			if s.message.streamedRefusal.Len() == 0 && s.message.streamedText.Len() == 0 {
+				s.message.refusalFirst = true
+			}
 			s.message.streamedRefusal.WriteString(content.Refusal)
 
 			if len(s.toolCalls) == 0 {
@@ -939,9 +957,10 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 				}
 
 				if err := s.emitEvent(StreamEvent{
-					Type:        StreamEventTextDelta,
-					Delta:       content.Text,
-					OutputIndex: s.message.messageOutputIndex,
+					Type:         StreamEventTextDelta,
+					Delta:        content.Text,
+					OutputIndex:  s.message.messageOutputIndex,
+					ContentIndex: s.textContentIndex(),
 				}); err != nil {
 					return err
 				}
@@ -1138,42 +1157,43 @@ func (s *StreamingAccumulator) flushMessage() error {
 			return err
 		}
 
-		if s.message.streamedText.Len() > 0 {
-			if err := s.emitEvent(StreamEvent{
-				Type:        StreamEventContentPartAdded,
-				OutputIndex: s.message.messageOutputIndex,
-			}); err != nil {
+		emitText := func() error {
+			if s.message.streamedText.Len() == 0 {
+				return nil
+			}
+			if err := s.ensureMessageContentPart(); err != nil {
 				return err
 			}
-			s.message.hasContentPart = true
-
-			if err := s.emitEvent(StreamEvent{
-				Type:        StreamEventTextDelta,
-				Delta:       text,
-				OutputIndex: s.message.messageOutputIndex,
-			}); err != nil {
-				return err
-			}
-		}
-
-		if s.message.streamedRefusal.Len() > 0 {
-			if err := s.emitEvent(StreamEvent{
-				Type:         StreamEventRefusalContentPartAdded,
+			return s.emitEvent(StreamEvent{
+				Type:         StreamEventTextDelta,
+				Delta:        text,
 				OutputIndex:  s.message.messageOutputIndex,
-				ContentIndex: s.refusalContentIndex(),
-			}); err != nil {
+				ContentIndex: s.textContentIndex(),
+			})
+		}
+		emitRefusal := func() error {
+			if s.message.streamedRefusal.Len() == 0 {
+				return nil
+			}
+			if err := s.ensureMessageRefusalPart(); err != nil {
 				return err
 			}
-			s.message.hasRefusalPart = true
-
-			if err := s.emitEvent(StreamEvent{
+			return s.emitEvent(StreamEvent{
 				Type:         StreamEventRefusalDelta,
 				Delta:        s.message.streamedRefusal.String(),
 				OutputIndex:  s.message.messageOutputIndex,
 				ContentIndex: s.refusalContentIndex(),
-			}); err != nil {
-				return err
-			}
+			})
+		}
+		first, second := emitText, emitRefusal
+		if s.message.refusalFirst {
+			first, second = emitRefusal, emitText
+		}
+		if err := first(); err != nil {
+			return err
+		}
+		if err := second(); err != nil {
+			return err
 		}
 	}
 
@@ -1205,11 +1225,15 @@ func (s *StreamingAccumulator) Result() *provider.Completion {
 	var content []provider.Content
 
 	appendMessage := func(m *streamMessage) {
+		start := len(content)
 		if m.streamedText.Len() > 0 {
 			content = append(content, provider.Content{MessageID: m.id, Phase: m.phase, Text: m.streamedText.String()})
 		}
 		if m.streamedRefusal.Len() > 0 {
 			content = append(content, provider.Content{MessageID: m.id, Phase: m.phase, Refusal: m.streamedRefusal.String()})
+		}
+		if m.refusalFirst && len(content)-start == 2 {
+			content[start], content[start+1] = content[start+1], content[start]
 		}
 	}
 
