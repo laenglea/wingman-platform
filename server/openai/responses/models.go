@@ -1028,8 +1028,9 @@ type OutputTokensDetails struct {
 
 // ResponseError contains error details when a response fails
 type ResponseError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // IncompleteDetails explains why a response stopped short

@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"context"
 	"encoding/json"
 	"maps"
 	"net/http"
@@ -517,6 +518,7 @@ func messageOutputs(message *provider.Message, messageID, status string, opts re
 	refusal := message.Refusal()
 	textEmitted := false
 	refusalEmitted := false
+	var messageItem *OutputMessage
 
 	// Only the item cut short by truncation is incomplete; everything that
 	// finished before it stays completed. The truncated item is the last one.
@@ -562,45 +564,21 @@ func messageOutputs(message *provider.Message, messageID, status string, opts re
 			}
 		}
 
-		if content.Refusal != "" && refusal != "" && !refusalEmitted {
-			refusalEmitted = true
-
+		if messageItem == nil && (content.Text != "" || content.Refusal != "") {
+			messageItem = &OutputMessage{ID: messageID, Role: MessageRoleAssistant, Status: status, Phase: phase, Contents: []OutputContent{}}
 			output = append(output, ResponseOutput{
-				Type: ResponseOutputTypeMessage,
-				OutputMessage: &OutputMessage{
-					ID:     messageID,
-					Role:   MessageRoleAssistant,
-					Status: status,
-					Phase:  phase,
-					Contents: []OutputContent{
-						{
-							Type: "refusal",
-							Text: refusal,
-						},
-					},
-				},
+				Type:          ResponseOutputTypeMessage,
+				OutputMessage: messageItem,
 			})
 		}
-
-		if refusal == "" && content.Text != "" && text != "" && !textEmitted {
+		if content.Refusal != "" && !refusalEmitted {
+			refusalEmitted = true
+			messageItem.Contents = append(messageItem.Contents, OutputContent{Type: "refusal", Text: refusal})
+		}
+		if content.Text != "" && !textEmitted {
 			textEmitted = true
-
-			output = append(output, ResponseOutput{
-				Type: ResponseOutputTypeMessage,
-				OutputMessage: &OutputMessage{
-					ID:     messageID,
-					Role:   MessageRoleAssistant,
-					Status: status,
-					Phase:  phase,
-					Contents: []OutputContent{
-						{
-							Type:        "output_text",
-							Text:        text,
-							Annotations: []any{},
-							Logprobs:    []any{},
-						},
-					},
-				},
+			messageItem.Contents = append(messageItem.Contents, OutputContent{
+				Type: "output_text", Text: text, Annotations: []any{}, Logprobs: []any{},
 			})
 		}
 
@@ -699,6 +677,11 @@ func setOutputStatus(o *ResponseOutput, status string) {
 }
 
 func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, req ResponsesRequest, completer provider.Completer, messages []provider.Message, options *provider.CompleteOptions) {
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	stopKeepalive := func() {}
+	defer func() { stopKeepalive() }()
+
 	headersSent := false
 
 	sendHeaders := func() {
@@ -706,7 +689,9 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-cache")
 			w.Header().Set("Connection", "keep-alive")
+			w.Header().Set("X-Accel-Buffering", "no")
 			headersSent = true
+			w, stopKeepalive = keepResponseStreamAlive(ctx, cancel, w)
 		}
 	}
 
@@ -793,7 +778,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				SequenceNumber: nextSeq(),
 				ItemID:         ids.get(event.MessageIndex, event.MessageID),
 				OutputIndex:    event.OutputIndex,
-				ContentIndex:   0,
+				ContentIndex:   event.ContentIndex,
 				Part: &OutputContent{
 					Type:        "output_text",
 					Text:        "",
@@ -808,7 +793,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				SequenceNumber: nextSeq(),
 				ItemID:         ids.get(event.MessageIndex, event.MessageID),
 				OutputIndex:    event.OutputIndex,
-				ContentIndex:   0,
+				ContentIndex:   event.ContentIndex,
 				Delta:          event.Delta,
 				Logprobs:       []any{},
 			})
@@ -819,7 +804,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				SequenceNumber: nextSeq(),
 				ItemID:         ids.get(event.MessageIndex, event.MessageID),
 				OutputIndex:    event.OutputIndex,
-				ContentIndex:   0,
+				ContentIndex:   event.ContentIndex,
 				Text:           event.Text,
 				Logprobs:       []any{},
 			})
@@ -830,7 +815,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				SequenceNumber: nextSeq(),
 				ItemID:         ids.get(event.MessageIndex, event.MessageID),
 				OutputIndex:    event.OutputIndex,
-				ContentIndex:   0,
+				ContentIndex:   event.ContentIndex,
 				Part: &OutputContent{
 					Type:        "output_text",
 					Text:        event.Text,
@@ -1335,6 +1320,9 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 					Text: event.RefusalText,
 				})
 			}
+			if event.RefusalFirst && len(content) == 2 {
+				content[0], content[1] = content[1], content[0]
+			}
 
 			return writeEvent(w, "response.output_item.done", OutputItemDoneEvent{
 				Type:           "response.output_item.done",
@@ -1414,6 +1402,9 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				},
 			}
 			responseDefaults(failResp, req, event.Completion)
+			if retry := provider.RetryAfterHeaderValue(provider.RetryAfterFromError(event.Error)); retry != "" {
+				failResp.Error.Headers = map[string]string{"Retry-After": retry}
+			}
 
 			return writeEvent(w, "response.failed", ResponseFailedEvent{
 				Type:           "response.failed",
@@ -1431,7 +1422,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 	failed := false
 
 	// Iterate over completions from the provider
-	for completion, err := range completer.Complete(r.Context(), messages, options) {
+	for completion, err := range completer.Complete(ctx, messages, options) {
 		if err != nil {
 			if !headersSent {
 				writeError(w, http.StatusBadGateway, err)

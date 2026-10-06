@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/adrianliechti/wingman/test/harness"
 	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/pkg/policy/noop"
@@ -20,6 +22,34 @@ const errorTestModel = "error-test-model"
 // midStreamErrCompleter emits one text chunk then returns an error.
 type midStreamErrCompleter struct {
 	err error
+}
+
+func TestResponseFailedIncludesRetryHeaders(t *testing.T) {
+	cfg := &config.Config{Policy: noop.New()}
+	cfg.RegisterCompleter(errorTestModel, midStreamErrCompleter{err: &provider.ProviderError{
+		Code: 429, Message: "Try again in 1s", RetryAfter: 2250 * time.Millisecond,
+	}})
+	rec := httptest.NewRecorder()
+	New(cfg).handleResponses(rec, httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(`{"model":"`+errorTestModel+`","stream":true,"input":"x"}`)))
+	if !strings.Contains(rec.Body.String(), "retry: 2250\n") {
+		t.Fatal("SSE retry advice lost")
+	}
+	events, err := harness.ParseSSE(rec.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Event != "response.failed" {
+			continue
+		}
+		response := event.Data["response"].(map[string]any)
+		headers := response["error"].(map[string]any)["headers"].(map[string]any)
+		if headers["Retry-After"] != "3" {
+			t.Fatalf("retry header = %v, want ceiling of 2.25s", headers)
+		}
+		return
+	}
+	t.Fatal("no response.failed event")
 }
 
 func (c midStreamErrCompleter) Complete(_ context.Context, _ []provider.Message, _ *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"math"
 	"net/http"
 	"regexp"
 	"slices"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/ssestream"
+	"golang.org/x/net/http/httpguts"
 )
 
 // convertError maps upstream OpenAI / Azure OpenAI errors into a
@@ -30,16 +32,15 @@ func convertError(err error) error {
 	}
 
 	// Streaming errors (e.g. rate limits that arrive mid-stream) are wrapped as
-	// *ssestream.StreamError with raw JSON in Event.Data. No HTTP headers are
-	// accessible (the stream already returned 200 OK), so any Retry-After hint
-	// must come from the error body itself (Azure PTU typically embeds one,
-	// e.g. "Please retry after 14 seconds").
+	// *ssestream.StreamError with raw JSON in Event.Data. Retry advice can
+	// appear in error.headers or in the message even after HTTP 200 was sent.
 	if streamErr, ok := errors.AsType[*ssestream.StreamError](err); ok {
 		var envelope struct {
 			Error struct {
-				Type    string `json:"type"`
-				Code    string `json:"code"`
-				Message string `json:"message"`
+				Type    string          `json:"type"`
+				Code    string          `json:"code"`
+				Message string          `json:"message"`
+				Headers json.RawMessage `json:"headers"`
 			} `json:"error"`
 		}
 		_ = json.Unmarshal(streamErr.Event.Data, &envelope)
@@ -49,7 +50,7 @@ func convertError(err error) error {
 			body.Message = streamErr.Message
 		}
 
-		return newProviderError(body.Type, body.Code, body.Message, http.StatusBadGateway, 0, err)
+		return newProviderError(body.Type, body.Code, body.Message, http.StatusBadGateway, parseRetryHeaders(body.Headers), err)
 	}
 
 	if apierr, ok := errors.AsType[*openai.Error](err); ok {
@@ -162,28 +163,58 @@ func parseRetryFromMessage(msg string) time.Duration {
 		return 0
 	}
 
-	val, err := strconv.ParseFloat(m[1], 64)
-	if err != nil || val <= 0 {
+	switch strings.ToLower(m[2]) {
+	case "ms", "millisecond", "milliseconds":
+		return parseRetryDuration(m[1], time.Millisecond)
+	default:
+		return parseRetryDuration(m[1], time.Second)
+	}
+}
+
+// parseRetryHeaders reads the header object embedded in a streamed error.
+// Validate and canonicalize names/values just like HTTP headers; ignore
+// malformed objects and unsupported values without losing the error itself.
+func parseRetryHeaders(raw json.RawMessage) time.Duration {
+	var values map[string]json.RawMessage
+	if json.Unmarshal(raw, &values) != nil {
 		return 0
 	}
 
-	switch strings.ToLower(m[2]) {
-	case "ms", "millisecond", "milliseconds":
-		return time.Duration(val * float64(time.Millisecond))
-	default:
-		return time.Duration(val * float64(time.Second))
+	headers := make(http.Header)
+	for name, rawValue := range values {
+		if !httpguts.ValidHeaderFieldName(name) {
+			continue
+		}
+		var value string
+		if json.Unmarshal(rawValue, &value) != nil {
+			var number json.Number
+			if json.Unmarshal(rawValue, &number) != nil {
+				continue
+			}
+			value = number.String()
+		}
+		if httpguts.ValidHeaderFieldValue(value) {
+			headers.Set(name, value)
+		}
 	}
+	return parseRetryAfter(headers)
+}
+
+// parseRetryDuration rejects non-finite and unrepresentable upstream delays.
+func parseRetryDuration(value string, unit time.Duration) time.Duration {
+	val, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	nanos := val * float64(unit)
+	if err != nil || math.IsNaN(nanos) || nanos <= 0 || nanos >= float64(math.MaxInt64) {
+		return 0
+	}
+	return time.Duration(nanos)
 }
 
 // parseRetryAfter parses Retry-After (seconds, float, HTTP-date) with retry-after-ms as fallback (Azure OpenAI).
 func parseRetryAfter(h http.Header) time.Duration {
 	if v := h.Get("Retry-After"); v != "" {
-		if secs, err := strconv.Atoi(v); err == nil {
-			return time.Duration(secs) * time.Second
-		}
-
-		if secs, err := strconv.ParseFloat(v, 64); err == nil {
-			return time.Duration(secs * float64(time.Second))
+		if d := parseRetryDuration(v, time.Second); d > 0 {
+			return d
 		}
 
 		if t, err := http.ParseTime(v); err == nil {
@@ -194,9 +225,7 @@ func parseRetryAfter(h http.Header) time.Duration {
 	}
 
 	if v := h.Get("retry-after-ms"); v != "" {
-		if ms, err := strconv.ParseFloat(v, 64); err == nil {
-			return time.Duration(ms * float64(time.Millisecond))
-		}
+		return parseRetryDuration(v, time.Millisecond)
 	}
 
 	return 0

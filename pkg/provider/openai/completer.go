@@ -408,6 +408,9 @@ func (c *Completer) convertMessages(input []provider.Message) ([]openai.ChatComp
 
 		case provider.MessageRoleAssistant:
 			message := openai.ChatCompletionAssistantMessageParam{}
+			if refusal := m.Refusal(); refusal != "" {
+				message.Refusal = openai.String(refusal)
+			}
 
 			var content []openai.ChatCompletionAssistantMessageParamContentArrayOfContentPartUnion
 
