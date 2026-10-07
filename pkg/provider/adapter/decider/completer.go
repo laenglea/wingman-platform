@@ -40,7 +40,14 @@ func (a *CompleterAdapter) Decide(ctx context.Context, input *provider.DecisionI
 		for j, option := range choices {
 			label := strconv.Itoa(j)
 			labels[j] = label
-			criteria[label] = map[string]any{"label": option.Label, "description": option.Description}
+			value := any(option.Label)
+			if option.Value != nil {
+				value = option.Value
+			}
+			if q.Score != nil && len(q.Score.Labels) == len(q.Score.Levels) {
+				value = q.Score.Labels[j]
+			}
+			criteria[label] = map[string]any{"label": value, "description": option.Description}
 			probabilities[label] = map[string]any{"type": "number", "minimum": 0, "maximum": 1}
 		}
 		questions[key] = map[string]any{"instructions": q.Instructions, "options": criteria}

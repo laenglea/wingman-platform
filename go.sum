@@ -183,6 +183,8 @@ github.com/open-policy-agent/opa v1.21.1 h1:j6NIMLmdOPUTp9+1fgtWLqbOPqwkTaxNm4T3
 github.com/open-policy-agent/opa v1.21.1/go.mod h1:eJL6KUOIaW5YLnhJEA6sm3FOYRDJaHZvYT6geATbpPk=
 github.com/openai/openai-go/v3 v3.71.1 h1:s+gWLEUvnV3sZqtZ+mlWZ3ePTtfuIV5EBY+fsnb8Njo=
 github.com/openai/openai-go/v3 v3.71.1/go.mod h1:+dSPa+nbX+dNoXg1jecMnVpgRP+E/5IBA6Jiz9Pc8WM=
+github.com/openai/openai-go/v3 v3.73.0 h1:rUaqo/zmTu5QmHplmTZ5NwXkERHMA4WwVwdQF6dYEak=
+github.com/openai/openai-go/v3 v3.73.0/go.mod h1:+dSPa+nbX+dNoXg1jecMnVpgRP+E/5IBA6Jiz9Pc8WM=
 github.com/pb33f/go-yaml v0.1.1 h1:yWGmhVdwzionRnSc/hEJwcfq6PaZL2QdYzyReXBbX7Q=
 github.com/pb33f/go-yaml v0.1.1/go.mod h1:QvWdkHP5VjFYAeHMQUkaPQqREaQnBNOXmWzAjNrnSdo=
 github.com/pb33f/ordered-map/v2 v2.3.2 h1:wDyaZ2Pv9QLh64X4utCeD5Zoi9nIv2aW3lwv172O5PQ=

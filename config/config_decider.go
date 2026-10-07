@@ -6,6 +6,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/adapter/decider"
+	"github.com/adrianliechti/wingman/pkg/provider/openai"
 	"github.com/adrianliechti/wingman/pkg/provider/typesafe"
 )
 
@@ -31,6 +32,19 @@ func (cfg *Config) Decider(id string) (provider.Decider, error) {
 }
 
 func createDecider(cfg providerConfig, model modelContext) (provider.Decider, error) {
+	if strings.EqualFold(cfg.Type, "openai") || strings.EqualFold(cfg.Type, "openai-compatible") {
+		var options []openai.Option
+		if cfg.Token != "" {
+			options = append(options, openai.WithToken(cfg.Token))
+		}
+		if model.Client != nil {
+			options = append(options, openai.WithClient(model.Client))
+		}
+		if model.MaxRetries != nil {
+			options = append(options, openai.WithMaxRetries(*model.MaxRetries))
+		}
+		return openai.NewDecider(cfg.URL, model.ID, options...)
+	}
 	if !strings.EqualFold(cfg.Type, "typesafe") {
 		return nil, errors.New("invalid decider type: " + cfg.Type)
 	}

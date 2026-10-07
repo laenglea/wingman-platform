@@ -69,10 +69,14 @@ func (a *EmbedderAdapter) Decide(ctx context.Context, input *provider.DecisionIn
 				return nil, err
 			}
 			stateIndices[qi] = addText(string(stateJSON))
-			for _, option := range options(q) {
-				text, err := json.Marshal(map[string]any{
+			for i, option := range options(q) {
+				criterion := map[string]any{
 					"question": q.Instructions, "answer": option.Label, "description": option.Description,
-				})
+				}
+				if q.Score.Labels != nil {
+					criterion["label"] = q.Score.Labels[i]
+				}
+				text, err := json.Marshal(criterion)
 				if err != nil {
 					return nil, err
 				}
@@ -91,6 +95,13 @@ func (a *EmbedderAdapter) Decide(ctx context.Context, input *provider.DecisionIn
 				return nil, err
 			}
 			label := strings.ReplaceAll(option.Label, "_", " ")
+			if option.Value != nil {
+				value, err := json.Marshal(option.Value)
+				if err != nil {
+					return nil, err
+				}
+				label = string(value)
+			}
 			if q.Noul != nil {
 				if option.Label == "true" {
 					label = "Yes"

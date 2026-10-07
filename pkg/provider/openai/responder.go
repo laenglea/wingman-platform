@@ -820,7 +820,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message, freeformP
 							tso.Execution = responses.ResponseToolSearchOutputItemParamExecution(c.ToolResult.Execution)
 						}
 						if len(c.ToolResult.Payload) > 0 {
-							var raw []responses.ToolUnionParam
+							var raw []responses.ResponseToolSearchOutputItemParamToolUnion
 							if err := json.Unmarshal(c.ToolResult.Payload, &raw); err == nil {
 								tso.Tools = raw
 							}
@@ -888,7 +888,11 @@ func (r *Responder) convertResponsesInput(messages []provider.Message, freeformP
 						ID: c.Reasoning.ID,
 					}
 
-					if c.Reasoning.Text != "" {
+					// Hosted OpenAI and Azure models replay from encrypted_content
+					// alone and reject reasoning_text content ("array too long ...
+					// maximum length 0"). Other Responses-compatible servers may
+					// need the text next to their signature to restore reasoning.
+					if c.Reasoning.Text != "" && !r.isOpenAI() {
 						reasoning.Content = append(reasoning.Content, responses.ResponseReasoningItemContentParam{
 							Text: c.Reasoning.Text,
 						})
