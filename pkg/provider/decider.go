@@ -39,10 +39,12 @@ type ChoiceQuestion struct {
 type DecisionOption struct {
 	Label       string
 	Description any
+	Value       any
 }
 
 type ScoreQuestion struct {
 	Levels []any
+	Labels []string
 }
 
 type Decision struct {
@@ -56,10 +58,13 @@ type Decision struct {
 type DecisionAnswer struct {
 	ID string
 
-	Noul   *NoulAnswer
-	Choice *ChoiceAnswer
-	Score  *ScoreAnswer
+	Noul    *NoulAnswer
+	Choice  *ChoiceAnswer
+	Score   *ScoreAnswer
+	Refusal *RefusalAnswer
 }
+
+type RefusalAnswer struct{}
 
 type NoulAnswer struct {
 	Probability float64
@@ -122,6 +127,11 @@ func (q DecisionQuestion) validate() error {
 		}
 		seen := make(map[string]bool)
 		for _, option := range q.Choice.Options {
+			switch option.Value.(type) {
+			case nil, string, bool:
+			default:
+				return errors.New("choice values must be strings or booleans")
+			}
 			if seen[option.Label] {
 				return fmt.Errorf("duplicate choice option: %q", option.Label)
 			}
@@ -131,6 +141,9 @@ func (q DecisionQuestion) validate() error {
 	}
 	if q.Score != nil {
 		variants++
+		if q.Score.Labels != nil && len(q.Score.Labels) != len(q.Score.Levels) {
+			return errors.New("score labels must match the level count")
+		}
 		if len(q.Score.Levels) < 2 || len(q.Score.Levels) > 10 {
 			return errors.New("score requires 2 to 10 levels")
 		}

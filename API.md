@@ -59,6 +59,66 @@ Prompt caching is on by default on every backend that supports it: the stable pr
 
 Prompt caching is on by default on every backend that supports it: the stable prefix is cached automatically, as on OpenAI, and cached tokens are reported in `usage.input_tokens_details.cached_tokens`. A `prompt_cache_breakpoint` on an input content part marks the end of a reusable prefix: GPT-5.6 and later take it natively, Claude backends receive it as a cache breakpoint, and other backends keep caching implicitly.
 
+## Decisions
+
+**Endpoint:** `POST /v1/decisions`
+
+Evaluate shared text or inline images with ordered questions, following the
+[OpenAI Decisions format](https://developers.openai.com/api/docs/guides/decisions).
+The supported request fields are `model`, `input`, and `questions`.
+
+| Question type | Required fields | Result |
+|---------------|-----------------|--------|
+| `predicate` | `instructions` | `probability` that the condition is true |
+| `choice` | `instructions`, `choices` containing string or boolean `value` and optional `description` | `choice`, `probabilities`, `confidence` |
+| `score` | `instructions`, ordered `levels` containing `label` and optional `description` | `score`, `probabilities`, `confidence` |
+
+Questions may include a `name`. Answers preserve question order and names;
+unnamed answers use `name: null`. A question may return `type: refusal`.
+`input` accepts a string or user messages with `input_text` and `input_image`
+parts. Images require base64 data URLs, with at most 128 images per request.
+
+Configure a native OpenAI decision model:
+
+```yaml
+providers:
+  - type: openai
+    token: ${OPENAI_API_KEY}
+    models:
+      decisions:
+        id: gpt-6-luna
+        type: decider
+```
+
+```bash
+curl http://localhost:8080/v1/decisions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "decisions",
+    "input": "The package arrived with a broken screen.",
+    "questions": [{
+      "type": "predicate",
+      "name": "damaged",
+      "instructions": "Does the customer report a damaged item?"
+    }]
+  }'
+```
+
+Responses contain `model`, an ordered `answers` array, and `usage`.
+The native provider also works through `/v1/systemone`, mapping `noul` to
+`predicate` and serializing structured state and criteria as text.
+Existing completion and embedding models can serve text decisions through
+the same adapters used by System One.
+
+Run live native and cross-model checks with `go test -v ./test/openai/decisions`.
+The native test compares an in-process Wingman server with direct OpenAI.
+The cross-model test uses a running Wingman server and the shared GPT, Claude,
+and Gemini test model list plus `text-embedding-3-small`; set
+`TEST_DECISIONS_MODELS` to a comma-separated list to select other configured
+models. `TEST_DECISIONS_NATIVE_MODEL` overrides the native reference model.
+To start an isolated server instead, append
+`-args -decisions-config /path/to/config.yaml` to the test command.
+
 ## Embeddings
 
 **Endpoint:** `POST /v1/embeddings`

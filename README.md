@@ -246,7 +246,7 @@ A single ingress speaks four dialects, so existing SDKs work unchanged:
 
 | Family | Mount | Endpoints |
 | --- | --- | --- |
-| **OpenAI** (compatible) | `/v1` | `chat/completions`, `responses`, `embeddings`, `audio/{speech,transcriptions}`, `images/{generations,edits}`, `models` |
+| **OpenAI** (compatible) | `/v1` | `chat/completions`, `responses`, `decisions`, `embeddings`, `audio/{speech,transcriptions}`, `images/{generations,edits}`, `models` |
 | **Anthropic** (compatible) | `/v1` | `messages`, `messages/count_tokens` |
 | **Gemini** (compatible) | `/v1beta` | `models/{model}:generateContent`, `:streamGenerateContent`, `:countTokens` |
 | **MCP** (native) | `/v1` | `mcp/{name}` — each configured MCP server, over HTTP-stream or SSE |
@@ -256,6 +256,10 @@ A single ingress speaks four dialects, so existing SDKs work unchanged:
 `typesafe` provider or an adapted completion or embedding model. TypeSafe SDKs
 can point their base URL at Wingman and use a configured Wingman model.
 See [System One](API.md#system-one) for the request format and response fields.
+
+`POST /v1/decisions` accepts OpenAI's ordered predicate, choice, and score
+questions. Configure an OpenAI model with `type: decider` to call the native
+Decisions API; see [Decisions](API.md#decisions).
 
 
 ## Integrations & Configuration

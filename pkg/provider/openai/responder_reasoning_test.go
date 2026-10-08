@@ -304,6 +304,55 @@ func TestConvertResponsesRequest_SkipsUnsignedReasoning(t *testing.T) {
 	}
 }
 
+func TestConvertResponsesRequest_OmitsReasoningTextForOpenAI(t *testing.T) {
+	messages := []provider.Message{
+		{
+			Role: provider.MessageRoleAssistant,
+			Content: []provider.Content{
+				provider.ReasoningContent(provider.Reasoning{
+					ID:        "rs_signed",
+					Summary:   "signed summary",
+					Text:      "signed reasoning",
+					Signature: "ENC_123",
+				}),
+			},
+		},
+	}
+
+	tests := []struct {
+		endpoint string
+		content  bool
+	}{
+		{endpoint: "", content: false},
+		{endpoint: "https://api.openai.com/v1", content: false},
+		{endpoint: "https://test.openai.azure.com/openai/v1", content: false},
+		{endpoint: "http://localhost:8000/v1", content: true},
+	}
+
+	for _, tt := range tests {
+		responder, err := NewResponder(tt.endpoint, "gpt-5.4")
+		if err != nil {
+			t.Fatalf("new responder for %q: %v", tt.endpoint, err)
+		}
+		request, err := responder.convertResponsesRequest(messages, &provider.CompleteOptions{})
+		if err != nil {
+			t.Fatalf("convert request for %q: %v", tt.endpoint, err)
+		}
+		reasoning := reasoningInputItems(t, request)
+		if len(reasoning) != 1 || reasoning[0]["encrypted_content"] != "ENC_123" {
+			t.Fatalf("request for %q lost signed reasoning: %+v", tt.endpoint, reasoning)
+		}
+		summary, _ := reasoning[0]["summary"].([]any)
+		if len(summary) != 1 {
+			t.Fatalf("request for %q lost reasoning summary: %+v", tt.endpoint, reasoning[0])
+		}
+		content, _ := reasoning[0]["content"].([]any)
+		if (len(content) > 0) != tt.content {
+			t.Fatalf("request for %q reasoning content = %+v, want present=%v", tt.endpoint, reasoning[0]["content"], tt.content)
+		}
+	}
+}
+
 func reasoningInputItems(t *testing.T, request *responses.ResponseNewParams) []map[string]any {
 	t.Helper()
 

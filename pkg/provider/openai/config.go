@@ -66,7 +66,7 @@ func (c *Config) init() {
 // Options returns SDK request options using a plain base URL.
 // For Azure this sets the Api-Key header directly and assumes the URL
 // already includes the deployment path or uses the v1 flat API.
-// Used by: Completer, Responder, Embedder.
+// Used by: Completer, Responder, Embedder, Decider.
 func (c *Config) Options() []option.RequestOption {
 	c.init()
 

@@ -160,6 +160,8 @@ func decisionsResponse(result *provider.Decision) DecisionsResponse {
 	for _, answer := range result.Answers {
 		var value DecisionAnswer
 		switch {
+		case answer.Refusal != nil:
+			value.Type = "refusal"
 		case answer.Noul != nil:
 			value.Type, value.Noul = "noul", &answer.Noul.Probability
 		case answer.Choice != nil:

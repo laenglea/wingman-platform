@@ -4,6 +4,7 @@ import (
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/server/openai/audio"
 	"github.com/adrianliechti/wingman/server/openai/chat"
+	"github.com/adrianliechti/wingman/server/openai/decisions"
 	"github.com/adrianliechti/wingman/server/openai/embeddings"
 	"github.com/adrianliechti/wingman/server/openai/image"
 	"github.com/adrianliechti/wingman/server/openai/models"
@@ -24,6 +25,7 @@ type Handler struct {
 
 	responses  *responses.Handler
 	embeddings *embeddings.Handler
+	decisions  *decisions.Handler
 
 	realtime *realtime.Handler
 }
@@ -40,6 +42,7 @@ func New(cfg *config.Config) *Handler {
 
 		responses:  responses.New(cfg),
 		embeddings: embeddings.New(cfg),
+		decisions:  decisions.New(cfg),
 
 		realtime: realtime.New(cfg),
 	}
@@ -54,6 +57,7 @@ func (h *Handler) Attach(r chi.Router) {
 
 	h.responses.Attach(r)
 	h.embeddings.Attach(r)
+	h.decisions.Attach(r)
 
 	h.realtime.Attach(r)
 }
