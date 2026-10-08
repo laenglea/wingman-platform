@@ -73,6 +73,19 @@ func TestPerMessageEffortBetweenTools(t *testing.T) {
 	}
 }
 
+func TestHaiku55DisabledEffortUpdates(t *testing.T) {
+	c, _ := NewCompleter("http://localhost", "claude-haiku-5-5")
+	input := []provider.Message{
+		provider.UserMessage("Plan"), provider.AssistantMessage("Ready"),
+		{Content: []provider.Content{provider.ConfigurationUpdateContent(provider.ConfigurationUpdate{ReasoningEffort: provider.EffortLow})}},
+		provider.UserMessage("Summarize"),
+	}
+	body := requestBody(t, c, input, &provider.CompleteOptions{ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortHigh}})
+	if len(body["messages"].([]any)) != 3 || body["output_config"].(map[string]any)["effort"] != "low" || body["thinking"].(map[string]any)["type"] != "disabled" {
+		t.Fatalf("disabled thinking must lower effort updates: %v", body)
+	}
+}
+
 func TestToolSearchPreservesDefinitionsAndResults(t *testing.T) {
 	c, _ := NewCompleter("http://localhost", "claude-fable-5-1")
 	options := &provider.CompleteOptions{Tools: []provider.Tool{

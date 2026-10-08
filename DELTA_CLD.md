@@ -13,7 +13,7 @@ Out of scope: Files/Skills, Managed Agents, admin endpoints, advisor pairings.
 ## P1
 
 - [ ] **Computer/browser toolsets.** Accept `computer_toolset_20260801` and
-      `browser_toolset_20260801` (rejected today). Opus 5.5 and Sonnet 5.5
+      `browser_toolset_20260801` (rejected today). Opus 5.5, Sonnet 5.5, and Haiku 5.5
       reject `computer_20251124` on the Claude API, so computer use is broken
       there; Bedrock still takes the legacy tool.
       - Define member schemas + a portable browser-state result on
@@ -104,6 +104,10 @@ Out of scope: Files/Skills, Managed Agents, admin endpoints, advisor pairings.
 - [ ] **`count_tokens` accuracy.** Count `thinking`, `tool_choice`,
       `output_config`, `context_management` (dropped by
       `CountTokensRequest`); use the backend tokenizer where available.
+- [ ] **Model discovery.** Expose upstream Models API capabilities and limits,
+      including `line`, `thinking.types.disabled`, and `server_tools`.
+      `server_tools.code_execution` means the server tool is accepted;
+      top-level `code_execution` means programmatic tool calling is supported.
 
 ## Tests
 
@@ -112,3 +116,35 @@ Out of scope: Files/Skills, Managed Agents, admin endpoints, advisor pairings.
       with strict binding enforcement.
 - [ ] JSON and SSE wire fixtures for every stop reason and envelope / usage
       field presence.
+
+## Release review — October 8, 2026
+
+Reviewed the [platform release notes](https://platform.claude.com/docs/en/release-notes/overview)
+from September 1 through October 8 against the current adapters.
+
+- **Adopted: Haiku 5.5.** Default-thinking summaries, disabled/forced-tool
+  effort caps, newer tokenizer estimates, Bedrock all-turn thinking retention,
+  and Claude API positional system/effort updates. The existing adapters
+  already select content by type, replay signature-only blocks, omit sampling,
+  support adaptive thinking, and propagate refusals. Defaults allow 128K output.
+  See the [migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide).
+- **Next: computer/browser toolsets and thinking binding controls.** These
+  close the remaining model migration gaps above. Until then, native computer
+  use through the Claude API remains incompatible on the new models. Signed
+  histories must stay append-only and use the originating account; Converse
+  lowering of instruction/effort updates can change the signed prefix.
+- **Next: cache diagnostics and model discovery.** Diagnostics reached GA
+  September 23. Support its request/response fields without requiring the old
+  beta header. Model discovery gained `line` (October 1), disabled-thinking
+  support (October 5), and server-tool support (October 6).
+- **Later: inline tool definitions.** September 22 added definitions inside
+  positional system messages; implement with tool additions/removals above.
+  On-demand compaction and progress displays already have adapter support.
+- **Operational:** Sonnet 4.5 retires November 30; migrate configured callers
+  to Sonnet 5.5. Sonnet 5.5 cache reads became cheaper October 7; there is no
+  static price table here to update. Admin/Compliance, Managed Agents network
+  changes, and Python/TypeScript automation toolsets do not require changes to
+  this Go Messages/Converse gateway.
+
+Verification uses local request and replay fixtures, not paid upstream calls.
+Regional Bedrock availability and access still need an account-specific smoke test.

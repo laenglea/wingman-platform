@@ -22,10 +22,10 @@ type Family string
 
 const (
 	// Claude2026 is the tokenizer of Claude Sonnet 5, Opus 4.7/4.8, Opus 5,
-	// Opus 5.5, and Fable/Mythos 5.
+	// Opus 5.5, Haiku 5.5, and Fable/Mythos 5.
 	Claude2026 Family = "claude-2026"
 	// ClaudeLegacy is the tokenizer of Claude Opus ≤ 4.6, Sonnet ≤ 4.6, and
-	// all Haiku models.
+	// Haiku through 4.5.
 	ClaudeLegacy Family = "claude-legacy"
 	// GPTO200k is OpenAI's o200k_base: GPT-5.x, GPT-4o, GPT-4.1, o-series.
 	// It is also the fallback estimate for GPT-6 until tokenizer calibration is available.
@@ -46,6 +46,7 @@ var familyPrefixes = map[string]Family{
 	"claude-opus-5-5":   Claude2026,
 	"claude-sonnet-5":   Claude2026,
 	"claude-sonnet-5-5": Claude2026,
+	"claude-haiku-5":    Claude2026,
 	"claude":            ClaudeLegacy,
 
 	"gpt-5":   GPTO200k,

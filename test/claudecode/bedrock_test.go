@@ -24,9 +24,9 @@ type bedrockTransport func(*http.Request) (*http.Response, error)
 
 func (f bedrockTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// Run the real CLI, Wingman handler and Bedrock adapter. Newer Claude Code
-// sends a trailing system message and keep-all thinking retention; Converse
-// must receive those instructions at the top level and end on the user turn.
+// Run the real CLI, Wingman handler and Bedrock adapter with a trailing
+// system instruction. Its presence must not depend on which CLI version is
+// installed; Converse must receive it at the top level and end on the user turn.
 func TestClaudeCodeOfflineBedrock(t *testing.T) {
 	binary, err := exec.LookPath("claude")
 	if err != nil {
@@ -91,7 +91,30 @@ func TestClaudeCodeOfflineBedrock(t *testing.T) {
 	cfg.RegisterCompleter(model, p)
 	router := chi.NewRouter()
 	router.Route("/v1", server.New(cfg).Attach)
-	upstream := httptest.NewServer(router)
+	const trailingInstruction = "WINGMAN_E2E_SYSTEM_GUIDANCE"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/messages" {
+			var request map[string]json.RawMessage
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+				http.Error(w, "invalid CLI request", http.StatusBadRequest)
+				return
+			}
+			r.Body.Close()
+			var messages []json.RawMessage
+			if err := json.Unmarshal(request["messages"], &messages); err != nil {
+				t.Error(err)
+				http.Error(w, "invalid CLI messages", http.StatusBadRequest)
+				return
+			}
+			instruction, _ := json.Marshal(map[string]any{"role": "system", "content": []map[string]string{{"type": "text", "text": trailingInstruction}}})
+			request["messages"], _ = json.Marshal(append(messages, instruction))
+			body, _ := json.Marshal(request)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			r.ContentLength = int64(len(body))
+		}
+		router.ServeHTTP(w, r)
+	}))
 	t.Cleanup(upstream.Close)
 	answer, exchanges, _ := runClaude(t, binary, harness.Endpoint{Name: "offline", BaseURL: upstream.URL + "/v1", APIKey: "test"}, model, "Reply with WINGMAN_E2E_OK.", "", "")
 	if answer != "WINGMAN_E2E_OK" {
@@ -99,7 +122,6 @@ func TestClaudeCodeOfflineBedrock(t *testing.T) {
 	}
 	checkExchanges(t, exchanges, model)
 
-	sawSystem := false
 	for _, exchange := range exchanges {
 		u, err := url.Parse(exchange.Path)
 		if err != nil || u.Path != "/v1/messages" {
@@ -118,7 +140,6 @@ func TestClaudeCodeOfflineBedrock(t *testing.T) {
 			if message.Role != "system" {
 				continue
 			}
-			sawSystem = true
 			var blocks []struct{ Text string }
 			if err := json.Unmarshal(message.Content, &blocks); err != nil {
 				t.Fatal(err)
@@ -130,7 +151,7 @@ func TestClaudeCodeOfflineBedrock(t *testing.T) {
 			}
 		}
 	}
-	if !sawSystem {
-		t.Fatal("installed CLI did not exercise mid-conversation system messages")
+	if !slices.Contains(systemTexts, trailingInstruction) {
+		t.Fatal("lost trailing system instruction")
 	}
 }

@@ -32,7 +32,13 @@ func TestResolveThinking(t *testing.T) {
 		{"updates on a progress-update model", "eu.anthropic.claude-opus-5-5", updates, false, thinking{Enabled: true, Updates: true, Effort: "low"}},
 		{"updates elsewhere are omitted", "eu.anthropic.claude-sonnet-4-6", updates, false, thinking{Enabled: true, Effort: "low"}},
 		{"sonnet 5.5 disabled effort is capped", "anthropic.claude-sonnet-5-5", disabled, false, thinking{Disabled: true, Effort: "high"}},
+		{"haiku 5.5 adaptive", "anthropic.claude-haiku-5-5", adaptive, false, thinking{Enabled: true, Summarized: true, Effort: "max"}},
+		{"haiku 5.5 summary sets display", "eu.anthropic.claude-haiku-5-5", summaryOnly, false, thinking{Enabled: true, Summarized: true}},
+		{"haiku 5.5 disabled effort is capped", "anthropic.claude-haiku-5-5", disabled, false, thinking{Disabled: true, Effort: "high"}},
+		{"haiku 5.5 forced tool caps effort", "anthropic.claude-haiku-5-5", adaptive, true, thinking{Disabled: true, Summarized: true, Effort: "high"}},
 		{"summary sets display on a default-thinking model", "eu.anthropic.claude-sonnet-5", summaryOnly, false, thinking{Enabled: true, Summarized: true}},
+		{"sonnet 5.5 summary sets display", "eu.anthropic.claude-sonnet-5-5", summaryOnly, false, thinking{Enabled: true, Summarized: true}},
+		{"opus 5.5 summary sets display", "eu.anthropic.claude-opus-5-5", summaryOnly, false, thinking{Enabled: true, Summarized: true}},
 		{"updates set display on a default-thinking model", "anthropic.claude-opus-5-5", updatesOnly, false, thinking{Enabled: true, Updates: true}},
 		{"summary leaves an opt-in model off", "eu.anthropic.claude-opus-4-8", summaryOnly, false, thinking{Summarized: true}},
 		{"forced tool keeps default display", "anthropic.claude-fable-5", summaryOnly, true, thinking{Summarized: true}},
@@ -66,5 +72,28 @@ func TestProgressNotes(t *testing.T) {
 		if got := c.progressNotes(tc.t); got != tc.want {
 			t.Errorf("%s %+v: got %v, want %v", tc.model, tc.t, got, tc.want)
 		}
+	}
+}
+
+func TestHaiku55AdditionalFields(t *testing.T) {
+	c := &Completer{Config: &Config{model: "anthropic.claude-haiku-5-5"}}
+	for _, tc := range []struct {
+		name, typ, display, effort string
+		opts                       provider.CompleteOptions
+	}{
+		{name: "summary", typ: "adaptive", display: "summarized", opts: provider.CompleteOptions{ReasoningOptions: &provider.ReasoningOptions{IncludeSummary: true}}},
+		{name: "disabled", typ: "disabled", effort: "high", opts: provider.CompleteOptions{ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled, Effort: provider.EffortMax}}},
+		{name: "schema tool", typ: "disabled", effort: "high", opts: provider.CompleteOptions{Schema: &provider.Schema{Properties: testSchema}, ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortMax}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fields, _ := c.converseAdditionalFields(&tc.opts)
+			thinking := fields["thinking"].(map[string]any)
+			if thinking["type"] != tc.typ || (tc.display != "" && thinking["display"] != tc.display) {
+				t.Fatalf("thinking = %v", thinking)
+			}
+			if tc.effort != "" && fields["output_config"].(map[string]any)["effort"] != tc.effort {
+				t.Fatalf("effort = %v", fields["output_config"])
+			}
+		})
 	}
 }
