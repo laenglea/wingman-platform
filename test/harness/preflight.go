@@ -1,12 +1,14 @@
 package harness
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 var (
@@ -26,7 +28,10 @@ func ConfiguredModels(baseURL, apiKey string) map[string]bool {
 
 	configuredModels[baseURL] = nil
 
-	req, err := http.NewRequest("GET", strings.TrimRight(baseURL, "/")+"/models", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(baseURL, "/")+"/models", nil)
 	if err != nil {
 		return nil
 	}
@@ -81,15 +86,15 @@ func ConfiguredModels(baseURL, apiKey string) map[string]bool {
 	return models
 }
 
-// SkipUnlessConfigured skips the test when the wingman endpoint exposes a
-// model listing and the given model is not part of it.
+// SkipUnlessConfigured requires a reachable wingman endpoint advertising the
+// model before a comparison test spends tokens on the reference provider.
 func SkipUnlessConfigured(t *testing.T, baseURL, apiKey, model string) {
 	t.Helper()
 
 	models := ConfiguredModels(baseURL, apiKey)
 
 	if models == nil {
-		return
+		t.Skip("wingman model listing unavailable — start the backend before running comparison tests")
 	}
 
 	if !models[model] {

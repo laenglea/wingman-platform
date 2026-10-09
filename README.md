@@ -333,13 +333,14 @@ providers:
   - type: anthropic
     token: sk-ant-apixx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-    # https://docs.anthropic.com/en/docs/models-overview
+    # https://platform.claude.com/docs/en/models/overview
     #
     # {alias}:
     #   - id: {anthropic api model name}
     models:
-      claude-3.5-sonnet:
-        id: claude-3-5-sonnet-20240620
+      - claude-haiku-5-5
+      - claude-sonnet-5-5
+      - claude-opus-5-5
 ```
 
 

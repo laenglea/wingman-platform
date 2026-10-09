@@ -13,10 +13,11 @@ var AlwaysThinkingModels = []string{
 }
 
 // DefaultThinkingModels think when the thinking field is omitted. Patterns
-// match by substring, so "opus-5" and "sonnet-5" also cover their 5.5 models.
+// match by substring, so the family patterns also cover their 5.5 models.
 var DefaultThinkingModels = []string{
 	"opus-5",
 	"sonnet-5",
+	"haiku-5",
 }
 
 // NoForcedToolChoiceModels reject `tool_choice: {type: "any"}` and named
@@ -54,6 +55,7 @@ var ProgressUpdateModels = []string{
 var DisabledThinkingEffortCapModels = []string{
 	"opus-5",
 	"sonnet-5-5",
+	"haiku-5",
 }
 
 // MatchesModel matches model identifiers, including Bedrock prefixes and dates.

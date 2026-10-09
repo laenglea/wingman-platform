@@ -541,15 +541,17 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 }
 
 func (c *Completer) convertMessageRequest(input []provider.Message, options *provider.CompleteOptions) (*anthropic.BetaMessageNewParams, error) {
-	midSystem := claude.MatchesModel(c.model, []string{"fable-5", "mythos-5", "opus-4-8", "opus-5", "sonnet-5-5"})
+	midSystem := claude.MatchesModel(c.model, []string{"fable-5", "mythos-5", "opus-4-8", "opus-5", "sonnet-5-5", "haiku-5"})
 	if !midSystem {
 		input = provider.ResolveInstructions(input)
 	}
-	// between_tools pins the effort for the conversation, so per-message
-	// updates are lowered to the request instead.
-	betweenTools := claude.MatchesModel(c.model, claude.BetweenToolsModels) && options != nil &&
-		options.ReasoningOptions != nil && options.ReasoningOptions.Type == provider.ReasoningTypeDisabled
-	if betweenTools || !claude.MatchesModel(c.model, []string{"fable-5-1", "mythos-5-1", "opus-5", "sonnet-5-5"}) {
+	// Sonnet's between_tools and Haiku's disabled thinking pin effort for
+	// the conversation, so per-message updates are lowered to the request.
+	disabledThinking := options != nil && options.ReasoningOptions != nil && options.ReasoningOptions.Type == provider.ReasoningTypeDisabled
+	forcedTool := options != nil && options.ToolOptions != nil && options.ToolOptions.Choice == provider.ToolChoiceAny
+	pinnedEffort := (disabledThinking && claude.MatchesModel(c.model, claude.BetweenToolsModels)) ||
+		((disabledThinking || forcedTool) && claude.MatchesModel(c.model, []string{"haiku-5"}))
+	if pinnedEffort || !claude.MatchesModel(c.model, []string{"fable-5-1", "mythos-5-1", "opus-5", "sonnet-5-5", "haiku-5"}) {
 		input, options = provider.ResolveConfigurationUpdates(input, options)
 	}
 	if options == nil {
@@ -1216,7 +1218,9 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	}
 	// Retention is meaningful only with active thinking; a forced tool call
 	// can disable it above.
-	if options.ReasoningOptions != nil && (thinking.Enabled || claude.MatchesModel(c.model, claude.AlwaysThinkingModels)) {
+	activeThinking := thinking.Enabled || claude.MatchesModel(c.model, claude.AlwaysThinkingModels) ||
+		(!thinking.Disabled && claude.MatchesModel(c.model, claude.DefaultThinkingModels))
+	if options.ReasoningOptions != nil && activeThinking {
 		var keep anthropic.BetaClearThinking20251015EditKeepUnionParam
 		switch options.ReasoningOptions.Context {
 		case provider.ReasoningContextAllTurns:

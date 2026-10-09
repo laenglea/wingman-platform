@@ -102,7 +102,9 @@ func supportsOutputFormat(model string) bool {
 
 // PreservedThinkingModels retain all prior thinking by default, so accepting
 // reasoning.context=all_turns requires no unsupported Converse parameter.
-// Earlier Sonnet/Opus models and Haiku retain only the last turn by default.
+// Entries are substring patterns: opus-5, sonnet-5, and haiku-5 include their 5.5
+// models, including regional prefixes and dated Bedrock identifiers.
+// Earlier Sonnet/Opus models and Haiku through 4.5 retain only the last turn.
 // https://platform.claude.com/docs/en/build-with-claude/context-editing
 var PreservedThinkingModels = []string{
 	"fable-5",
@@ -117,6 +119,8 @@ var PreservedThinkingModels = []string{
 
 	"sonnet-4-6",
 	"sonnet-5",
+
+	"haiku-5",
 }
 
 type thinking = claude.Thinking

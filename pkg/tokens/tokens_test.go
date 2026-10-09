@@ -54,6 +54,7 @@ func TestFamilyFor(t *testing.T) {
 		"claude-opus-5":             Claude2026,
 		"claude-opus-5-5":           Claude2026,
 		"claude-sonnet-5-5":         Claude2026,
+		"claude-haiku-5-5":          Claude2026,
 		"claude-haiku-4-5-20251001": ClaudeLegacy,
 		"claude-opus-4-6":           ClaudeLegacy,
 		"gpt-5.6":                   GPTO200k,

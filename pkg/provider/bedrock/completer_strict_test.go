@@ -89,6 +89,8 @@ func TestSupportsStrictTools(t *testing.T) {
 	}
 
 	unsupported := []string{
+		"eu.anthropic.claude-opus-5-5",
+		"eu.anthropic.claude-sonnet-5-5",
 		"eu.anthropic.claude-opus-4-8",
 		"eu.anthropic.claude-opus-4-7",
 		"eu.anthropic.claude-sonnet-5",

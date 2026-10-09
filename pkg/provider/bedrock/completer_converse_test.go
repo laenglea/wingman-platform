@@ -204,6 +204,8 @@ func TestConvertConverseInput_DefaultMaxTokens(t *testing.T) {
 		want    int32
 	}{
 		{"eu.anthropic.claude-opus-5-5", &provider.CompleteOptions{}, 128000},
+		{"eu.anthropic.claude-sonnet-5-5", &provider.CompleteOptions{}, 128000},
+		{"anthropic.claude-haiku-5-5", &provider.CompleteOptions{}, 128000},
 		{"eu.anthropic.claude-sonnet-4-6", &provider.CompleteOptions{}, 128000},
 		{"eu.anthropic.claude-haiku-4-5-20251001-v1:0", &provider.CompleteOptions{}, 64000},
 		{"eu.anthropic.claude-sonnet-4-20250514-v1:0", &provider.CompleteOptions{}, 0},
