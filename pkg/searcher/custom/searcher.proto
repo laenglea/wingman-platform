@@ -16,6 +16,7 @@ message CapabilitiesRequest {}
 message CapabilitiesResponse {
   bool date_filters = 1;
   repeated Category categories = 2;
+  bool content = 3;
 }
 
 message Category {
@@ -37,7 +38,11 @@ message SearchRequest {
   // Publication time bounds: since is inclusive; until is exclusive.
   google.protobuf.Timestamp since = 7;
   google.protobuf.Timestamp until = 8;
+  TextOptions text = 9;
 }
+
+// Presence enables page text retrieval with provider defaults.
+message TextOptions {}
 
 message SearchResponse {
   repeated Result results = 1;
@@ -47,7 +52,8 @@ message Result {
   string source = 1;
 
   string title = 2;
-  string Content = 3;
+  string excerpt = 3;
 
   map<string, string> metadata = 5;
+  optional string text = 6;
 }

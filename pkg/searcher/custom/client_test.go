@@ -45,7 +45,7 @@ func TestSearchProtocolFieldsAndCallerOptions(t *testing.T) {
 				if !proto.Equal(req, expected) {
 					t.Fatalf("request = %v, want %v", req, expected)
 				}
-				return &SearchResponse{Results: []*Result{{Source: "https://example.com/a", Title: "Release", Content: "Evidence", Metadata: map[string]string{"published": "2026-10-10T12:00:00Z", "author": "Example"}}, {Source: "https://example.com/b"}}}, nil
+				return &SearchResponse{Results: []*Result{{Source: "https://example.com/a", Title: "Release", Excerpt: "Evidence", Metadata: map[string]string{"published": "2026-10-10T12:00:00Z", "author": "Example"}}, {Source: "https://example.com/b"}}}, nil
 			})}
 			results, err := c.Search(context.Background(), " release ", options)
 			if err != nil {
@@ -54,7 +54,7 @@ func TestSearchProtocolFieldsAndCallerOptions(t *testing.T) {
 			if !called || !reflect.DeepEqual(*options, want) {
 				t.Fatal("missing RPC or mutated caller options")
 			}
-			if len(results) != 2 || results[0].Source != "https://example.com/a" || results[0].Content != "Evidence" || results[0].Timestamp == nil || results[0].Metadata["author"] != "Example" || results[1].Timestamp != nil {
+			if len(results) != 2 || results[0].Source != "https://example.com/a" || results[0].Excerpt != "Evidence" || results[0].Timestamp == nil || results[0].Metadata["author"] != "Example" || results[1].Timestamp != nil {
 				t.Fatalf("wrong results: %#v", results)
 			}
 		})

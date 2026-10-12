@@ -242,15 +242,23 @@ curl http://localhost:8080/v1/chat/completions \
 
 ### API Surface
 
-A single ingress speaks four dialects, so existing SDKs work unchanged:
+A single ingress supports existing model, retrieval, and MCP clients:
 
 | Family | Mount | Endpoints |
 | --- | --- | --- |
 | **OpenAI** (compatible) | `/v1` | `chat/completions`, `responses`, `decisions`, `embeddings`, `audio/{speech,transcriptions}`, `images/{generations,edits}`, `models` |
 | **Anthropic** (compatible) | `/v1` | `messages`, `messages/count_tokens` |
 | **Gemini** (compatible) | `/v1beta` | `models/{model}:generateContent`, `:streamGenerateContent`, `:countTokens` |
+| **Tavily** (compatible subset) | `/v1/tavily` | `search`, `extract` — over any configured searcher/scraper |
+| **Exa** (compatible subset) | `/v1/exa` | `search`, `contents` — over any configured searcher/scraper |
 | **MCP** (native) | `/v1` | `mcp/{name}` — each configured MCP server, over HTTP-stream or SSE |
 | **Wingman** (native) | `/v1` | `systemone`, `extract`, `segment`, `search`, `retrieve`, `research`, `rerank`, `summarize`, `translate`, `render`, `transcribe` |
+
+Tavily and Exa SDKs can use Wingman for a portable search/extraction subset.
+The API format is independent of the backend: for example, a Tavily client can
+use an Exa searcher, or an Exa client can use a Tavily scraper. See
+[Web retrieval compatibility](API.md#web-retrieval-compatibility) for supported
+options, SDK examples, and live cross-provider tests.
 
 `POST /v1/systemone` accepts TypeSafe state and typed questions using a native
 `typesafe` provider or an adapted completion or embedding model. TypeSafe SDKs

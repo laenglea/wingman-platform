@@ -8,11 +8,12 @@ type searchResult struct {
 	Results []struct {
 		URL string `json:"url"`
 
-		Title   string `json:"title"`
-		Content string `json:"content"`
+		Title      string  `json:"title"`
+		Content    string  `json:"content"`
+		RawContent *string `json:"raw_content"`
 
 		PublishedDate string `json:"published_date"`
 
-		Score float64 `json:"score"`
+		Score *float64 `json:"score"`
 	} `json:"results"`
 }

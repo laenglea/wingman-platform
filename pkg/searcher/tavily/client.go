@@ -74,6 +74,10 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 		"include_published_date": true,
 	}
 
+	if options.Text != nil {
+		body["include_raw_content"] = true
+	}
+
 	if location := strings.ToUpper(strings.TrimSpace(options.Location)); location != "" {
 		if topic != "general" {
 			return nil, errors.New("tavily search: location is supported only for the general category; omit location or category")
@@ -153,9 +157,18 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 		}
 		result := searcher.Result{
 			Source: r.URL,
+			Score:  r.Score,
 
 			Title:   r.Title,
-			Content: r.Content,
+			Excerpt: r.Content,
+		}
+		if options.Text != nil {
+			result.Text = r.RawContent
+			if result.Text == nil {
+				// Retrieval was attempted. Do not retry it as a fresh crawl.
+				empty := ""
+				result.Text = &empty
+			}
 		}
 
 		if dated {
@@ -172,6 +185,7 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 func (c *Client) Capabilities() searcher.Capabilities {
 	return searcher.Capabilities{
 		DateFilters: true,
+		Content:     true,
 		Categories: []searcher.Category{
 			{Name: CategoryGeneral, Description: "General web search, the default when category is omitted. Country bias is supported."},
 			{Name: CategoryNews, Description: "News articles and current-events coverage from media outlets; results carry estimated publication or update dates. Country bias is not supported."},

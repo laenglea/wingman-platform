@@ -7,9 +7,12 @@ import (
 
 	"github.com/adrianliechti/wingman/server/anthropic"
 	"github.com/adrianliechti/wingman/server/api"
+	"github.com/adrianliechti/wingman/server/exa"
 	"github.com/adrianliechti/wingman/server/gemini"
 	"github.com/adrianliechti/wingman/server/mcp"
 	"github.com/adrianliechti/wingman/server/openai"
+	"github.com/adrianliechti/wingman/server/tavily"
+	"github.com/adrianliechti/wingman/server/web"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -28,6 +31,8 @@ type Server struct {
 	openai    *openai.Handler
 	anthropic *anthropic.Handler
 	gemini    *gemini.Handler
+	exa       *exa.Handler
+	tavily    *tavily.Handler
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -36,6 +41,8 @@ func New(cfg *config.Config) (*Server, error) {
 	openai := openai.New(cfg)
 	anthropic := anthropic.New(cfg)
 	gemini := gemini.New(cfg)
+	exaHandler := exa.New(cfg)
+	tavilyHandler := tavily.New(cfg)
 
 	mux := chi.NewMux()
 
@@ -49,6 +56,8 @@ func New(cfg *config.Config) (*Server, error) {
 		openai:    openai,
 		anthropic: anthropic,
 		gemini:    gemini,
+		exa:       exaHandler,
+		tavily:    tavilyHandler,
 	}
 
 	mux.Use(middleware.Logger)
@@ -74,6 +83,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	mux.Use(otelhttp.NewMiddleware("http"))
 	mux.Use(handleRouteTag)
+	mux.Use(web.Credentials)
 	mux.Use(s.handleAuth)
 
 	mux.Route("/v1", func(r chi.Router) {
@@ -81,6 +91,8 @@ func New(cfg *config.Config) (*Server, error) {
 		s.mcp.Attach(r)
 		s.openai.Attach(r)
 		s.anthropic.Attach(r)
+		s.exa.Attach(r)
+		s.tavily.Attach(r)
 	})
 
 	mux.Route("/v1beta", func(r chi.Router) {

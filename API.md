@@ -344,8 +344,9 @@ Search for information.
 | Parameter   | Type    | Description            |
 |-------------|---------|------------------------|
 | `model`     | String  | Model/provider to use  |
-| `query`     | String  | Search query           |
+| `query`     | String  | Search query; `input` is also accepted |
 | `limit`     | Integer | Maximum results        |
+| `text` | Object or Boolean | `{}` or true requests page text; omitted, null or false returns excerpts only |
 | `category`  | String  | Provider vertical (e.g. `news`, `publication`); see provider categories |
 | `location`  | String  | ISO 3166-1 alpha-2 country code to bias results |
 | `domain`    | String  | Repeatable; restrict to a domain, or exclude one with a `!` prefix |
@@ -353,8 +354,15 @@ Search for information.
 | `until`     | String  | Latest publication date; `YYYY-MM-DD` includes the whole UTC day, RFC 3339 is an exclusive timestamp bound |
 
 ```bash
-curl -X POST -F "input=your query" -F "category=news" -F "since=2026-10-01" http://localhost:8080/v1/search
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"query":"your query","category":"news","text":{}}' \
+  http://localhost:8080/v1/search
 ```
+
+JSON, URL-encoded forms and multipart forms are supported. In forms, pass
+`text={}` or `text=true`; repeat `domain` for domain filters. JSON uses a
+`domain` array. `text` is reserved for retrieval options and is no longer a
+query alias. Unsupported text options return HTTP 400.
 
 Search options vary by provider. Unsupported filters return an error rather than
 being silently ignored.
@@ -364,7 +372,7 @@ being silently ignored.
 | Exa | `company`, `people`, `news`, `publication`, `personal site`, `financial report`; other strings are hints. Legacy `research paper` maps to `publication`. | ISO country code | Supported except with `company` or `people`, which also reject domain exclusions | 1–100 |
 | Tavily | `general` (default), `news`, `finance`; legacy `financial report` maps to `finance` | Supported country code, translated to Tavily's country name; `general` only | Strict filtering by estimated publication/update dates; undated results are omitted when bounds are supplied | 0–20 |
 | DuckDuckGo | General web search only | Supported country code, translated to a documented region/locale | Not supported by the HTML adapter | Positive integer |
-| Custom | Forwarded to the gRPC provider | Forwarded to the gRPC provider | Not present in the current gRPC protocol | Positive int32 |
+| Custom | Forwarded to the gRPC provider | Forwarded to the gRPC provider | When advertised by the gRPC provider | Positive int32 |
 
 Exa supports up to 1200 included and 1200 excluded domains. Tavily supports up
 to 300 included and 150 excluded domains. DuckDuckGo accepts hostnames, searches
@@ -373,11 +381,209 @@ Publication dates may be unavailable; Tavily dates are estimates of publication
 or the last update. Exa and Tavily preserve explicit timestamp bounds, with
 Tavily applying timestamp filtering after its calendar-date search.
 
+Each result carries a source, title, and a query-relevant `excerpt`
+when the provider has evidence available. `text={}` or `text=true` also returns
+`text` for successfully retrieved pages. Exa and Tavily retrieve that text in
+the search call; other providers use the configured scraper. Failed page
+retrieval preserves the result and its excerpt, with `text` omitted.
+
 Provider references: [Exa Search](https://exa.ai/docs/reference/search),
 [Tavily Search](https://docs.tavily.com/documentation/api-reference/endpoint/search),
 [DuckDuckGo parameters](https://duckduckgo.com/duckduckgo-help-pages/settings/params),
 [DuckDuckGo search syntax](https://duckduckgo.com/duckduckgo-help-pages/results/syntax),
 and [custom searcher protocol](pkg/searcher/custom/searcher.proto).
+
+## Web retrieval compatibility
+
+Tavily and Exa clients can point their API base URLs at Wingman. These are
+compatibility subsets over the same provider-neutral search and scraping
+interfaces used by the native endpoints. The client API does not select an
+upstream vendor: configure `searchers` and `scrapers` independently.
+
+| Client API | Base URL | Endpoints |
+| --- | --- | --- |
+| Tavily | `http://localhost:8080/v1/tavily` | `POST /search`, `POST /extract` |
+| Exa | `http://localhost:8080/v1/exa` | `POST /search`, `POST /contents` |
+
+All endpoints require a JSON object and `Content-Type: application/json`.
+They use Wingman's configured authorizers and model access policies. Clients
+send a **Wingman credential**, not an upstream vendor key. Bearer authentication
+works for both; Exa's `x-api-key` and Tavily's legacy JSON `api_key` are also
+accepted. An explicit Authorization header takes precedence.
+
+Omitting `model` selects the first configured searcher or scraper. A Wingman
+extension, `model` in the JSON body or query string, selects a named backend.
+For page contents that the searcher cannot retrieve itself, configure a searcher
+and scraper under the same name. The SDK examples below use the configured
+defaults, so switching backend requires no client changes.
+
+```python
+from tavily import TavilyClient
+from exa_py import Exa
+
+tavily = TavilyClient(api_key="WINGMAN_KEY",
+                     api_base_url="http://localhost:8080/v1/tavily")
+results = tavily.search("Go documentation", max_results=3,
+                       include_domains=["go.dev"])
+pages = tavily.extract(["https://go.dev/doc/"])
+
+exa = Exa(api_key="WINGMAN_KEY", base_url="http://localhost:8080/v1/exa")
+results = exa.search("Go documentation", num_results=3,
+                    include_domains=["go.dev"])
+pages = exa.get_contents(["https://go.dev/doc/"], text={"max_characters": 1000})
+```
+
+```typescript
+import { tavily } from '@tavily/core'
+import Exa from 'exa-js'
+
+const tvly = tavily({ apiKey: 'WINGMAN_KEY', apiBaseURL: 'http://localhost:8080/v1/tavily' })
+await tvly.search('Go documentation', { maxResults: 3 })
+await tvly.extract(['https://go.dev/doc/'])
+
+const exa = new Exa('WINGMAN_KEY', 'http://localhost:8080/v1/exa')
+await exa.search('Go documentation', { numResults: 3 })
+await exa.getContents(['https://go.dev/doc/'], { text: { maxCharacters: 1000 } })
+```
+
+### Supported retrieval options
+
+| Capability | Tavily JSON | Exa JSON |
+| --- | --- | --- |
+| Search query | `query` | `query` |
+| Result count | `max_results` (0–20; default 10) | `numResults` (1–20; default 10) |
+| Domain filters | `include_domains`, `exclude_domains` | `includeDomains`, `excludeDomains` |
+| Category | `topic`: `general`, `news`, `finance` | `category` from the selected provider's capabilities |
+| Country bias | `country`: Tavily country name or ISO code; general topic only | `userLocation`: ISO country code string |
+| Publication bounds | `start_date`, `end_date`: YYYY-MM-DD; end includes that UTC day | `startPublishedDate`, `endPublishedDate`: RFC3339 or YYYY-MM-DD; end is exclusive |
+| Recency | `time_range`: day/week/month/year or d/w/m/y; `days` for news | Use publication bounds |
+| URL extraction | `urls`: string or array, 1–20 URLs | `urls` or legacy `ids`: string or array, 1–20 URL identifiers |
+| Extraction timeout | `timeout`: 1–60 seconds per URL; default 10 | 30 seconds per URL |
+| Search excerpts | Always in `content` | `contents.highlights`: true or `{ "maxCharacters": N }` |
+| Page text in search | `include_raw_content`: true or `"markdown"` | `contents.text`: true or `{ "maxCharacters": N }` |
+| Extracted text limit | Unavailable | `text`: true or `{ "maxCharacters": N }` |
+
+Domain filters allow up to 300 included and 150 excluded hostnames. Date and
+category filters require support from the selected backend; `finance` and
+`financial report` are translated between Tavily and Exa. Recency windows use
+1, 7, 30, or 365 days and intersect with explicit publication bounds.
+
+Search and extraction use the backend's configured retrieval strategy.
+Tavily's default `search_depth: basic`, `extract_depth: basic`, and
+`format: markdown`, and Exa's `type: auto`, are accepted as baseline SDK hints;
+they do not override backend configuration. Extracted content is the backend's
+normalized text, which may contain Markdown. Backend-specific depth modes,
+format conversion, images, summaries, custom excerpt-selection queries, cached snapshot
+controls, generated answers, and billing/usage fields are not emulated.
+Unsupported active options and unknown fields return HTTP 400, rather than
+silently losing the requested behavior. Disabled SDK options may be omitted,
+null, or their documented defaults. Other endpoints return HTTP 404.
+
+Tavily returns `query`, `answer: null`, `images: []`, `results`, `response_time`,
+and `request_id`; each result includes `url`, `title`, `content`, and
+`raw_content` (null unless page text is requested and available).
+`score` is included only when the backend supplies it.
+Exa returns `requestId`, `results`, and optional retrieval `statuses` and
+`searchTime`. Exa results omit scores. Result IDs are URLs and can be passed
+to `/contents`. Full-text searches reuse complete text returned by the searcher;
+only sources for which full-text retrieval was not attempted use the configured
+scraper. Unavailable search text is reported as a partial failure, without an
+automatic fresh crawl. Use `/contents` to explicitly retry a page fetch.
+No synthetic relevance scores or vendor credit charges are returned.
+
+Extraction runs at most four fetches concurrently and preserves input order
+within its results and failures. A page failure does not fail the whole batch:
+Tavily returns `failed_results`; Exa returns one `statuses` entry per URL.
+Provider errors use HTTP 502, validation errors use HTTP 400, and access-denied
+providers use HTTP 404. Errors follow the selected API's JSON envelope.
+
+### Shared result contract
+
+The current [Exa OpenAPI specification](https://exa.ai/docs/exa-spec.yaml) and
+the embedded OpenAPI schemas for [Tavily Search](https://docs.tavily.com/documentation/api-reference/endpoint/search)
+and [Tavily Extract](https://docs.tavily.com/documentation/api-reference/endpoint/extract)
+separate evidence retrieval from generated answers. The common searcher
+interface always returns excerpts and has one optional full-text switch:
+
+```go
+type SearchOptions struct {
+    // Existing count, category, location, domain and date filters omitted.
+    Text *TextOptions
+}
+
+// nil Text means excerpts only; &TextOptions{} also requests page text.
+type TextOptions struct{}
+```
+
+| Requested evidence | Exa mapping | Tavily mapping | Separate fetch |
+| --- | --- | --- | --- |
+| Query excerpts (always) | `contents.highlights` | `results[].content` | Never |
+| Optional page text | `contents.text` | `include_raw_content` | Only when the search backend has no integrated text retrieval |
+| Known URL content | `/contents` | `/extract` | Call the configured scraper directly |
+
+There is no excerpt selector or character budget in the shared interface.
+Providers use their normal excerpt size. Exa SDK `maxCharacters` is retained
+as an optional compatibility response limit (1–1,000,000 Unicode characters),
+including for highlights; it does not alter the shared provider request.
+`Capabilities.Content` distinguishes integrated page retrieval from a
+searcher-plus-scraper fallback. An unavailable page
+must retain its retrieval failure rather than silently substituting a snippet
+for full text or initiating an unrequested fresh crawl.
+
+Exa SDK 2.25.0 defaults `search()` to requesting text, even though its HTTP
+content controls are optional. The official SDK probes explicitly request
+both text and highlights through each backend.
+Absent or empty search `contents` does not request text in Wingman. The
+`/contents` extraction subset defaults to text retrieval when no text selector
+is supplied.
+The Exa provider requests native highlights for excerpts and adds page text
+only when `SearchOptions.Text` is non-nil. Shared result fields are `Excerpt`
+for query evidence and `Text` for page text. Compatibility endpoints expose excerpts only
+in the fields requested by their SDK dialect. Custom gRPC services can advertise
+`content` and handle the optional `text` options message; older services continue to return
+excerpts, with optional text composed through the configured scraper.
+
+Freshness belongs to content retrieval options, separately from output shape.
+Exa supports cache preference, a maximum cached age, forced fresh retrieval,
+and cached-only retrieval. Tavily's published Search/Extract schemas do not
+expose equivalent cache-policy fields, so those controls require explicit
+capabilities or a cache in Wingman before they can be advertised as portable.
+Similarly, search speed/quality presets belong to provider configuration or a
+separate common search profile; provider-specific depth names are not identical
+algorithms. Generated answers, summaries, and structured synthesis belong to
+research/completion interfaces, with structured citation support.
+
+### Additional API assessment
+
+The current [Exa API reference](https://exa.ai/docs/reference/answer) includes
+`/answer`, which combines search, LLM synthesis, and structured source citations.
+It is a useful next addition once Wingman's research interface carries citation
+data alongside report text; mapping report text alone would lose that contract.
+The [Tavily API](https://docs.tavily.com/documentation/api-reference/endpoint/research)
+also includes asynchronous research, crawl, and map operations. These require
+task lifecycle or site traversal capabilities that the current provider-neutral
+interfaces do not expose, so they are outside this retrieval subset.
+
+### Verification
+
+The dedicated `server/tavily` and `server/exa` tests cover authentication,
+access policies, filter translation, partial failures, Unicode limits, and
+rejection of unsupported options. Live tests load the nearest `.env` and require
+both `TAVILY_API_KEY` and `EXA_API_KEY`. They compare portable response fields
+against the native APIs and exercise both API dialects over both hosted backends,
+plus extraction through the built-in HTTP fetcher.
+
+```shell
+# Live HTTP contracts against both vendors
+WEB_LIVE_TEST=1 go test -v ./server/tavily ./server/exa -run TestLiveHTTP
+
+# Official JavaScript and Python SDKs, over both hosted backends
+npm ci --prefix test/webtest/sdk
+uv venv /tmp/wingman-web-sdk-venv
+uv pip install --python /tmp/wingman-web-sdk-venv/bin/python -r test/webtest/sdk/requirements.txt
+WEB_LIVE_TEST=1 WEB_SDK_TEST=1 WEB_TEST_PYTHON=/tmp/wingman-web-sdk-venv/bin/python \
+  go test -v ./server/tavily ./server/exa -run TestLiveSDK
+```
 
 ## Research
 

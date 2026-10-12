@@ -42,7 +42,7 @@ func TestSearchRegionAndHTMLResults(t *testing.T) {
 	if !reflect.DeepEqual(*options, want) {
 		t.Fatal("mutated caller options")
 	}
-	if len(results) != 3 || results[0].Source != "https://example.com/a?x=1&y=2" || results[0].Title != "Research & release" || results[0].Content != "Evidence <verbatim>." || results[1].Content != "" || len(results[2].Content) != 70000 {
+	if len(results) != 3 || results[0].Source != "https://example.com/a?x=1&y=2" || results[0].Title != "Research & release" || results[0].Excerpt != "Evidence <verbatim>." || results[1].Excerpt != "" || len(results[2].Excerpt) != 70000 {
 		t.Fatalf("wrong results: %d %+v", len(results), results[:min(len(results), 2)])
 	}
 }

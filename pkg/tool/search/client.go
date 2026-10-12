@@ -261,7 +261,7 @@ func (c *Client) Execute(ctx context.Context, name string, parameters map[string
 		var fresh []searcher.Result
 		omitted := 0
 		for _, hit := range outcomes[i].hits {
-			key := evidence{source: canonicalURL(hit.Source), title: hit.Title, content: hit.Content}
+			key := evidence{source: canonicalURL(hit.Source), title: hit.Title, content: hit.Excerpt}
 			if hit.Timestamp != nil {
 				key.published = hit.Timestamp.UTC().Format(time.RFC3339Nano)
 			}
@@ -356,7 +356,7 @@ func formatResults(hits []searcher.Result, maxChars int) string {
 			fmt.Fprintf(&b, " — %s", h.Timestamp.Format("2006-01-02"))
 		}
 		b.WriteString("\n")
-		if s := snippet(h.Content, maxChars); s != "" {
+		if s := snippet(h.Excerpt, maxChars); s != "" {
 			fmt.Fprintf(&b, "   %s\n", s)
 		}
 	}

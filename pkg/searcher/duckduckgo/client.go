@@ -40,6 +40,9 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 	if options == nil {
 		options = new(searcher.SearchOptions)
 	}
+	if options.Text != nil {
+		return nil, errors.New("duckduckgo search: integrated full text is not supported; use a scraper")
+	}
 	if options.Limit != nil && *options.Limit < 1 {
 		return nil, errors.New("duckduckgo search: limit must be positive")
 	}
@@ -157,7 +160,7 @@ func parseResults(body io.Reader) ([]searcher.Result, error) {
 					}
 				}
 				if hasClass(child, "result__snippet") {
-					result.Content = nodeText(child)
+					result.Excerpt = nodeText(child)
 				}
 				for next := child.FirstChild; next != nil; next = next.NextSibling {
 					read(next)

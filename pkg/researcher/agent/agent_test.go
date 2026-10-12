@@ -14,7 +14,7 @@ import (
 type fakeSearcher struct{}
 
 func (f *fakeSearcher) Search(ctx context.Context, q string, o *searcher.SearchOptions) ([]searcher.Result, error) {
-	return []searcher.Result{{Source: "https://example.com", Title: "Example", Content: "body"}}, nil
+	return []searcher.Result{{Source: "https://example.com", Title: "Example", Excerpt: "body"}}, nil
 }
 
 func (f *fakeSearcher) Capabilities() searcher.Capabilities {
