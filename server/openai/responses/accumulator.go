@@ -271,6 +271,10 @@ func (s *StreamingAccumulator) ensureMessageItem() error {
 		return err
 	}
 
+	if err := s.closeCompletedToolCalls(); err != nil {
+		return err
+	}
+
 	s.message.hasOutputItem = true
 	s.message.messageOutputIndex = s.reserveOutputIndex(streamItemMessage, len(s.messages)-1)
 
@@ -495,12 +499,37 @@ func (s *StreamingAccumulator) shouldClosePreviousToolCall(nextID string) bool {
 		s.toolCallArgumentsComplete(s.lastToolCallID)
 }
 
+// Completed calls may be followed by native message or reasoning items.
+// Keep unfinished calls open so later argument fragments remain valid.
+func (s *StreamingAccumulator) closeCompletedToolCalls() error {
+	for i := range s.toolCalls {
+		call := &s.toolCalls[i]
+		if call.Closed {
+			continue
+		}
+		id := call.ID
+		if s.toolCallArgumentsComplete(id) {
+			if err := s.closeToolCall(id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (s *StreamingAccumulator) ensureReasoningItem() error {
 	if s.hasReasoningItem {
 		return nil
 	}
 
 	if err := s.closeCompaction(); err != nil {
+		return err
+	}
+
+	if err := s.closeMessage(); err != nil {
+		return err
+	}
+	if err := s.closeCompletedToolCalls(); err != nil {
 		return err
 	}
 
@@ -910,7 +939,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			}
 			s.message.streamedRefusal.WriteString(content.Refusal)
 
-			if len(s.toolCalls) == 0 {
+			if len(s.toolCalls) == 0 || s.message.id != "" {
 				if err := s.closeReasoning(); err != nil {
 					return err
 				}
@@ -933,10 +962,9 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			}
 		}
 
-		// Text — only emit if no tool calls have started yet; otherwise
-		// just accumulate (will be flushed in Complete). This prevents
-		// opening a message output item after function_call items when
-		// an upstream provider sends text after tool calls.
+		// Native message IDs identify a new item even after tool calls.
+		// Stream these messages in place so subsequent signed reasoning
+		// retains its position. ID-less trailing text is flushed at completion.
 		if content.Text != "" {
 			if err := s.closeCompaction(); err != nil {
 				return err
@@ -944,7 +972,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 
 			s.message.streamedText.WriteString(content.Text)
 
-			if len(s.toolCalls) == 0 {
+			if len(s.toolCalls) == 0 || s.message.id != "" {
 				if err := s.closeReasoning(); err != nil {
 					return err
 				}

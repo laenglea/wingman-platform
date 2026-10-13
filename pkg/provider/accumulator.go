@@ -19,9 +19,9 @@ type CompletionAccumulator struct {
 	reasonings  []Reasoning
 	compactions []Compaction
 
-	toolCalls      []ToolCall
-	toolResults    []ToolResult
-	lastToolCallID string
+	toolCall    string
+	toolCalls   []ToolCall
+	toolResults []ToolResult
 
 	usage *Usage
 
@@ -270,7 +270,7 @@ func (a *CompletionAccumulator) addToolCall(c *ToolCall) {
 	targetID := c.ID
 
 	if targetID == "" {
-		targetID = a.lastToolCallID
+		targetID = a.toolCall
 	}
 
 	if targetID == "" {
@@ -296,7 +296,7 @@ func (a *CompletionAccumulator) addToolCall(c *ToolCall) {
 		target = &a.toolCalls[len(a.toolCalls)-1]
 	}
 
-	a.lastToolCallID = targetID
+	a.toolCall = targetID
 
 	if c.Kind != "" {
 		target.Kind = c.Kind

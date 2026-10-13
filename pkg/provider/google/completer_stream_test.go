@@ -113,7 +113,7 @@ func TestComplete_ParallelToolsAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(steps) != 3 || steps[0].FunctionCallStep.Name != "weather_lookup" || value(steps[2].FunctionResultStep.Name) != "weather_lookup" || steps[2].FunctionResultStep.CallID != "c1" {
+	if len(steps) != 4 || value(steps[0].ThoughtStep.Signature) != unsignedThoughtSignature || steps[1].FunctionCallStep.Name != "weather_lookup" || value(steps[3].FunctionResultStep.Name) != "weather_lookup" || steps[3].FunctionResultStep.CallID != "c1" {
 		t.Fatalf("tool replay lost names/IDs: %+v", steps)
 	}
 }

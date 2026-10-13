@@ -52,9 +52,6 @@ belong.
       `nullable`) like `responseSchema`, keep it distinct from
       `parametersJsonSchema`, and reject both being set (`parameters` wins
       silently today).
-- [ ] **`thoughtSignature`.** Emit it on `functionCall` parts and read it back
-      from replayed ones; today it only travels in the packed
-      `id::name::signature` call id (`convert.go`, `toMessage` / `toContent`).
 
 ### Parts and response
 

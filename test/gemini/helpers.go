@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/adrianliechti/wingman/test/harness"
@@ -34,7 +35,12 @@ var WeatherTool = map[string]any{
 
 func (h *Harness) SkipUnlessConfigured(t *testing.T, model string) {
 	t.Helper()
-	harness.SkipUnlessConfigured(t, h.Wingman.BaseURL, h.Wingman.APIKey, model)
+	// Wingman's model registry is exposed on its OpenAI route.
+	registryURL := h.Wingman.BaseURL
+	if strings.HasSuffix(registryURL, "/v1beta") {
+		registryURL = strings.TrimSuffix(registryURL, "/v1beta") + "/v1"
+	}
+	harness.SkipUnlessConfigured(t, registryURL, h.Wingman.APIKey, model)
 }
 
 func WithModel(body map[string]any, model string) map[string]any {
