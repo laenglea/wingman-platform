@@ -138,6 +138,9 @@ func TestToolSearchAcrossAPIsAndProvidersE2E(t *testing.T) {
 						if !strings.Contains(string(data), "tool_search") || !strings.Contains(string(data), searchID) || !strings.Contains(string(data), "lookup") {
 							t.Fatalf("missing search state: %s", data)
 						}
+						if source == "claude" && !strings.Contains(string(data), `"pattern":"lookup"`) {
+							t.Fatalf("lost streamed server_tool_use input arguments: %s", data)
+						}
 						if source == "claude" && api == "messages" && !reflect.DeepEqual(types, []string{"text", "server_tool_use", "tool_search_tool_result", "text", "tool_use"}) {
 							t.Fatalf("changed signed block order: %v", types)
 						}

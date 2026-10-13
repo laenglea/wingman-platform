@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/google"
 	"github.com/adrianliechti/wingman/pkg/tool"
 	"github.com/adrianliechti/wingman/server/files"
 )
@@ -66,6 +67,11 @@ func toMessage(c Content, pendingCallIDs map[string][]string) (*provider.Message
 
 	for _, part := range c.Parts {
 		sig := string(part.ThoughtSignature)
+		// Native Gemini signatures are binary; Interactions expects base64.
+		// Wingman's realm-tagged signatures already hold the encoded value.
+		if realm, _ := provider.ParseSignature(sig); realm == "" {
+			sig = google.EncodeThoughtSignature(part.ThoughtSignature)
+		}
 
 		if part.Thought {
 			content = append(content, provider.ReasoningContent(provider.Reasoning{
@@ -75,7 +81,9 @@ func toMessage(c Content, pendingCallIDs map[string][]string) (*provider.Message
 			continue
 		}
 
-		if sig != "" && part.FunctionCall == nil && part.FunctionResponse == nil {
+		// The signature precedes the part's content, including a function call:
+		// Gemini requires it back on the call that opened the step.
+		if sig != "" && part.FunctionResponse == nil {
 			content = append(content, provider.ReasoningContent(provider.Reasoning{
 				Signature: sig,
 			}))
@@ -271,8 +279,9 @@ func toContent(content []provider.Content) *Content {
 
 	var pendingSig string
 
-	for _, c := range content {
+	for i, c := range content {
 		if c.Reasoning != nil {
+			beforeCall := i+1 < len(content) && content[i+1].ToolCall != nil
 			text := c.Reasoning.Text
 			if text == "" {
 				text = c.Reasoning.Summary
@@ -280,8 +289,11 @@ func toContent(content []provider.Content) *Content {
 
 			if text == "" {
 				if c.Reasoning.Signature != "" {
-					if n := len(parts); n > 0 && len(parts[n-1].ThoughtSignature) == 0 && !parts[n-1].Thought {
-						parts[n-1].ThoughtSignature = []byte(c.Reasoning.Signature)
+					// A replayed signature precedes the part it belongs to; a
+					// terminal signature-only delta belongs to the preceding part.
+					beforePart := beforeCall || i+1 < len(content) && content[i+1].Text != ""
+					if n := len(parts); !beforePart && n > 0 && len(parts[n-1].ThoughtSignature) == 0 && !parts[n-1].Thought {
+						parts[n-1].ThoughtSignature = google.DecodeThoughtSignature(c.Reasoning.Signature)
 					} else {
 						pendingSig = c.Reasoning.Signature
 					}
@@ -295,7 +307,11 @@ func toContent(content []provider.Content) *Content {
 			}
 
 			if c.Reasoning.Signature != "" {
-				part.ThoughtSignature = []byte(c.Reasoning.Signature)
+				if beforeCall {
+					pendingSig = c.Reasoning.Signature
+				} else {
+					part.ThoughtSignature = google.DecodeThoughtSignature(c.Reasoning.Signature)
+				}
 			}
 
 			parts = append(parts, part)
@@ -306,7 +322,7 @@ func toContent(content []provider.Content) *Content {
 				Text: c.Text,
 			}
 			if pendingSig != "" {
-				part.ThoughtSignature = []byte(pendingSig)
+				part.ThoughtSignature = google.DecodeThoughtSignature(pendingSig)
 				pendingSig = ""
 			}
 			parts = append(parts, part)
@@ -337,7 +353,7 @@ func toContent(content []provider.Content) *Content {
 				},
 			}
 			if pendingSig != "" {
-				part.ThoughtSignature = []byte(pendingSig)
+				part.ThoughtSignature = google.DecodeThoughtSignature(pendingSig)
 				pendingSig = ""
 			}
 			parts = append(parts, part)
@@ -345,7 +361,7 @@ func toContent(content []provider.Content) *Content {
 	}
 
 	if pendingSig != "" {
-		parts = append(parts, &Part{ThoughtSignature: []byte(pendingSig)})
+		parts = append(parts, &Part{ThoughtSignature: google.DecodeThoughtSignature(pendingSig)})
 	}
 
 	if len(parts) == 0 {

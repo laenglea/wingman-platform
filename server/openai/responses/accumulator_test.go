@@ -53,6 +53,44 @@ func TestStreamingAccumulatorMergesUsage(t *testing.T) {
 	}
 }
 
+func TestStreamingAccumulatorKeepsPartialCallOpenAcrossNativeItems(t *testing.T) {
+	var events []StreamEvent
+	acc := NewStreamingAccumulator(func(event StreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	add := func(part provider.Content) {
+		t.Helper()
+		if err := acc.Add(provider.Completion{Message: &provider.Message{Content: []provider.Content{part}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add(provider.ToolCallContent(provider.ToolCall{ID: "c1", Name: "lookup", Arguments: `{"city":`}))
+	add(provider.Content{MessageID: "msg1", Text: "Working."})
+	add(provider.ReasoningContent(provider.Reasoning{ID: "rs1", Signature: "signature"}))
+	for _, event := range events {
+		if event.Type == StreamEventFunctionCallArgumentsDone || event.Type == StreamEventFunctionCallDone {
+			t.Fatal("native items closed a call with incomplete arguments")
+		}
+	}
+	add(provider.ToolCallContent(provider.ToolCall{ID: "c1", Arguments: `"Zurich"}`}))
+	if err := acc.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	done := 0
+	for _, event := range events {
+		if event.Type == StreamEventFunctionCallArgumentsDone {
+			done++
+			if event.Arguments != `{"city":"Zurich"}` {
+				t.Fatalf("arguments = %q", event.Arguments)
+			}
+		}
+	}
+	if done != 1 {
+		t.Fatalf("arguments.done emitted %d times", done)
+	}
+}
+
 func TestAccumulatorsPreserveOptionalReasoningUsage(t *testing.T) {
 	for _, kind := range []string{"completion", "stream"} {
 		for _, tc := range []struct {

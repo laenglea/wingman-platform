@@ -137,7 +137,7 @@ func TestConvertMessages_PreservesInterleavingAndLegacyIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(steps) != 6 || steps[0].ModelOutputStep.Content[0].TextContent.Text != "first " || value(steps[1].ThoughtStep.Signature) != "opaque_signature" || value(steps[2].ThoughtStep.Signature) != "Ev8BAA==" || steps[3].FunctionCallStep.ID != "c1" || steps[4].ModelOutputStep.Content[0].TextContent.Text != " last" || steps[5].FunctionResultStep.CallID != "c1" {
+	if len(steps) != 7 || value(steps[0].ThoughtStep.Signature) != unsignedThoughtSignature || steps[1].ModelOutputStep.Content[0].TextContent.Text != "first " || value(steps[2].ThoughtStep.Signature) != "opaque_signature" || value(steps[3].ThoughtStep.Signature) != "Ev8BAA==" || steps[4].FunctionCallStep.ID != "c1" || steps[5].ModelOutputStep.Content[0].TextContent.Text != " last" || steps[6].FunctionResultStep.CallID != "c1" {
 		t.Fatalf("history order changed: %+v", steps)
 	}
 }
@@ -145,19 +145,64 @@ func TestConvertMessages_PreservesInterleavingAndLegacyIDs(t *testing.T) {
 func TestConvertMessages_PreservesNumericArgumentsAndTextResults(t *testing.T) {
 	arguments := `{"id":9007199254740993,"decimal":0.1234567890123456789}`
 	steps, err := convertMessages([]provider.Message{
-		{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ToolCallContent(provider.ToolCall{ID: "c1", Name: "lookup", Arguments: arguments})}},
+		{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ReasoningContent(provider.Reasoning{Signature: "sig"}), provider.ToolCallContent(provider.ToolCall{ID: "c1", Name: "lookup", Arguments: arguments})}},
 		{Role: provider.MessageRoleUser, Content: []provider.Content{provider.ToolResultContent(provider.ToolResult{ID: "c1", IsError: true, Parts: []provider.Part{{Text: "first"}, {Text: " second"}}})}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := json.Marshal(steps[0].FunctionCallStep.Arguments)
+	encoded, err := json.Marshal(steps[1].FunctionCallStep.Arguments)
 	if err != nil || string(encoded) != `{"decimal":0.1234567890123456789,"id":9007199254740993}` {
 		t.Fatalf("tool argument precision lost: %s (%v)", encoded, err)
 	}
-	result := steps[1].FunctionResultStep
+	result := steps[2].FunctionResultStep
 	if result.Result.Str == nil || *result.Result.Str != "first second" || !value(result.IsError) || value(result.Name) != "lookup" {
 		t.Fatalf("plain-text result lost: %+v", result)
+	}
+}
+
+func TestConvertMessages_UnsignedToolTurns(t *testing.T) {
+	steps, err := convertMessages([]provider.Message{
+		provider.UserMessage("inspect"),
+		{Role: provider.MessageRoleAssistant, Content: []provider.Content{
+			provider.ToolCallContent(provider.ToolCall{ID: "c1", Name: "lookup", Arguments: `{}`}),
+			provider.ToolCallContent(provider.ToolCall{ID: "c2", Name: "lookup", Arguments: `{}`}),
+		}},
+		provider.ToolMessage("c1", "ok"), provider.ToolMessage("c2", "ok"),
+		{Role: provider.MessageRoleAssistant, Content: []provider.Content{
+			provider.ReasoningContent(provider.Reasoning{Summary: "foreign reasoning"}),
+			provider.ToolCallContent(provider.ToolCall{ID: "c3", Name: "lookup", Arguments: `{}`}),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 8 || steps[1].ThoughtStep == nil || value(steps[1].ThoughtStep.Signature) != unsignedThoughtSignature ||
+		steps[2].FunctionCallStep.ID != "c1" || steps[3].FunctionCallStep.ID != "c2" ||
+		steps[4].FunctionResultStep.CallID != "c1" || steps[5].FunctionResultStep.CallID != "c2" ||
+		value(steps[6].ThoughtStep.Signature) != unsignedThoughtSignature || steps[6].ThoughtStep.Summary[0].TextContent.Text != "foreign reasoning" ||
+		steps[7].FunctionCallStep.ID != "c3" {
+		t.Fatalf("unsigned tool history not prepared: %+v", steps)
+	}
+}
+
+func TestConvertMessages_ThoughtPrecedesUnsignedText(t *testing.T) {
+	steps, err := convertMessages([]provider.Message{
+		provider.UserMessage("inspect"),
+		provider.AssistantMessage("Checking history."),
+		{Role: provider.MessageRoleAssistant, Content: []provider.Content{
+			provider.ReasoningContent(provider.Reasoning{Summary: "Run the history command."}),
+			provider.ToolCallContent(provider.ToolCall{ID: "c1", Name: "lookup", Arguments: `{}`}),
+		}},
+		provider.ToolMessage("c1", "ok"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 6 || steps[1].ThoughtStep == nil || value(steps[1].ThoughtStep.Signature) != unsignedThoughtSignature ||
+		steps[2].ModelOutputStep.Content[0].TextContent.Text != "Checking history." ||
+		steps[3].ThoughtStep.Summary[0].TextContent.Text != "Run the history command." || steps[4].FunctionCallStep.ID != "c1" {
+		t.Fatalf("model turn must start with a thought: %+v", steps)
 	}
 }
 

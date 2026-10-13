@@ -453,6 +453,13 @@ func (o responseOutputOptions) kindOf(name string) provider.ToolKind {
 	return outputKind(name, o.Tools)
 }
 
+func (o responseOutputOptions) kind(callKind provider.ToolKind, name string) provider.ToolKind {
+	if k := o.kindOf(name); k != provider.ToolKindFunction || callKind == "" {
+		return k
+	}
+	return callKind
+}
+
 func functionCallItem(call provider.ToolCall, status string) *FunctionCallOutputItem {
 	return &FunctionCallOutputItem{
 		ID:        "fc_" + call.ID,
@@ -585,7 +592,7 @@ func messageOutputs(message *provider.Message, messageID, status string, opts re
 		if content.ToolCall != nil {
 			call := *content.ToolCall
 
-			switch opts.kindOf(call.Name) {
+			switch opts.kind(call.Kind, call.Name) {
 			case provider.ToolKindCustom:
 				output = append(output, ResponseOutput{
 					Type:               ResponseOutputTypeCustomToolCall,
@@ -871,7 +878,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventFunctionCallAdded:
-			switch outputOpts.kindOf(event.ToolCallName) {
+			switch outputOpts.kind(event.ToolCallKind, event.ToolCallName) {
 			case provider.ToolKindCustom:
 				return writeEvent(w, "response.output_item.added", CustomToolCallOutputItemAddedEvent{
 					Type:           "response.output_item.added",
@@ -976,7 +983,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			}
 
 		case StreamEventFunctionCallArgumentsDelta:
-			switch outputOpts.kindOf(event.ToolCallName) {
+			switch outputOpts.kind(event.ToolCallKind, event.ToolCallName) {
 			case provider.ToolKindCustom:
 				if isApplyPatchToolCall(provider.ToolCall{Name: event.ToolCallName, Namespace: event.ToolCallNamespace}) {
 					return nil
@@ -1004,7 +1011,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			}
 
 		case StreamEventFunctionCallArgumentsDone:
-			switch outputOpts.kindOf(event.ToolCallName) {
+			switch outputOpts.kind(event.ToolCallKind, event.ToolCallName) {
 			case provider.ToolKindCustom:
 				call := provider.ToolCall{
 					ID:        event.ToolCallID,
@@ -1039,6 +1046,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 		case StreamEventFunctionCallDone:
 			call := provider.ToolCall{
 				ID:        event.ToolCallID,
+				Kind:      event.ToolCallKind,
 				Async:     event.ToolCallAsync,
 				Name:      event.ToolCallName,
 				Namespace: event.ToolCallNamespace,
@@ -1048,7 +1056,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 
 			status := itemStatus(event.Incomplete)
 
-			switch outputOpts.kindOf(event.ToolCallName) {
+			switch outputOpts.kind(event.ToolCallKind, event.ToolCallName) {
 			case provider.ToolKindCustom:
 				return writeEvent(w, "response.output_item.done", CustomToolCallOutputItemDoneEvent{
 					Type:           "response.output_item.done",

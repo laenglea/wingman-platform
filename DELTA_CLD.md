@@ -43,9 +43,6 @@ Out of scope: Files/Skills, Managed Agents, admin endpoints, advisor pairings.
 - [ ] **Fixed `budget_tokens`.** Pass the exact budget to Claude backends that
       accept it instead of mapping to an effort level; Claude 4.5 and older
       currently get no thinking at all.
-- [ ] **`thinking.block_binding`.** Accept the binding controls (rejected
-      today), forward them with `thinking-binding-controls-2026-08-01`, and
-      return `input_transformations`.
 - [ ] **Compaction options.** Support `instructions` and
       `pause_after_compaction` on `compact_*` edits (rejected today;
       `validateCompactionRequest`).
@@ -112,8 +109,7 @@ Out of scope: Files/Skills, Managed Agents, admin endpoints, advisor pairings.
 ## Tests
 
 - [ ] `max_tokens: 0` on non-Claude backends.
-- [ ] Explicit binding-policy controls; Fable 5.1 replay
-      with strict binding enforcement.
+- [ ] Fable 5.1 signed replay with default binding enforcement.
 - [ ] JSON and SSE wire fixtures for every stop reason and envelope / usage
       field presence.
 
@@ -128,8 +124,9 @@ from September 1 through October 8 against the current adapters.
   already select content by type, replay signature-only blocks, omit sampling,
   support adaptive thinking, and propagate refusals. Defaults allow 128K output.
   See the [migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide).
-- **Next: computer/browser toolsets and thinking binding controls.** These
-  close the remaining model migration gaps above. Until then, native computer
+- **Next: computer/browser toolsets.** These close the remaining model
+  migration gaps above. Optional thinking binding controls and
+  `input_transformations` diagnostics are intentionally omitted. Until then, native computer
   use through the Claude API remains incompatible on the new models. Signed
   histories must stay append-only and use the originating account; Converse
   lowering of instruction/effort updates can change the signed prefix.

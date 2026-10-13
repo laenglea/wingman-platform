@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/google"
 )
 
 // StreamingAccumulator manages streaming state and emits Gemini-format responses
@@ -12,6 +13,10 @@ type StreamingAccumulator struct {
 	handler     StreamEventHandler
 	responseID  string
 	model       string
+
+	// Hold signatures until the next text or buffered function call establishes
+	// which part carries them. Upstream often sends them in a separate chunk.
+	pendingSignature string
 }
 
 // StreamEventHandler is called for each streaming chunk
@@ -46,14 +51,31 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 		response.UsageMetadata = &UsageMetadata{}
 	}
 
-	// Text, thoughts and thought signatures stream as they arrive. Function
-	// calls are delivered once, in Complete(), so their arguments are never
-	// partial.
+	// Text and thought summaries stream as they arrive. Function calls are
+	// delivered with their signatures in Complete(), once arguments are complete.
 	if c.Message != nil && len(c.Message.Content) > 0 {
 		var textContent []provider.Content
 		for _, content := range c.Message.Content {
-			if content.Text != "" || content.Reasoning != nil {
+			if content.Reasoning != nil {
+				reasoning := *content.Reasoning
+				if reasoning.Signature != "" {
+					s.pendingSignature = reasoning.Signature
+				}
+				reasoning.Signature = ""
+				if reasoning.Text != "" || reasoning.Summary != "" {
+					textContent = append(textContent, provider.ReasoningContent(reasoning))
+				}
+			}
+			if content.Text != "" {
+				if s.pendingSignature != "" {
+					textContent = append(textContent, provider.ReasoningContent(provider.Reasoning{Signature: s.pendingSignature}))
+					s.pendingSignature = ""
+				}
 				textContent = append(textContent, content)
+			}
+			if content.ToolCall != nil {
+				// Complete reconstructs the signed call from accumulated content.
+				s.pendingSignature = ""
 			}
 		}
 		if len(textContent) > 0 {
@@ -108,18 +130,23 @@ func (s *StreamingAccumulator) Complete() error {
 		Index:        0,
 	}
 
-	// Only function calls go into the final chunk — text and thoughts were
-	// already streamed, and clients concatenate parts across chunks.
+	// Convert the full content before selecting calls, so each call retains
+	// the signature from its preceding thought. Text and summaries were streamed.
+	var parts []*Part
 	if result.Message != nil {
-		var calls []provider.Content
-		for _, c := range result.Message.Content {
-			if c.ToolCall != nil {
-				calls = append(calls, c)
+		if content := toContent(result.Message.Content); content != nil {
+			for _, part := range content.Parts {
+				if part.FunctionCall != nil {
+					parts = append(parts, part)
+				}
 			}
 		}
-		if len(calls) > 0 {
-			candidate.Content = toContent(calls)
-		}
+	}
+	if s.pendingSignature != "" {
+		parts = append(parts, &Part{ThoughtSignature: google.DecodeThoughtSignature(s.pendingSignature)})
+	}
+	if len(parts) > 0 {
+		candidate.Content = &Content{Role: "model", Parts: parts}
 	}
 
 	response.Candidates = []*Candidate{candidate}

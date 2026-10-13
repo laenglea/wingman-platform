@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/google"
 )
 
 func TestUsageMetadataPreservesReasoningPresence(t *testing.T) {
@@ -114,5 +115,91 @@ func TestNormalizeResponseSchema(t *testing.T) {
 	// input untouched
 	if schema["type"] != "OBJECT" {
 		t.Error("input schema was mutated")
+	}
+}
+
+// A thought signature that precedes a function call must survive a Gemini
+// round trip on that call, in the same order, so the next request replays the
+// thought step before the call as the backend produced it.
+func TestFunctionCallThoughtSignatureSurvivesReplay(t *testing.T) {
+	signature := google.EncodeThoughtSignature([]byte{0xff, 0x00, 0x80})
+	content := toContent([]provider.Content{
+		provider.TextContent("Checking"),
+		provider.ReasoningContent(provider.Reasoning{Signature: signature}),
+		provider.ToolCallContent(provider.ToolCall{ID: "call_1", Name: "lookup", Arguments: `{"q":"x"}`}),
+	})
+	if content == nil || len(content.Parts) != 2 {
+		t.Fatalf("parts = %+v", content)
+	}
+	if len(content.Parts[0].ThoughtSignature) != 0 || content.Parts[1].FunctionCall == nil || google.EncodeThoughtSignature(content.Parts[1].ThoughtSignature) != signature {
+		t.Fatalf("signature not on the function call part: %+v %+v", content.Parts[0], content.Parts[1])
+	}
+
+	wire, err := json.Marshal(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replayed Content
+	if err := json.Unmarshal(wire, &replayed); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := toMessages(nil, []*Content{{Role: "user", Parts: []*Part{{Text: "Hi"}}}, &replayed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := messages[len(messages)-1].Content
+	if len(got) != 3 || got[0].Text != "Checking" || got[1].Reasoning == nil || got[1].Reasoning.Signature != signature || got[2].ToolCall == nil || got[2].ToolCall.ID != "call_1" {
+		t.Fatalf("replayed content = %+v", got)
+	}
+}
+
+// Gemini clients send the signature on the functionCall part, as the native
+// API returns it.
+func TestClientFunctionCallSignatureIsKept(t *testing.T) {
+	messages, err := toMessages(nil, []*Content{
+		{Role: "user", Parts: []*Part{{Text: "Hi"}}},
+		{Role: "model", Parts: []*Part{{FunctionCall: &FunctionCall{ID: "call_1", Name: "lookup", Args: map[string]any{}}, ThoughtSignature: []byte("SIG")}}},
+		{Role: "user", Parts: []*Part{{FunctionResponse: &FunctionResponse{ID: "call_1", Name: "lookup", Response: map[string]any{"ok": true}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := messages[1].Content
+	if len(got) != 2 || got[0].Reasoning == nil || got[0].Reasoning.Signature != google.EncodeThoughtSignature([]byte("SIG")) || got[1].ToolCall == nil {
+		t.Fatalf("model content = %+v", got)
+	}
+}
+
+func TestNativeTextSignatureStaysOnItsPart(t *testing.T) {
+	want := google.EncodeThoughtSignature([]byte{0xff, 0x00, 0x80})
+	message, err := toMessage(Content{Role: "model", Parts: []*Part{
+		{Text: "First"},
+		{Text: "Second", ThoughtSignature: google.DecodeThoughtSignature(want)},
+	}}, map[string][]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply := toContent(message.Content)
+	if len(reply.Parts) != 2 || len(reply.Parts[0].ThoughtSignature) != 0 || google.EncodeThoughtSignature(reply.Parts[1].ThoughtSignature) != want {
+		t.Fatalf("signature moved to another text part: %+v", reply)
+	}
+}
+
+func TestBinaryThoughtSignatureWithAtAndColonIsNotParsedAsRealm(t *testing.T) {
+	// Protobuf wire bytes starting with '@' (0x40 = field 8 varint) and containing
+	// ':' (0x3a = field 7 length-delimited) plus binary control/high bytes.
+	rawSig := []byte{0x40, 0x01, 0x3a, 0x80, 0xff, 0x00}
+	want := google.EncodeThoughtSignature(rawSig)
+
+	messages, err := toMessages(nil, []*Content{
+		{Role: "user", Parts: []*Part{{Text: "Hi"}}},
+		{Role: "model", Parts: []*Part{{FunctionCall: &FunctionCall{ID: "call_1", Name: "lookup", Args: map[string]any{}}, ThoughtSignature: rawSig}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := messages[1].Content
+	if len(got) != 2 || got[0].Reasoning == nil || got[0].Reasoning.Signature != want {
+		t.Fatalf("binary signature was corrupted as realm-tagged: got %+v, want %q", got, want)
 	}
 }

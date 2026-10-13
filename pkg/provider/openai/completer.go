@@ -87,6 +87,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		}
 
 		stream := c.completions.NewStreaming(ctx, *req)
+		defer stream.Close()
 
 		toolAliases := provider.ToolAliases(options.Tools)
 		toolCallIDs := map[int64]string{}

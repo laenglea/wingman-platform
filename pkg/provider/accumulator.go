@@ -19,9 +19,9 @@ type CompletionAccumulator struct {
 	reasonings  []Reasoning
 	compactions []Compaction
 
-	toolCalls      []ToolCall
-	toolResults    []ToolResult
-	lastToolCallID string
+	toolCall    string
+	toolCalls   []ToolCall
+	toolResults []ToolResult
 
 	usage *Usage
 
@@ -211,8 +211,8 @@ func (a *CompletionAccumulator) addReasoning(r *Reasoning) {
 				break
 			}
 		}
-	} else if len(a.reasonings) > 0 {
-		// A signed or redacted entry is complete; ID-less deltas start a new one
+	} else if len(a.reasonings) > 0 && len(a.contentOrder) > 0 && a.contentOrder[len(a.contentOrder)-1].kind == accumulatedContentReasoning {
+		// A signed, redacted, or interrupted entry is complete; ID-less deltas start a new one
 		if last := &a.reasonings[len(a.reasonings)-1]; !last.Redacted && last.Signature == "" {
 			target = last
 		}
@@ -270,7 +270,7 @@ func (a *CompletionAccumulator) addToolCall(c *ToolCall) {
 	targetID := c.ID
 
 	if targetID == "" {
-		targetID = a.lastToolCallID
+		targetID = a.toolCall
 	}
 
 	if targetID == "" {
@@ -296,7 +296,7 @@ func (a *CompletionAccumulator) addToolCall(c *ToolCall) {
 		target = &a.toolCalls[len(a.toolCalls)-1]
 	}
 
-	a.lastToolCallID = targetID
+	a.toolCall = targetID
 
 	if c.Kind != "" {
 		target.Kind = c.Kind

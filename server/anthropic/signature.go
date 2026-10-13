@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"strings"
+
+	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
 // OpenAI-backed reasoning replays only with its original item id, but thinking
@@ -21,19 +23,21 @@ func encodeSignature(id, signature string) string {
 		return signature
 	}
 
-	data, _ := json.Marshal(wrappedSignature{ID: id, Signature: signature})
+	realm, raw := provider.ParseSignature(signature)
+	data, _ := json.Marshal(wrappedSignature{ID: id, Signature: raw})
 
-	return signaturePrefix + base64.RawURLEncoding.EncodeToString(data)
+	return provider.TagSignature(realm, signaturePrefix+base64.RawURLEncoding.EncodeToString(data))
 }
 
 func decodeSignature(value string) (id, signature string) {
-	raw, ok := strings.CutPrefix(value, signaturePrefix)
+	realm, raw := provider.ParseSignature(value)
+	encoded, ok := strings.CutPrefix(raw, signaturePrefix)
 
 	if !ok {
 		return "", value
 	}
 
-	data, err := base64.RawURLEncoding.DecodeString(raw)
+	data, err := base64.RawURLEncoding.DecodeString(encoded)
 
 	if err != nil {
 		return "", value
@@ -41,9 +45,9 @@ func decodeSignature(value string) (id, signature string) {
 
 	var w wrappedSignature
 
-	if err := json.Unmarshal(data, &w); err != nil {
+	if err := json.Unmarshal(data, &w); err != nil || w.ID == "" || w.Signature == "" {
 		return "", value
 	}
 
-	return w.ID, w.Signature
+	return w.ID, provider.TagSignature(realm, w.Signature)
 }

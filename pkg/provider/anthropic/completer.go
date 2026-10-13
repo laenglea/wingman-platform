@@ -104,19 +104,11 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 				}
 
 				block := &message.Content[event.Index]
-				if block.Type == "server_tool_use" && strings.HasPrefix(block.Name, "tool_search_tool_") {
-					if !yield(&provider.Completion{ID: message.ID, Model: c.model, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{
-						provider.ToolCallContent(provider.ToolCall{ID: block.ID, Name: block.Name, Kind: provider.ToolKindToolSearch, Execution: "server", Arguments: string(block.Input)}),
-					}}}, nil) {
-						return
-					}
+				if (block.Type == "tool_use" || block.Type == "server_tool_use") && !toolArgsSeen[event.Index] && len(block.Input) == 0 {
+					block.Input = json.RawMessage([]byte("{}"))
 				}
 
 				if block.Type == "tool_use" && !toolArgsSeen[event.Index] {
-					if len(block.Input) == 0 {
-						block.Input = json.RawMessage([]byte("{}"))
-					}
-
 					delta := &provider.Completion{
 						ID:    message.ID,
 						Model: c.model,
@@ -167,7 +159,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 						yield(nil, err)
 						return
 					}
-					if !yield(&provider.Completion{ID: message.ID, Model: c.model, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ToolResultContent(result)}}}, nil) {
+					if !yield(&provider.Completion{ID: message.ID, Model: c.model, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ToolResultContent(result)}}, Usage: toUsage(message.Usage)}, nil) {
 						return
 					}
 				case anthropic.BetaThinkingBlock:
@@ -246,6 +238,8 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 								provider.CompactionContent(compactionFromBlock(message.ID, startIndex, event.Content, event.EncryptedContent, event.RawJSON())),
 							},
 						},
+
+						Usage: toUsage(message.Usage),
 					}
 
 					if !yield(delta, nil) {
@@ -405,6 +399,33 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 				}
 
 			case anthropic.BetaRawContentBlockStopEvent:
+				if int(event.Index) >= len(message.Content) {
+					break
+				}
+
+				block := &message.Content[event.Index]
+				if block.Type == "server_tool_use" && strings.HasPrefix(block.Name, "tool_search_tool_") {
+					if !yield(&provider.Completion{
+						ID:    message.ID,
+						Model: c.model,
+						Message: &provider.Message{
+							Role: provider.MessageRoleAssistant,
+							Content: []provider.Content{
+								provider.ToolCallContent(provider.ToolCall{
+									ID:        block.ID,
+									Name:      block.Name,
+									Kind:      provider.ToolKindToolSearch,
+									Execution: "server",
+									Arguments: string(block.Input),
+								}),
+							},
+						},
+						Usage: toUsage(message.Usage),
+					}, nil) {
+						return
+					}
+				}
+
 				buffer, ok := customArgs[event.Index]
 
 				if !ok {
@@ -412,10 +433,6 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 				}
 
 				delete(customArgs, event.Index)
-
-				if int(event.Index) >= len(message.Content) {
-					break
-				}
 
 				delta := &provider.Completion{
 					ID:    message.ID,
@@ -426,7 +443,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 
 						Content: []provider.Content{
 							provider.ToolCallContent(provider.ToolCall{
-								ID:        message.Content[event.Index].ID,
+								ID:        block.ID,
 								Kind:      provider.ToolKindCustom,
 								Arguments: custom.Unwrap(buffer.String()),
 							}),
