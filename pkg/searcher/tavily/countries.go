@@ -1,5 +1,22 @@
 package tavily
 
+import "strings"
+
+// CountryCode translates Tavily's country names (or ISO codes) to Wingman's
+// provider-neutral ISO 3166-1 alpha-2 location filter.
+func CountryCode(country string) (string, bool) {
+	country = strings.TrimSpace(country)
+	if code := strings.ToUpper(country); countries[code] != "" {
+		return code, true
+	}
+	for code, name := range countries {
+		if strings.EqualFold(country, name) {
+			return code, true
+		}
+	}
+	return "", false
+}
+
 // ISO 3166-1 alpha-2 codes mapped to Tavily's supported country enum.
 // https://docs.tavily.com/documentation/api-reference/endpoint/search
 var countries = map[string]string{

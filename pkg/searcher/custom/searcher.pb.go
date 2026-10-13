@@ -62,6 +62,7 @@ type CapabilitiesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DateFilters   bool                   `protobuf:"varint,1,opt,name=date_filters,json=dateFilters,proto3" json:"date_filters,omitempty"`
 	Categories    []*Category            `protobuf:"bytes,2,rep,name=categories,proto3" json:"categories,omitempty"`
+	Content       bool                   `protobuf:"varint,3,opt,name=content,proto3" json:"content,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -108,6 +109,13 @@ func (x *CapabilitiesResponse) GetCategories() []*Category {
 		return x.Categories
 	}
 	return nil
+}
+
+func (x *CapabilitiesResponse) GetContent() bool {
+	if x != nil {
+		return x.Content
+	}
+	return false
 }
 
 type Category struct {
@@ -173,6 +181,7 @@ type SearchRequest struct {
 	// Publication time bounds: since is inclusive; until is exclusive.
 	Since         *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=since,proto3" json:"since,omitempty"`
 	Until         *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=until,proto3" json:"until,omitempty"`
+	Text          *TextOptions           `protobuf:"bytes,9,opt,name=text,proto3" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -263,6 +272,50 @@ func (x *SearchRequest) GetUntil() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *SearchRequest) GetText() *TextOptions {
+	if x != nil {
+		return x.Text
+	}
+	return nil
+}
+
+// Presence enables page text retrieval with provider defaults.
+type TextOptions struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TextOptions) Reset() {
+	*x = TextOptions{}
+	mi := &file_searcher_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TextOptions) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TextOptions) ProtoMessage() {}
+
+func (x *TextOptions) ProtoReflect() protoreflect.Message {
+	mi := &file_searcher_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TextOptions.ProtoReflect.Descriptor instead.
+func (*TextOptions) Descriptor() ([]byte, []int) {
+	return file_searcher_proto_rawDescGZIP(), []int{4}
+}
+
 type SearchResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Results       []*Result              `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty"`
@@ -272,7 +325,7 @@ type SearchResponse struct {
 
 func (x *SearchResponse) Reset() {
 	*x = SearchResponse{}
-	mi := &file_searcher_proto_msgTypes[4]
+	mi := &file_searcher_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -284,7 +337,7 @@ func (x *SearchResponse) String() string {
 func (*SearchResponse) ProtoMessage() {}
 
 func (x *SearchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_searcher_proto_msgTypes[4]
+	mi := &file_searcher_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -297,7 +350,7 @@ func (x *SearchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchResponse.ProtoReflect.Descriptor instead.
 func (*SearchResponse) Descriptor() ([]byte, []int) {
-	return file_searcher_proto_rawDescGZIP(), []int{4}
+	return file_searcher_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SearchResponse) GetResults() []*Result {
@@ -311,15 +364,16 @@ type Result struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Source        string                 `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
 	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
-	Content       string                 `protobuf:"bytes,3,opt,name=Content,proto3" json:"Content,omitempty"`
+	Excerpt       string                 `protobuf:"bytes,3,opt,name=excerpt,proto3" json:"excerpt,omitempty"`
 	Metadata      map[string]string      `protobuf:"bytes,5,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Text          *string                `protobuf:"bytes,6,opt,name=text,proto3,oneof" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Result) Reset() {
 	*x = Result{}
-	mi := &file_searcher_proto_msgTypes[5]
+	mi := &file_searcher_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -331,7 +385,7 @@ func (x *Result) String() string {
 func (*Result) ProtoMessage() {}
 
 func (x *Result) ProtoReflect() protoreflect.Message {
-	mi := &file_searcher_proto_msgTypes[5]
+	mi := &file_searcher_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -344,7 +398,7 @@ func (x *Result) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Result.ProtoReflect.Descriptor instead.
 func (*Result) Descriptor() ([]byte, []int) {
-	return file_searcher_proto_rawDescGZIP(), []int{5}
+	return file_searcher_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Result) GetSource() string {
@@ -361,9 +415,9 @@ func (x *Result) GetTitle() string {
 	return ""
 }
 
-func (x *Result) GetContent() string {
+func (x *Result) GetExcerpt() string {
 	if x != nil {
-		return x.Content
+		return x.Excerpt
 	}
 	return ""
 }
@@ -375,20 +429,28 @@ func (x *Result) GetMetadata() map[string]string {
 	return nil
 }
 
+func (x *Result) GetText() string {
+	if x != nil && x.Text != nil {
+		return *x.Text
+	}
+	return ""
+}
+
 var File_searcher_proto protoreflect.FileDescriptor
 
 const file_searcher_proto_rawDesc = "" +
 	"\n" +
 	"\x0esearcher.proto\x12\bsearcher\x1a\x1fgoogle/protobuf/timestamp.proto\"\x15\n" +
-	"\x13CapabilitiesRequest\"m\n" +
+	"\x13CapabilitiesRequest\"\x87\x01\n" +
 	"\x14CapabilitiesResponse\x12!\n" +
 	"\fdate_filters\x18\x01 \x01(\bR\vdateFilters\x122\n" +
 	"\n" +
 	"categories\x18\x02 \x03(\v2\x12.searcher.CategoryR\n" +
-	"categories\"@\n" +
+	"categories\x12\x18\n" +
+	"\acontent\x18\x03 \x01(\bR\acontent\"@\n" +
 	"\bCategory\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
-	"\vdescription\x18\x02 \x01(\tR\vdescription\"\xbe\x02\n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\"\xe9\x02\n" +
 	"\rSearchRequest\x12\x14\n" +
 	"\x05query\x18\x01 \x01(\tR\x05query\x12\x19\n" +
 	"\x05limit\x18\x02 \x01(\x05H\x00R\x05limit\x88\x01\x01\x12\x18\n" +
@@ -397,20 +459,24 @@ const file_searcher_proto_rawDesc = "" +
 	"\bcategory\x18\x05 \x01(\tH\x01R\bcategory\x88\x01\x01\x12\x1f\n" +
 	"\blocation\x18\x06 \x01(\tH\x02R\blocation\x88\x01\x01\x120\n" +
 	"\x05since\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x120\n" +
-	"\x05until\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x05untilB\b\n" +
+	"\x05until\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x05until\x12)\n" +
+	"\x04text\x18\t \x01(\v2\x15.searcher.TextOptionsR\x04textB\b\n" +
 	"\x06_limitB\v\n" +
 	"\t_categoryB\v\n" +
-	"\t_location\"<\n" +
+	"\t_location\"\r\n" +
+	"\vTextOptions\"<\n" +
 	"\x0eSearchResponse\x12*\n" +
-	"\aresults\x18\x01 \x03(\v2\x10.searcher.ResultR\aresults\"\xc9\x01\n" +
+	"\aresults\x18\x01 \x03(\v2\x10.searcher.ResultR\aresults\"\xeb\x01\n" +
 	"\x06Result\x12\x16\n" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x18\n" +
-	"\aContent\x18\x03 \x01(\tR\aContent\x12:\n" +
-	"\bmetadata\x18\x05 \x03(\v2\x1e.searcher.Result.MetadataEntryR\bmetadata\x1a;\n" +
+	"\aexcerpt\x18\x03 \x01(\tR\aexcerpt\x12:\n" +
+	"\bmetadata\x18\x05 \x03(\v2\x1e.searcher.Result.MetadataEntryR\bmetadata\x12\x17\n" +
+	"\x04text\x18\x06 \x01(\tH\x00R\x04text\x88\x01\x01\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\x9a\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\a\n" +
+	"\x05_text2\x9a\x01\n" +
 	"\bSearcher\x12O\n" +
 	"\fCapabilities\x12\x1d.searcher.CapabilitiesRequest\x1a\x1e.searcher.CapabilitiesResponse\"\x00\x12=\n" +
 	"\x06Search\x12\x17.searcher.SearchRequest\x1a\x18.searcher.SearchResponse\"\x00B=Z;github.com/adrianliechti/wingman/pkg/searcher/custom;customb\x06proto3"
@@ -427,32 +493,34 @@ func file_searcher_proto_rawDescGZIP() []byte {
 	return file_searcher_proto_rawDescData
 }
 
-var file_searcher_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_searcher_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_searcher_proto_goTypes = []any{
 	(*CapabilitiesRequest)(nil),   // 0: searcher.CapabilitiesRequest
 	(*CapabilitiesResponse)(nil),  // 1: searcher.CapabilitiesResponse
 	(*Category)(nil),              // 2: searcher.Category
 	(*SearchRequest)(nil),         // 3: searcher.SearchRequest
-	(*SearchResponse)(nil),        // 4: searcher.SearchResponse
-	(*Result)(nil),                // 5: searcher.Result
-	nil,                           // 6: searcher.Result.MetadataEntry
-	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
+	(*TextOptions)(nil),           // 4: searcher.TextOptions
+	(*SearchResponse)(nil),        // 5: searcher.SearchResponse
+	(*Result)(nil),                // 6: searcher.Result
+	nil,                           // 7: searcher.Result.MetadataEntry
+	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
 }
 var file_searcher_proto_depIdxs = []int32{
 	2, // 0: searcher.CapabilitiesResponse.categories:type_name -> searcher.Category
-	7, // 1: searcher.SearchRequest.since:type_name -> google.protobuf.Timestamp
-	7, // 2: searcher.SearchRequest.until:type_name -> google.protobuf.Timestamp
-	5, // 3: searcher.SearchResponse.results:type_name -> searcher.Result
-	6, // 4: searcher.Result.metadata:type_name -> searcher.Result.MetadataEntry
-	0, // 5: searcher.Searcher.Capabilities:input_type -> searcher.CapabilitiesRequest
-	3, // 6: searcher.Searcher.Search:input_type -> searcher.SearchRequest
-	1, // 7: searcher.Searcher.Capabilities:output_type -> searcher.CapabilitiesResponse
-	4, // 8: searcher.Searcher.Search:output_type -> searcher.SearchResponse
-	7, // [7:9] is the sub-list for method output_type
-	5, // [5:7] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	8, // 1: searcher.SearchRequest.since:type_name -> google.protobuf.Timestamp
+	8, // 2: searcher.SearchRequest.until:type_name -> google.protobuf.Timestamp
+	4, // 3: searcher.SearchRequest.text:type_name -> searcher.TextOptions
+	6, // 4: searcher.SearchResponse.results:type_name -> searcher.Result
+	7, // 5: searcher.Result.metadata:type_name -> searcher.Result.MetadataEntry
+	0, // 6: searcher.Searcher.Capabilities:input_type -> searcher.CapabilitiesRequest
+	3, // 7: searcher.Searcher.Search:input_type -> searcher.SearchRequest
+	1, // 8: searcher.Searcher.Capabilities:output_type -> searcher.CapabilitiesResponse
+	5, // 9: searcher.Searcher.Search:output_type -> searcher.SearchResponse
+	8, // [8:10] is the sub-list for method output_type
+	6, // [6:8] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_searcher_proto_init() }
@@ -461,13 +529,14 @@ func file_searcher_proto_init() {
 		return
 	}
 	file_searcher_proto_msgTypes[3].OneofWrappers = []any{}
+	file_searcher_proto_msgTypes[6].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_searcher_proto_rawDesc), len(file_searcher_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

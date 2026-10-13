@@ -31,7 +31,7 @@ func (h *Handler) handleResearch(w http.ResponseWriter, r *http.Request) {
 
 	options := &researcher.ResearchOptions{}
 
-	result, err := p.Research(r.Context(), input, options)
+	result, err := researcher.Collect(p.Research(r.Context(), input, options))
 
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)

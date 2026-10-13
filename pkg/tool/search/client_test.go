@@ -17,6 +17,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/searcher/duckduckgo"
 	"github.com/adrianliechti/wingman/pkg/searcher/exa"
 	"github.com/adrianliechti/wingman/pkg/searcher/tavily"
+	"github.com/adrianliechti/wingman/pkg/tool"
 )
 
 type fakeSearcher struct {
@@ -96,7 +97,7 @@ func TestTools_CategorySchemaFromProvider(t *testing.T) {
 func TestExecute_PassesDomainsAndLocation(t *testing.T) {
 	f := &fakeSearcher{
 		results: []searcher.Result{
-			{Source: "https://go.dev/blog/go1.24", Title: "Go 1.24", Content: "Body of post"},
+			{Source: "https://go.dev/blog/go1.24", Title: "Go 1.24", Excerpt: "Body of post"},
 		},
 	}
 	c, _ := New(f, WithLimit(3))
@@ -184,7 +185,7 @@ func TestExecute_MaxResultsOverridesLimit(t *testing.T) {
 func TestFormatResults_Timestamp(t *testing.T) {
 	ts := time.Date(2026, 5, 1, 9, 30, 0, 0, time.UTC)
 	got := formatResults([]searcher.Result{
-		{Source: "https://go.dev/x", Title: "Go", Content: "body", Timestamp: &ts},
+		{Source: "https://go.dev/x", Title: "Go", Excerpt: "body", Timestamp: &ts},
 	}, 400)
 	if !strings.Contains(got, "— 2026-05-01\n") {
 		t.Errorf("missing timestamp in:\n%s", got)
@@ -205,21 +206,21 @@ func TestExecute_EmptyResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if got.(string) != "No results." {
+	if got.(string) != "No results.\n" {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestResult_PassesThroughText(t *testing.T) {
 	c, _ := New(&fakeSearcher{})
-	out := c.Result(ToolName, "some markdown")
+	out, _ := tool.RenderResult(c, ToolName, "some markdown")
 	if len(out.Parts) != 1 || out.Parts[0].Text != "some markdown" {
 		t.Errorf("got %+v", out)
 	}
 }
 
 func TestExecute_ConfigurableExcerptPreservesLateEvidence(t *testing.T) {
-	f := &fakeSearcher{results: []searcher.Result{{Content: strings.Repeat("background ", 60) + "Calibration: VX-7319."}}}
+	f := &fakeSearcher{results: []searcher.Result{{Excerpt: strings.Repeat("background ", 60) + "Calibration: VX-7319."}}}
 	c, _ := New(f, WithMaxSnippetChars(1500))
 	got, err := c.Execute(context.Background(), ToolName, map[string]any{"query": "calibration"})
 	if err != nil || !strings.Contains(got.(string), "VX-7319") {
@@ -291,26 +292,30 @@ func (f *batchSearcher) Capabilities() searcher.Capabilities {
 
 func TestExecute_BatchesQueriesAndDeduplicates(t *testing.T) {
 	f := &batchSearcher{results: map[string][]searcher.Result{
-		"a": {{Source: "https://www.example.com/page/", Title: "Page", Content: "A"}},
-		"b": {{Source: "https://example.com/page#top", Title: "Page", Content: "A"}, {Source: "https://example.com/other", Title: "Other", Content: "C"}},
+		"a": {{Source: "https://www.example.com/page/", Title: "Page", Excerpt: "A"}},
+		"b": {{Source: "https://example.com/page#top", Title: "Page", Excerpt: "A"}, {Source: "https://example.com/other", Title: "Other", Excerpt: "C"}},
+		"c": {{Source: "https://example.com/other", Title: "Other", Excerpt: "C"}},
 	}}
 	c, _ := New(f)
 
 	got, err := c.Execute(context.Background(), ToolName, map[string]any{
-		"queries": []any{"a", " b ", "a", "broken"},
+		"queries": []any{"a", " b ", "a", "c", "broken"},
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	text := got.(string)
 	sort.Strings(f.queries)
-	if !reflect.DeepEqual(f.queries, []string{"a", "b", "broken"}) {
+	if !reflect.DeepEqual(f.queries, []string{"a", "b", "broken", "c"}) {
 		t.Errorf("queries = %v", f.queries)
 	}
 	for _, want := range []string{"## Query: a", "## Query: b", "## Query: broken", "Error: backend down", "https://example.com/other", "1 result(s) already listed above omitted."} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in output:\n%s", want, text)
 		}
+	}
+	if !strings.Contains(text, "## Query: c\n1 result(s) already listed above omitted.\n") || strings.Contains(text, "No results.") {
+		t.Errorf("fully duplicated query should only report omitted results:\n%s", text)
 	}
 	if strings.Count(text, "[Page]") != 1 {
 		t.Errorf("duplicate URL listed twice:\n%s", text)
@@ -363,8 +368,10 @@ func TestTools_ReflectProviderCapabilities(t *testing.T) {
 			} else if present {
 				t.Fatalf("invalid category schema: %v", category)
 			}
-			if len(tools[0].Parameters["anyOf"].([]map[string]any)) != 2 {
-				t.Fatal("query alternatives missing")
+			for _, key := range []string{"anyOf", "oneOf", "allOf"} {
+				if _, present := tools[0].Parameters[key]; present {
+					t.Fatalf("top-level %s is rejected by Anthropic and Chat Completions", key)
+				}
 			}
 			if !test.dates {
 				_, err := c.Execute(t.Context(), ToolName, map[string]any{"query": "q", "since": "2026-01-01"})
@@ -406,9 +413,9 @@ func TestExecute_NativeParametersAndMalformedFilters(t *testing.T) {
 func TestExecute_BatchRetainsDifferentEvidenceFromSameSource(t *testing.T) {
 	date := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	f := &batchSearcher{results: map[string][]searcher.Result{
-		"launch": {{Source: "https://example.com/report", Title: "Report", Content: "Launch: May 14."}},
-		"budget": {{Source: "https://example.com/report", Title: "Report", Content: "Budget: 83 million."}},
-		"dated":  {{Source: "https://example.com/report", Title: "Report", Content: "Launch: May 14.", Timestamp: &date}},
+		"launch": {{Source: "https://example.com/report", Title: "Report", Excerpt: "Launch: May 14."}},
+		"budget": {{Source: "https://example.com/report", Title: "Report", Excerpt: "Budget: 83 million."}},
+		"dated":  {{Source: "https://example.com/report", Title: "Report", Excerpt: "Launch: May 14.", Timestamp: &date}},
 	}}
 	c, _ := New(f)
 	got, err := c.Execute(t.Context(), ToolName, map[string]any{"queries": []string{"launch", "budget", "dated"}})

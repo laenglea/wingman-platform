@@ -33,8 +33,8 @@ func TestSearchRetrievalOnlyAndOptionsUnchanged(t *testing.T) {
 		if body["type"] != "fast" || body["query"] != "launch date" || body["numResults"] != float64(3) || body["category"] != "news" || body["userLocation"] != "CH" {
 			t.Fatalf("wrong request: %#v", body)
 		}
-		if !reflect.DeepEqual(body["contents"], map[string]any{"text": true}) {
-			t.Fatalf("only plain text retrieval is allowed: %#v", body["contents"])
+		if !reflect.DeepEqual(body["contents"], map[string]any{"highlights": true}) {
+			t.Fatalf("default search must retrieve excerpts without full text: %#v", body["contents"])
 		}
 		for _, name := range []string{"outputSchema", "summary", "highlights", "systemPrompt", "additionalQueries"} {
 			if _, ok := body[name]; ok {
@@ -44,7 +44,7 @@ func TestSearchRetrievalOnlyAndOptionsUnchanged(t *testing.T) {
 		if r.Header.Get("x-api-key") != "test-token" {
 			t.Fatal("missing authentication")
 		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"results":[{"url":"https://example.com","title":"Report","text":"Evidence","publishedDate":"2031-05-14T09:00:00Z"}]}`))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"results":[{"url":"https://example.com","title":"Report","highlights":["Evidence"],"publishedDate":"2031-05-14T09:00:00Z"}]}`))}, nil
 	})}
 	c, err := New("test-token", WithClient(httpClient), WithCategory("news"), WithLocation("CH"))
 	if err != nil {
@@ -57,8 +57,39 @@ func TestSearchRetrievalOnlyAndOptionsUnchanged(t *testing.T) {
 	if !reflect.DeepEqual(*options, want) {
 		t.Fatalf("mutated caller options: %#v", options)
 	}
-	if len(results) != 1 || results[0].Content != "Evidence" || results[0].Timestamp == nil || results[0].Metadata["published"] != "2031-05-14T09:00:00Z" {
+	if len(results) != 1 || results[0].Excerpt != "Evidence" || results[0].Text != nil || results[0].Timestamp == nil || results[0].Metadata["published"] != "2031-05-14T09:00:00Z" {
 		t.Fatalf("missing evidence or publication date: %#v", results)
+	}
+}
+
+func TestSearchRetainsFullTextIncludingFailedRetrievals(t *testing.T) {
+	page := strings.Repeat("Full source evidence. ", 200)
+	body, _ := json.Marshal(map[string]any{"results": []map[string]string{
+		{"url": "https://example.com/full", "title": "Full", "text": page},
+		{"url": "https://example.com/empty", "title": "Empty"},
+	}})
+	c, err := New("test", WithClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var request SearchRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.Contents == nil || !request.Contents.Text || !request.Contents.Highlights {
+			t.Fatal("full text must be requested alongside excerpts")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+	})}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, err := c.Search(t.Context(), "source evidence", &searcher.SearchOptions{Text: &searcher.TextOptions{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 || results[0].Text == nil || *results[0].Text != page || len(results[0].Excerpt) >= len(page) {
+		t.Fatal("full text was lost or replaced the bounded excerpt")
+	}
+	if results[1].Text == nil || *results[1].Text != "" {
+		t.Fatal("unavailable text was mistaken for unattempted retrieval")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/otel"
+	"github.com/adrianliechti/wingman/server/web"
 )
 
 func (s *Server) handleAuth(next http.Handler) http.Handler {
@@ -40,6 +41,10 @@ func writeUnauthorized(w http.ResponseWriter, r *http.Request) {
 	const message = "invalid or missing credentials"
 
 	var body any
+	if web.IsTavily(r) || web.IsExa(r) {
+		web.WriteError(w, r, http.StatusUnauthorized, message)
+		return
+	}
 
 	switch path := r.URL.Path; {
 	case strings.HasPrefix(path, "/v1beta/"):

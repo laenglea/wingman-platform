@@ -71,7 +71,7 @@ func (c *Client) loadCapabilities() error {
 	if response == nil {
 		return errors.New("empty capabilities response")
 	}
-	capabilities := searcher.Capabilities{DateFilters: response.DateFilters}
+	capabilities := searcher.Capabilities{DateFilters: response.DateFilters, Content: response.Content}
 	names := make(map[string]bool)
 	for _, category := range response.Categories {
 		if category == nil || strings.TrimSpace(category.Name) == "" {
@@ -99,6 +99,9 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 	if settings.Limit != nil && (*settings.Limit < 1 || int64(*settings.Limit) > math.MaxInt32) {
 		return nil, errors.New("custom search: limit must be between 1 and 2147483647")
 	}
+	if settings.Text != nil && !c.capabilities.Content {
+		return nil, errors.New("custom search: service does not support integrated full text")
+	}
 	if (settings.Since != nil || settings.Until != nil) && !c.capabilities.DateFilters {
 		return nil, errors.New("custom search: service does not support publication date filters; omit since and until")
 	}
@@ -116,6 +119,9 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 
 	req := &SearchRequest{
 		Query: query,
+	}
+	if settings.Text != nil {
+		req.Text = &TextOptions{}
 	}
 	if settings.Since != nil {
 		req.Since = timestamppb.New(*settings.Since)
@@ -170,9 +176,16 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 			Source: r.Source,
 
 			Title:   r.Title,
-			Content: r.Content,
+			Excerpt: r.Excerpt,
 
 			Metadata: r.Metadata,
+		}
+		if settings.Text != nil {
+			result.Text = r.Text
+			if result.Text == nil {
+				empty := ""
+				result.Text = &empty
+			}
 		}
 		if published, err := time.Parse(time.RFC3339, r.Metadata["published"]); err == nil {
 			result.Timestamp = &published

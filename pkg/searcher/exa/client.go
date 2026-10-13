@@ -100,9 +100,8 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 		ExcludeDomains: settings.Exclude,
 
 		Contents: &SearchContents{
-			// Plain source text only: no Exa highlights, summaries or outputSchema.
-			// Select a query-relevant excerpt locally after retrieval.
-			Text: true,
+			Highlights: true,
+			Text:       settings.Text != nil,
 		},
 	}
 
@@ -165,7 +164,13 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 			Source: r.URL,
 
 			Title:   r.Title,
-			Content: searchExcerpt(r.Text, query),
+			Excerpt: strings.Join(r.Highlights, "\n\n"),
+		}
+		if settings.Text != nil {
+			result.Text = &r.Text
+			if result.Excerpt == "" {
+				result.Excerpt = searchExcerpt(r.Text, query)
+			}
 		}
 
 		if t, err := time.Parse(time.RFC3339, r.PublishedDate); err == nil {
@@ -193,6 +198,7 @@ const (
 func (c *Client) Capabilities() searcher.Capabilities {
 	return searcher.Capabilities{
 		DateFilters: true,
+		Content:     true,
 		Categories: []searcher.Category{
 			{Name: CategoryCompany, Description: "Specific companies or organizations (e.g. SaaS vendors, public companies). Date filters and domain exclusions are not supported; omit those filters or choose another category."},
 			{Name: CategoryPeople, Description: "Specific people or profile pages (e.g. LinkedIn-style biographies). Date filters and domain exclusions are not supported; omit those filters or choose another category."},

@@ -3,10 +3,12 @@ package research
 import (
 	"context"
 	"errors"
+	"iter"
 	"strings"
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/researcher"
+	"github.com/adrianliechti/wingman/pkg/tool"
 )
 
 type fakeResearcher struct {
@@ -15,9 +17,11 @@ type fakeResearcher struct {
 	err          error
 }
 
-func (f *fakeResearcher) Research(_ context.Context, instructions string, _ *researcher.ResearchOptions) (*researcher.Result, error) {
-	f.instructions = instructions
-	return f.result, f.err
+func (f *fakeResearcher) Research(_ context.Context, instructions string, _ *researcher.ResearchOptions) iter.Seq2[*researcher.Result, error] {
+	return func(yield func(*researcher.Result, error) bool) {
+		f.instructions = instructions
+		yield(f.result, f.err)
+	}
 }
 
 func TestExecute_ResearchReportAndFailures(t *testing.T) {
@@ -30,7 +34,7 @@ func TestExecute_ResearchReportAndFailures(t *testing.T) {
 	if err != nil || got != f.result.Content || f.instructions != "Compare sources" {
 		t.Fatalf("got %v, instructions %q, err %v", got, f.instructions, err)
 	}
-	if c.Result(ToolName, got).Parts[0].Text != got {
+	if rendered, _ := tool.RenderResult(c, ToolName, got); rendered.Parts[0].Text != got {
 		t.Fatal("report was JSON quoted")
 	}
 	for _, test := range []struct {

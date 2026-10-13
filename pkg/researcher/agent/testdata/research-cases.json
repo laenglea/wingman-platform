@@ -18,7 +18,7 @@
         "results": [
           {
             "source": "https://northstar.example/releases",
-            "content": "Stable release: 7.4.",
+            "excerpt": "Stable release: 7.4.",
             "title": "Official documentation"
           }
         ]
@@ -53,7 +53,7 @@
         "results": [
           {
             "source": "https://lumen.example/warranty",
-            "content": "Lumen: 36 months warranty.",
+            "excerpt": "Lumen: 36 months warranty.",
             "title": "Official documentation"
           }
         ]
@@ -65,7 +65,7 @@
         "results": [
           {
             "source": "https://orbit.example/warranty",
-            "content": "Orbit: 24 months warranty.",
+            "excerpt": "Orbit: 24 months warranty.",
             "title": "Official documentation"
           }
         ]
@@ -96,7 +96,7 @@
         "results": [
           {
             "source": "https://aster.example/team",
-            "content": "Aster project lead: Dr Mira Vale.",
+            "excerpt": "Aster project lead: Dr Mira Vale.",
             "title": "Official documentation"
           }
         ]
@@ -109,7 +109,7 @@
         "results": [
           {
             "source": "https://vale.example/lab",
-            "content": "Mira Vale leads the lab in Bellwick.",
+            "excerpt": "Mira Vale leads the lab in Bellwick.",
             "title": "Official documentation"
           }
         ]
@@ -145,7 +145,7 @@
         "results": [
           {
             "source": "https://harbor.example/annual",
-            "content": "Annual report. Launch date and approved budget are in the milestones section.",
+            "excerpt": "Annual report. Launch date and approved budget are in the milestones section.",
             "title": "Official documentation"
           }
         ]
@@ -174,12 +174,12 @@
         "results": [
           {
             "source": "https://cedar.example/2029",
-            "content": "Published 2029-01-01. Active quota: 100 requests.",
+            "excerpt": "Published 2029-01-01. Active quota: 100 requests.",
             "title": "Official documentation"
           },
           {
             "source": "https://cedar.example/2031",
-            "content": "Published 2031-05-01. Active quota: 320 requests. Replaces the 2029 quota.",
+            "excerpt": "Published 2031-05-01. Active quota: 320 requests. Replaces the 2029 quota.",
             "title": "Official documentation"
           }
         ]
@@ -208,7 +208,7 @@
         "results": [
           {
             "source": "https://finch.example/registry",
-            "content": "Registry accession: FN-5821.",
+            "excerpt": "Registry accession: FN-5821.",
             "title": "Official documentation"
           }
         ]
@@ -262,7 +262,7 @@
           {
             "source": "https://vela.example/calibration",
             "title": "Vela antenna calibration",
-            "content": "Vela antenna documentation. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. The approved calibration code is VX-7319."
+            "excerpt": "Vela antenna documentation. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. Calibration background and routine antenna maintenance. The approved calibration code is VX-7319."
           }
         ]
       }

@@ -7,10 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
+	"mime"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/adrianliechti/wingman/pkg/researcher"
+	"github.com/openai/openai-go/v3/packages/ssestream"
 )
 
 var _ researcher.Provider = &Client{}
@@ -40,63 +44,117 @@ func New(token string, options ...Option) (*Client, error) {
 	return c, nil
 }
 
-func (c *Client) Research(ctx context.Context, instructions string, options *researcher.ResearchOptions) (*researcher.Result, error) {
-	if options == nil {
-		options = new(researcher.ResearchOptions)
+func (c *Client) Research(ctx context.Context, instructions string, options *researcher.ResearchOptions) iter.Seq2[*researcher.Result, error] {
+	return func(yield func(*researcher.Result, error) bool) {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
+		if !yield(&researcher.Result{Progress: "Searching and synthesizing web evidence"}, nil) {
+			return
+		}
+		body, err := json.Marshal(&SearchRequest{Query: instructions, Type: "deep-reasoning", Stream: true,
+			SystemPrompt: "Honor the research task's requested timeframes, document versions, and source restrictions. Use the supplied source URLs when requested. Cite the source URL for each supported claim; do not use unrelated sources or invent citation references. If requested sources cannot be verified, explicitly say so. Follow the requested report length and format. Research task: " + instructions,
+			OutputSchema: &OutputSchema{Type: "text", Description: "A source-backed research report following the research task's instructions, length, and format, with cited source URLs."},
+		})
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.url, "/")+"/search", bytes.NewReader(body))
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("x-api-key", c.token)
+		resp, err := c.client.Do(req)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			yield(nil, fmt.Errorf("exa: unexpected status %d: %s", resp.StatusCode, string(body)))
+			return
+		}
+		// The done event and a non-streaming response carry the same output.
+		finish := func(output *SearchOutput) {
+			if output == nil {
+				yield(nil, errors.New("exa: no research output returned"))
+				return
+			}
+			sources := collectSources(output.Grounding)
+			progress := "Received research report"
+			if len(sources) > 0 {
+				progress = fmt.Sprintf("Received research report with %d cited sources", len(sources))
+			}
+			if !yield(&researcher.Result{Progress: progress}, nil) {
+				return
+			}
+			yield(&researcher.Result{Content: appendSources(strings.TrimSpace(decodeContent(output.Content)), sources)}, nil)
+		}
+		mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+		if mediaType != "text/event-stream" {
+			// Accept a normal response from deployments that do not stream search.
+			var data SearchResponse
+			if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+				yield(nil, err)
+				return
+			}
+			finish(data.Output)
+			return
+		}
+		stream := ssestream.NewStream[searchEvent](ssestream.NewDecoder(resp), nil)
+		defer stream.Close()
+		// Text deltas only report drafting progress: Exa can discard a draft with
+		// stream-reset, and the done event carries the final report and grounding.
+		chars, lastChars := 0, -1
+		for stream.Next() {
+			event := stream.Current()
+			switch event.Type {
+			case "stream-reset":
+				chars, lastChars = 0, -1
+			case "grounding":
+				if sources := len(collectSources(event.Grounding)); sources > 0 {
+					if !yield(&researcher.Result{Progress: fmt.Sprintf("Found %d research sources", sources)}, nil) {
+						return
+					}
+				}
+			case "text-delta":
+				chars += utf8.RuneCountInString(event.Delta)
+				if chars > 0 && (lastChars < 0 || chars-lastChars >= 1000) {
+					progress := "Writing research report"
+					if lastChars >= 0 {
+						progress = fmt.Sprintf("Writing research report (%d characters)", chars)
+					}
+					lastChars = chars
+					if !yield(&researcher.Result{Progress: progress}, nil) {
+						return
+					}
+				}
+			case "done":
+				finish(event.Output)
+				return
+			}
+		}
+		if err := stream.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
+		yield(nil, errors.New("exa research: stream ended before completion"))
 	}
+}
 
-	request := &SearchRequest{
-		Query: instructions,
-		Type:  "deep-reasoning",
-
-		OutputSchema: &OutputSchema{
-			Type:        "text",
-			Description: "A comprehensive, well-structured research report that answers the question.",
-		},
-	}
-
-	body, _ := json.Marshal(request)
-
-	url := strings.TrimRight(c.url, "/") + "/search"
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", c.token)
-
-	resp, err := c.client.Do(req)
-
-	if err != nil {
-		return nil, err
-	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("exa: unexpected status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var data SearchResponse
-
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
-	}
-
-	if data.Output == nil {
-		return nil, errors.New("exa: no research output returned")
-	}
-
-	content := strings.TrimSpace(decodeContent(data.Output.Content))
-	content = appendSources(content, collectSources(data.Output.Grounding))
-
-	return &researcher.Result{
-		Content: content,
-	}, nil
+type searchEvent struct {
+	Type      string        `json:"type"`
+	Delta     string        `json:"delta"`
+	Grounding []Grounding   `json:"grounding"`
+	Output    *SearchOutput `json:"output"`
 }
 
 type source struct {

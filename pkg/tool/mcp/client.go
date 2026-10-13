@@ -98,23 +98,40 @@ func (c *Client) Tools(ctx context.Context) ([]tool.Tool, error) {
 
 	var result []tool.Tool
 
-	// Tools paginates; ListTools would silently stop at the server's page size.
-	for t, err := range session.Tools(ctx, nil) {
+	// Follow every page, but not a cursor seen before: the SDK's Tools iterator
+	// would list forever when an upstream repeats nextCursor.
+	params := &mcp.ListToolsParams{}
+	seen := map[string]bool{}
+
+	for {
+		page, err := session.ListTools(ctx, params)
+
 		if err != nil {
 			return nil, err
 		}
 
-		input, _ := t.InputSchema.(map[string]any)
+		for _, t := range page.Tools {
+			input, _ := t.InputSchema.(map[string]any)
 
-		result = append(result, tool.Tool{
-			Name:        t.Name,
-			Description: t.Description,
+			result = append(result, tool.Tool{
+				Name:        t.Name,
+				Description: t.Description,
 
-			Parameters: tool.NormalizeSchema(input),
-		})
+				Parameters: tool.NormalizeSchema(input),
+			})
+		}
+
+		if page.NextCursor == "" {
+			return result, nil
+		}
+
+		if seen[page.NextCursor] {
+			return nil, fmt.Errorf("mcp: tools/list repeated cursor %q", page.NextCursor)
+		}
+
+		seen[page.NextCursor] = true
+		params = &mcp.ListToolsParams{Cursor: page.NextCursor}
 	}
-
-	return result, nil
 }
 
 func (c *Client) Execute(ctx context.Context, name string, parameters map[string]any) (any, error) {

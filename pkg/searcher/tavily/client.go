@@ -18,12 +18,14 @@ var _ searcher.Provider = &Client{}
 type Client struct {
 	token  string
 	client *http.Client
+	depth  string
 }
 
 func New(token string, options ...Option) (*Client, error) {
 	c := &Client{
 		token:  token,
 		client: http.DefaultClient,
+		depth:  "advanced",
 	}
 
 	for _, option := range options {
@@ -32,6 +34,11 @@ func New(token string, options ...Option) (*Client, error) {
 
 	if c.token == "" {
 		return nil, errors.New("invalid token")
+	}
+	switch c.depth {
+	case "basic", "fast", "ultra-fast", "advanced":
+	default:
+		return nil, fmt.Errorf("tavily search: invalid depth %q", c.depth)
 	}
 
 	return c, nil
@@ -69,9 +76,13 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 
 	body := map[string]any{
 		"query":                  query,
-		"search_depth":           "advanced",
+		"search_depth":           c.depth,
 		"topic":                  topic,
 		"include_published_date": true,
+	}
+
+	if options.Text != nil {
+		body["include_raw_content"] = true
 	}
 
 	if location := strings.ToUpper(strings.TrimSpace(options.Location)); location != "" {
@@ -153,9 +164,18 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 		}
 		result := searcher.Result{
 			Source: r.URL,
+			Score:  r.Score,
 
 			Title:   r.Title,
-			Content: r.Content,
+			Excerpt: r.Content,
+		}
+		if options.Text != nil {
+			result.Text = r.RawContent
+			if result.Text == nil {
+				// Retrieval was attempted. Do not retry it as a fresh crawl.
+				empty := ""
+				result.Text = &empty
+			}
 		}
 
 		if dated {
@@ -172,6 +192,7 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 func (c *Client) Capabilities() searcher.Capabilities {
 	return searcher.Capabilities{
 		DateFilters: true,
+		Content:     true,
 		Categories: []searcher.Category{
 			{Name: CategoryGeneral, Description: "General web search, the default when category is omitted. Country bias is supported."},
 			{Name: CategoryNews, Description: "News articles and current-events coverage from media outlets; results carry estimated publication or update dates. Country bias is not supported."},

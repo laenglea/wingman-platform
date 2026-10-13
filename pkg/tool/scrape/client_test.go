@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/scraper"
+	"github.com/adrianliechti/wingman/pkg/tool"
 )
 
 type fakeScraper struct {
@@ -124,7 +125,7 @@ func TestExecute_DomainFilterBlock(t *testing.T) {
 
 func TestResult_PassesThroughText(t *testing.T) {
 	c, _ := New(&fakeScraper{doc: &scraper.Document{Text: "ok"}})
-	out := c.Result(ToolName, "some markdown")
+	out, _ := tool.RenderResult(c, ToolName, "some markdown")
 	if len(out.Parts) != 1 || out.Parts[0].Text != "some markdown" {
 		t.Errorf("got %+v", out)
 	}

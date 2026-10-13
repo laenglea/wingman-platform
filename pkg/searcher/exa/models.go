@@ -20,7 +20,8 @@ type SearchRequest struct {
 }
 
 type SearchContents struct {
-	Text bool `json:"text,omitempty"`
+	Text       bool `json:"text,omitempty"`
+	Highlights bool `json:"highlights,omitempty"`
 }
 
 type SearchResponse struct {
@@ -35,5 +36,6 @@ type SearchResult struct {
 
 	PublishedDate string `json:"publishedDate"`
 
-	Text string `json:"text"`
+	Text       string   `json:"text"`
+	Highlights []string `json:"highlights"`
 }

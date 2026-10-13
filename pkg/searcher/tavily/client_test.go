@@ -17,6 +17,30 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+func TestSearchDepth(t *testing.T) {
+	if _, err := New("test", WithDepth("invalid")); err == nil {
+		t.Fatal("accepted invalid depth")
+	}
+	for _, depth := range []string{"advanced", "basic", "fast", "ultra-fast"} {
+		c, err := New("test", WithDepth(depth), WithClient(&http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			var body map[string]any
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["search_depth"] != depth {
+				t.Fatalf("search_depth=%v, want %s", body["search_depth"], depth)
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"results":[]}`))}, nil
+		})}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Search(t.Context(), "query", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestSearchTopicsDatesAndPublication(t *testing.T) {
 	limit := 4
 	since := time.Date(2031, 5, 1, 0, 0, 0, 0, time.UTC)

@@ -1,0 +1,152 @@
+[
+  {
+    "id": "focused_lookup",
+    "tool": "web_search",
+    "target_ms": 2000,
+    "arguments": {
+      "query": "MCP 2025-03-26 progressToken progress notifications requirements",
+      "allowed_domains": [
+        "modelcontextprotocol.io"
+      ],
+      "max_results": 3
+    },
+    "expected_sources": [
+      "https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/progress"
+    ],
+    "required_terms": [
+      [
+        "progressToken",
+        "progress token"
+      ]
+    ]
+  },
+  {
+    "id": "batched_lookup",
+    "tool": "web_search",
+    "target_ms": 3000,
+    "arguments": {
+      "queries": [
+        "MCP 2025-03-26 progressToken requirements",
+        "MCP 2025-03-26 cancellation initialize request requirements"
+      ],
+      "allowed_domains": [
+        "modelcontextprotocol.io"
+      ],
+      "max_results": 3
+    },
+    "expected_sources": [
+      "https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/progress",
+      "https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/cancellation"
+    ],
+    "required_terms": [
+      [
+        "progressToken",
+        "progress token"
+      ],
+      [
+        "cancel"
+      ]
+    ]
+  },
+  {
+    "id": "read_source",
+    "tool": "web_fetch",
+    "target_ms": 3000,
+    "arguments": {
+      "url": "https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/progress",
+      "query": "progressToken increase completion",
+      "max_chars": 5000
+    },
+    "expected_sources": [
+      "https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/progress"
+    ],
+    "required_terms": [
+      [
+        "progressToken",
+        "progress token"
+      ],
+      [
+        "increase",
+        "greater than the previous",
+        "greater than its previous",
+        "strictly greater"
+      ],
+      [
+        "completion"
+      ]
+    ]
+  },
+  {
+    "id": "focused_research",
+    "tool": "web_research",
+    "target_ms": 15000,
+    "arguments": {
+      "instructions": "Read https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/progress and https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/cancellation. Compare progress and cancellation in that exact version: progressToken types and uniqueness, numeric progress changes, when updates stop, and cancellation behavior. Use these primary sources, cite both URLs, and answer in at most 200 words."
+    },
+    "expected_sources": [
+      "https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/progress",
+      "https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/cancellation"
+    ],
+    "required_terms": [
+      [
+        "progressToken",
+        "progress token"
+      ],
+      [
+        "increase",
+        "monotonic",
+        "greater than the previous",
+        "greater than its previous",
+        "strictly greater"
+      ],
+      [
+        "completion",
+        "complete"
+      ],
+      [
+        "cancel"
+      ]
+    ],
+    "max_words": 200
+  },
+  {
+    "id": "broader_research",
+    "tool": "web_research",
+    "target_ms": 45000,
+    "arguments": {
+      "instructions": "For MCP specification 2025-03-26, recommend how an internet research server should handle long-running tools over Streamable HTTP. Read https://modelcontextprotocol.io/specification/2025-03-26/basic/transports , https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/progress , and https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/cancellation . Compare immediate JSON responses and SSE responses; explain opt-in progress, increasing values, cancellation and disconnects. Include a short implementation recommendation distinguishing MUST from SHOULD, cite all three primary URLs, and keep the report under 350 words."
+    },
+    "expected_sources": [
+      "https://modelcontextprotocol.io/specification/2025-03-26/basic/transports",
+      "https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/progress",
+      "https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/cancellation"
+    ],
+    "required_terms": [
+      [
+        "JSON"
+      ],
+      [
+        "SSE",
+        "server-sent"
+      ],
+      [
+        "progressToken",
+        "progress token"
+      ],
+      [
+        "increase",
+        "monotonic",
+        "greater than the previous",
+        "greater than its previous",
+        "strictly greater"
+      ],
+      [
+        "cancel"
+      ],
+      [
+        "disconnect"
+      ]
+    ],
+    "max_words": 350
+  }
+]

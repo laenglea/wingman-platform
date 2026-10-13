@@ -65,9 +65,9 @@ func TestSearchLive(t *testing.T) {
 			}
 			chars, found := 0, false
 			for _, result := range results {
-				chars += len([]rune(result.Content))
-				found = found || strings.Contains(strings.ToLower(result.Content), tc.evidence)
-				if result.Source == "" || result.Content == "" {
+				chars += len([]rune(result.Excerpt))
+				found = found || strings.Contains(strings.ToLower(result.Excerpt), tc.evidence)
+				if result.Source == "" || result.Excerpt == "" {
 					t.Error("result lacks source/evidence")
 				}
 			}
