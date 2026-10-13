@@ -7,7 +7,9 @@ import "encoding/json"
 type SearchRequest struct {
 	Query string `json:"query"`
 
-	Type string `json:"type,omitempty"`
+	Type         string `json:"type,omitempty"`
+	Stream       bool   `json:"stream,omitempty"`
+	SystemPrompt string `json:"systemPrompt,omitempty"`
 
 	OutputSchema *OutputSchema `json:"outputSchema,omitempty"`
 }

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/scraper"
 	"github.com/adrianliechti/wingman/pkg/tool"
 )
@@ -19,10 +18,7 @@ const defaultMaxChars = 32 * 1024
 
 var ErrURLNotAllowed = errors.New("scrape: url not allowed")
 
-var (
-	_ tool.Provider = (*Client)(nil)
-	_ tool.Resulter = (*Client)(nil)
-)
+var _ tool.Provider = (*Client)(nil)
 
 type Client struct {
 	scraper scraper.Provider
@@ -140,13 +136,6 @@ func (c *Client) Execute(ctx context.Context, name string, parameters map[string
 	}
 
 	return formatDocument(raw, text), nil
-}
-
-// Result implements tool.Resulter so the agent chain sees the same markdown
-// the MCP server emits.
-func (c *Client) Result(name string, value any) provider.ToolResult {
-	text, _ := value.(string)
-	return tool.TextResult(text)
 }
 
 // paginate returns a window of at most max characters (runes) starting at

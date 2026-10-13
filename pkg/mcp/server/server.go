@@ -35,14 +35,17 @@ func New(name, instructions string, tools []tool.Provider) (*Server, error) {
 
 	serverOpts := &mcp.ServerOptions{
 		Instructions: instructions,
-
-		KeepAlive: time.Second * 30,
 	}
+	// Stateless discovery clients negotiate 2026-07-28, which removes ping.
+	// KeepAlive would send unsupported pings during long research requests.
 
 	server := mcp.NewServer(serverImpl, serverOpts)
 
 	handlerOpts := &mcp.StreamableHTTPOptions{
 		Stateless: true,
+
+		// Stop paid research when a 2026-07-28 client cancels or disconnects.
+		PropagateRequestCancellation: true,
 	}
 
 	handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
@@ -126,10 +129,19 @@ func (s *Server) refreshTools() error {
 					}
 				}
 
-				result, err := p.Execute(ctx, t.Name, args)
+				result, err := executeTool(ctx, req, p, t.Name, args)
 
 				if err != nil {
-					return nil, err
+					if ctx.Err() != nil {
+						return nil, err
+					}
+
+					// A failed call is a tool result, not a protocol error, so the
+					// model sees messages such as unsupported filter combinations.
+					result := &mcp.CallToolResult{}
+					result.SetError(err)
+
+					return result, nil
 				}
 
 				switch v := result.(type) {

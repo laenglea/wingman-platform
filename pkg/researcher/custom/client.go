@@ -3,6 +3,7 @@ package custom
 import (
 	"context"
 	"errors"
+	"iter"
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/researcher"
@@ -47,7 +48,25 @@ func New(url string, options ...Option) (*Client, error) {
 	return c, nil
 }
 
-func (c *Client) Research(ctx context.Context, instructions string, options *researcher.ResearchOptions) (*researcher.Result, error) {
+func (c *Client) Research(ctx context.Context, instructions string, options *researcher.ResearchOptions) iter.Seq2[*researcher.Result, error] {
+	return func(yield func(*researcher.Result, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
+		if !yield(&researcher.Result{Progress: "Waiting for custom researcher report"}, nil) {
+			return
+		}
+		result, err := c.research(ctx, instructions, options)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		yield(result, nil)
+	}
+}
+
+func (c *Client) research(ctx context.Context, instructions string, options *researcher.ResearchOptions) (*researcher.Result, error) {
 	if options == nil {
 		options = new(researcher.ResearchOptions)
 	}

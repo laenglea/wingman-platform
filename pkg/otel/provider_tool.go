@@ -2,6 +2,7 @@ package otel
 
 import (
 	"context"
+	"iter"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/tool"
@@ -41,34 +42,42 @@ func (p *observableTool) Tools(ctx context.Context) ([]tool.Tool, error) {
 	return tools, err
 }
 
-func (p *observableTool) Execute(ctx context.Context, tool string, parameters map[string]any) (any, error) {
-	ctx, span := otel.Tracer(instrumentationName).Start(ctx, "execute_tool "+tool)
-	defer span.End()
+func (p *observableTool) Execute(ctx context.Context, name string, parameters map[string]any) (any, error) {
+	return tool.Collect(p.ExecuteStream(ctx, name, parameters), nil)
+}
 
-	if span.IsRecording() {
-		baseAttrs := []KeyValue{
-			semconv.GenAIOperationNameExecuteTool,
-			semconv.GenAIToolName(tool),
-			semconv.GenAIToolType("function"),
+func (p *observableTool) ExecuteStream(ctx context.Context, name string, parameters map[string]any) iter.Seq2[*tool.Execution, error] {
+	return func(yield func(*tool.Execution, error) bool) {
+		ctx, span := otel.Tracer(instrumentationName).Start(ctx, "execute_tool "+name)
+		defer span.End()
+
+		if span.IsRecording() {
+			baseAttrs := []KeyValue{
+				semconv.GenAIOperationNameExecuteTool,
+				semconv.GenAIToolName(name),
+				semconv.GenAIToolType("function"),
+			}
+
+			span.SetAttributes(KeyValues(
+				baseAttrs,
+				ToolArgumentAttrs(parameters),
+			)...)
 		}
 
-		span.SetAttributes(KeyValues(
-			baseAttrs,
-			ToolArgumentAttrs(parameters),
-		)...)
+		for execution, err := range tool.ExecuteStream(ctx, p.tool, name, parameters) {
+			if err != nil {
+				RecordError(span, err)
+				yield(nil, err)
+				return
+			}
+			if execution != nil && execution.Progress == "" && span.IsRecording() {
+				span.SetAttributes(ToolResultAttrs(execution.Result)...)
+			}
+			if !yield(execution, nil) {
+				return
+			}
+		}
 	}
-
-	result, err := p.tool.Execute(ctx, tool, parameters)
-
-	if err != nil {
-		RecordError(span, err)
-	}
-
-	if span.IsRecording() {
-		span.SetAttributes(ToolResultAttrs(result)...)
-	}
-
-	return result, err
 }
 
 func (p *observableTool) Result(name string, value any) provider.ToolResult {

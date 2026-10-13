@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -85,111 +86,182 @@ func New(completer provider.Completer, searcher searcher.Provider, options ...Op
 	return c, nil
 }
 
-func (c *Client) Research(ctx context.Context, instructions string, options *researcher.ResearchOptions) (*researcher.Result, error) {
-	prompt, err := c.prompt.Execute(map[string]any{
-		"HasScraper":     c.scraper != nil,
-		"HasDateFilters": c.searcher.Capabilities().DateFilters,
-		"HasSummarizer":  c.summarizer != nil,
-		"ToolCallTarget": c.toolCallTarget,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	searchProvider, err := search.New(&cachedSearcher{Provider: c.searcher}, search.WithMaxSnippetChars(1500))
-	if err != nil {
-		return nil, err
-	}
-
-	tools := map[string]tool.Provider{}
-	var toolDefs []provider.Tool
-
-	searchTools, err := searchProvider.Tools(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, t := range searchTools {
-		tools[t.Name] = searchProvider
-		toolDefs = append(toolDefs, t)
-	}
-
-	if c.scraper != nil {
-		scrapeProvider, err := scrape.New(&cachedScraper{Provider: c.scraper}, scrape.WithMaxChars(c.maxFetchChars))
+func (c *Client) Research(ctx context.Context, instructions string, options *researcher.ResearchOptions) iter.Seq2[*researcher.Result, error] {
+	return func(yield func(*researcher.Result, error) bool) {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		prompt, err := c.prompt.Execute(map[string]any{
+			"HasScraper":     c.scraper != nil,
+			"HasDateFilters": c.searcher.Capabilities().DateFilters,
+			"HasSummarizer":  c.summarizer != nil,
+			"ToolCallTarget": c.toolCallTarget,
+		})
 		if err != nil {
-			return nil, err
+			yield(nil, err)
+			return
 		}
-		scrapeTools, err := scrapeProvider.Tools(ctx)
+
+		searchProvider, err := search.New(&cachedSearcher{Provider: c.searcher}, search.WithMaxSnippetChars(1500))
 		if err != nil {
-			return nil, err
+			yield(nil, err)
+			return
 		}
-		for _, t := range scrapeTools {
-			tools[t.Name] = scrapeProvider
+
+		tools := map[string]tool.Provider{}
+		var toolDefs []provider.Tool
+
+		searchTools, err := searchProvider.Tools(ctx)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		for _, t := range searchTools {
+			tools[t.Name] = searchProvider
 			toolDefs = append(toolDefs, t)
 		}
-	}
 
-	messages := []provider.Message{
-		provider.SystemMessage(prompt),
-		provider.UserMessage(instructions),
-	}
-
-	completeOptions := &provider.CompleteOptions{
-		Tools: toolDefs,
-	}
-	if c.verbosity != "" {
-		completeOptions.OutputOptions = &provider.OutputOptions{Verbosity: c.verbosity}
-	}
-	if c.effort != "" {
-		completeOptions.ReasoningOptions = &provider.ReasoningOptions{Effort: c.effort}
-	}
-
-	s := &state{
-		instructions: instructions,
-		tools:        tools,
-		client:       c,
-	}
-
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		acc := provider.CompletionAccumulator{}
-		for completion, err := range c.completer.Complete(ctx, messages, completeOptions) {
+		if c.scraper != nil {
+			scrapeProvider, err := scrape.New(&cachedScraper{Provider: c.scraper}, scrape.WithMaxChars(c.maxFetchChars))
 			if err != nil {
-				return nil, err
+				yield(nil, err)
+				return
 			}
-			if completion != nil {
-				acc.Add(*completion)
+			scrapeTools, err := scrapeProvider.Tools(ctx)
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+			for _, t := range scrapeTools {
+				tools[t.Name] = scrapeProvider
+				toolDefs = append(toolDefs, t)
 			}
 		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
+
+		messages := []provider.Message{
+			provider.SystemMessage(prompt),
+			provider.UserMessage(instructions),
 		}
 
-		result := acc.Result()
-		if result.Message == nil {
-			return &researcher.Result{Content: ""}, nil
+		completeOptions := &provider.CompleteOptions{
+			Tools: toolDefs,
+		}
+		if c.verbosity != "" {
+			completeOptions.OutputOptions = &provider.OutputOptions{Verbosity: c.verbosity}
+		}
+		if c.effort != "" {
+			completeOptions.ReasoningOptions = &provider.ReasoningOptions{Effort: c.effort}
 		}
 
-		messages = append(messages, *result.Message)
-
-		calls := result.Message.ToolCalls()
-		if len(calls) == 0 {
-			return &researcher.Result{Content: result.Text()}, nil
+		s := &state{
+			instructions: instructions,
+			tools:        tools,
+			client:       c,
 		}
 
-		s.toolCalls += len(calls)
+		for {
+			if err := ctx.Err(); err != nil {
+				yield(nil, err)
+				return
+			}
 
-		toolMessages := s.runCalls(ctx, calls)
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if hint := s.efficiencyHint(); hint != "" {
-			appendText(&toolMessages[len(toolMessages)-1], hint)
-		}
+			if s.toolCalls == 0 {
+				if !yield(&researcher.Result{Progress: "Planning research"}, nil) {
+					return
+				}
+			} else {
+				if !yield(&researcher.Result{Progress: "Reviewing evidence and planning next steps"}, nil) {
+					return
+				}
+			}
+			acc := provider.CompletionAccumulator{}
+			drafting := false
+			for completion, err := range c.completer.Complete(ctx, messages, completeOptions) {
+				if err != nil {
+					yield(nil, err)
+					return
+				}
+				if completion != nil {
+					acc.Add(*completion)
+					if !drafting && completion.Message != nil && completion.Message.Text() != "" {
+						drafting = true
+						if !yield(&researcher.Result{Progress: "Drafting research response"}, nil) {
+							return
+						}
+					}
+				}
+			}
+			if err := ctx.Err(); err != nil {
+				yield(nil, err)
+				return
+			}
 
-		messages = append(messages, toolMessages...)
+			result := acc.Result()
+			// Like the hosted researchers, never return a truncated or failed turn as a report.
+			switch result.Status {
+			case provider.CompletionStatusFailed, provider.CompletionStatusIncomplete, provider.CompletionStatusRefused:
+				yield(nil, fmt.Errorf("research: completion %s", result.Status))
+				return
+			}
+			var calls []provider.ToolCall
+			if result.Message != nil {
+				calls = result.Message.ToolCalls()
+			}
+			if len(calls) == 0 {
+				report := result.Text()
+				if strings.TrimSpace(report) == "" {
+					yield(nil, errors.New("research: empty response"))
+					return
+				}
+				yield(&researcher.Result{Content: report}, nil)
+				return
+			}
+
+			messages = append(messages, *result.Message)
+
+			s.toolCalls += len(calls)
+
+			var searches, fetches int
+			var details []string
+			for _, call := range calls {
+				var input struct {
+					Query string `json:"query"`
+					URL   string `json:"url"`
+				}
+				_ = json.Unmarshal([]byte(call.Arguments), &input)
+				switch call.Name {
+				case toolWebSearch:
+					searches++
+					if input.Query != "" {
+						details = append(details, input.Query)
+					}
+				case toolWebFetch:
+					fetches++
+					if input.URL != "" {
+						details = append(details, input.URL)
+					}
+				}
+			}
+			progress := fmt.Sprintf("Gathering evidence: %d search requests, %d source reads", searches, fetches)
+			if len(details) > 0 {
+				progress += "; " + strings.Join(details[:min(3, len(details))], "; ")
+			}
+			if !yield(&researcher.Result{Progress: progress}, nil) {
+				return
+			}
+			toolMessages := s.runCalls(ctx, calls)
+			if err := ctx.Err(); err != nil {
+				yield(nil, err)
+				return
+			}
+			if !yield(&researcher.Result{Progress: fmt.Sprintf("Processed %d research tool calls", s.toolCalls)}, nil) {
+				return
+			}
+			if hint := s.efficiencyHint(); hint != "" {
+				appendText(&toolMessages[len(toolMessages)-1], hint)
+			}
+
+			messages = append(messages, toolMessages...)
+		}
 	}
 }
 

@@ -69,7 +69,7 @@ func (s protocolSearcher) Capabilities(ctx context.Context, request *searchrpc.C
 func (protocolSearcher) Search(_ context.Context, request *searchrpc.SearchRequest) (*searchrpc.SearchResponse, error) {
 	// Echo the bounds in metadata so the test checks their serialized precision.
 	return &searchrpc.SearchResponse{Results: []*searchrpc.Result{{
-		Content: request.Query,
+		Excerpt: request.Query,
 		Metadata: map[string]string{
 			"since": request.Since.AsTime().Format(time.RFC3339Nano),
 			"until": request.Until.AsTime().Format(time.RFC3339Nano),

@@ -129,6 +129,35 @@ researchers:
 	}
 }
 
+func TestInternetMCPConfiguration(t *testing.T) {
+	cfg, err := parseTestConfig(t, testProviderConfig+`
+searchers:
+  web: {type: duckduckgo}
+scrapers:
+  web: {type: exa, token: test}
+researchers:
+  agent: {type: agent, searcher: web, scraper: web}
+tools:
+  web_search: {type: search, searcher: web}
+  web_fetch: {type: scraper, scraper: web}
+  web_research: {type: research, researcher: agent}
+mcps:
+  internet:
+    type: server
+    name: internet
+    tools: [web_search, web_fetch, web_research]
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.MCP("internet"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(cfg.MCPs(), []string{"internet"}) {
+		t.Fatalf("MCPs = %v", cfg.MCPs())
+	}
+}
+
 func TestHTTPExtractorClientConfiguration(t *testing.T) {
 	for _, kind := range []string{"azure", "docling", "kreuzberg", "mistral"} {
 		t.Run(kind, func(t *testing.T) {

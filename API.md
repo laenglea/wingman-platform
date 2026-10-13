@@ -748,3 +748,7 @@ Proxy requests to configured MCP (Model Context Protocol) servers.
 **Endpoint:** `POST /v1/mcp/{id}`, `POST /v1/mcp/{id}/*`
 
 Forwards requests to the MCP server identified by `{id}`.
+
+Built-in MCP servers also use this endpoint. The local configuration combines `web_search`, `web_fetch`, and `web_research` at `/v1/mcp/internet`. Search returns ranked sources and excerpts, fetch reads a source URL, and research accepts `{"instructions":"..."}` and returns a cited report as text.
+
+To request progress, include `_meta.progressToken` (a string or integer) in the `tools/call` parameters. The response stream includes `notifications/progress` with the same token, an increasing `progress` counter, and a human-readable `message`. `total` is omitted because the research workflow is open-ended. No progress notifications are sent without a valid token, or after the tool returns or is cancelled. See the research MCP example in [README.md](README.md).

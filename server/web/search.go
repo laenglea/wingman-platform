@@ -60,11 +60,10 @@ func (h *Retriever) Search(r *http.Request, model, query string, options *search
 	if category == "general" {
 		category = ""
 	}
-	if category == "finance" && hasCategory(caps, "financial report") {
-		category = "financial report"
-	}
-	if category == "financial report" && hasCategory(caps, "finance") {
-		category = "finance"
+	// Map Tavily's finance topic and Exa's financial report category onto each
+	// other only when the backend lacks the requested name.
+	if alias := map[string]string{"finance": "financial report", "financial report": "finance"}[category]; alias != "" && !hasCategory(caps, category) && hasCategory(caps, alias) {
+		category = alias
 	}
 	if category != "" && !hasCategory(caps, category) {
 		return nil, BadRequest(fmt.Sprintf("selected searcher does not support category %q", options.Category))

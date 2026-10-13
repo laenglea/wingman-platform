@@ -3,16 +3,13 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/adrianliechti/wingman/pkg/searcher"
 )
 
 func valueURL(r *http.Request) string {
@@ -299,13 +296,4 @@ func readFiles(r *http.Request) ([]provider.File, error) {
 	}
 
 	return files, nil
-}
-
-// valueDate includes the whole UTC day for a date-only until bound.
-func valueDate(r *http.Request, name string) (*time.Time, error) {
-	bound, err := searcher.ParseDateBound(r.FormValue(name), name == "until")
-	if err != nil {
-		return nil, fmt.Errorf("invalid %s: %w", name, err)
-	}
-	return bound, nil
 }

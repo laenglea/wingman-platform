@@ -90,7 +90,7 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 			hit.RawContent = result.Text
 		}
 		if result.Timestamp != nil && (request.IncludePublishedDate || topic == "news") {
-			hit.PublishedDate = result.Timestamp.UTC().Format(time.RFC1123)
+			hit.PublishedDate = result.Timestamp.UTC().Format(http.TimeFormat)
 		}
 		response.Results = append(response.Results, hit)
 	}
@@ -133,9 +133,10 @@ func tavilyDates(request SearchRequest, now time.Time) (*time.Time, *time.Time, 
 			return nil, nil, errors.New("time_range must be day, week, month or year")
 		}
 	}
-	if request.Days != nil {
-		if request.Topic != "news" || *request.Days < 1 || *request.Days > 36500 {
-			return nil, nil, errors.New("days requires topic news and must be between 1 and 36500")
+	// Like upstream, days applies only to news; SDK helpers send it with general.
+	if request.Days != nil && request.Topic == "news" {
+		if *request.Days < 1 || *request.Days > 36500 {
+			return nil, nil, errors.New("days must be between 1 and 36500")
 		}
 		days = *request.Days
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/searcher/duckduckgo"
 	"github.com/adrianliechti/wingman/pkg/searcher/exa"
 	"github.com/adrianliechti/wingman/pkg/searcher/tavily"
+	"github.com/adrianliechti/wingman/pkg/tool"
 )
 
 type fakeSearcher struct {
@@ -205,14 +206,14 @@ func TestExecute_EmptyResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if got.(string) != "No results." {
+	if got.(string) != "No results.\n" {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestResult_PassesThroughText(t *testing.T) {
 	c, _ := New(&fakeSearcher{})
-	out := c.Result(ToolName, "some markdown")
+	out, _ := tool.RenderResult(c, ToolName, "some markdown")
 	if len(out.Parts) != 1 || out.Parts[0].Text != "some markdown" {
 		t.Errorf("got %+v", out)
 	}
@@ -293,24 +294,28 @@ func TestExecute_BatchesQueriesAndDeduplicates(t *testing.T) {
 	f := &batchSearcher{results: map[string][]searcher.Result{
 		"a": {{Source: "https://www.example.com/page/", Title: "Page", Excerpt: "A"}},
 		"b": {{Source: "https://example.com/page#top", Title: "Page", Excerpt: "A"}, {Source: "https://example.com/other", Title: "Other", Excerpt: "C"}},
+		"c": {{Source: "https://example.com/other", Title: "Other", Excerpt: "C"}},
 	}}
 	c, _ := New(f)
 
 	got, err := c.Execute(context.Background(), ToolName, map[string]any{
-		"queries": []any{"a", " b ", "a", "broken"},
+		"queries": []any{"a", " b ", "a", "c", "broken"},
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	text := got.(string)
 	sort.Strings(f.queries)
-	if !reflect.DeepEqual(f.queries, []string{"a", "b", "broken"}) {
+	if !reflect.DeepEqual(f.queries, []string{"a", "b", "broken", "c"}) {
 		t.Errorf("queries = %v", f.queries)
 	}
 	for _, want := range []string{"## Query: a", "## Query: b", "## Query: broken", "Error: backend down", "https://example.com/other", "1 result(s) already listed above omitted."} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in output:\n%s", want, text)
 		}
+	}
+	if !strings.Contains(text, "## Query: c\n1 result(s) already listed above omitted.\n") || strings.Contains(text, "No results.") {
+		t.Errorf("fully duplicated query should only report omitted results:\n%s", text)
 	}
 	if strings.Count(text, "[Page]") != 1 {
 		t.Errorf("duplicate URL listed twice:\n%s", text)
@@ -363,8 +368,10 @@ func TestTools_ReflectProviderCapabilities(t *testing.T) {
 			} else if present {
 				t.Fatalf("invalid category schema: %v", category)
 			}
-			if len(tools[0].Parameters["anyOf"].([]map[string]any)) != 2 {
-				t.Fatal("query alternatives missing")
+			for _, key := range []string{"anyOf", "oneOf", "allOf"} {
+				if _, present := tools[0].Parameters[key]; present {
+					t.Fatalf("top-level %s is rejected by Anthropic and Chat Completions", key)
+				}
 			}
 			if !test.dates {
 				_, err := c.Execute(t.Context(), ToolName, map[string]any{"query": "q", "since": "2026-01-01"})

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/researcher"
 	"github.com/adrianliechti/wingman/pkg/searcher"
 )
 
@@ -48,6 +49,56 @@ func assistantToolCalls(calls ...provider.ToolCall) provider.Message {
 	return m
 }
 
+func TestResearchProgress(t *testing.T) {
+	first := assistantToolCalls(provider.ToolCall{ID: "1", Name: "web_search", Arguments: `{"query":"evidence"}`})
+	final := provider.AssistantMessage("cited report")
+	c, err := New(&fakeCompleter{script: []provider.Completion{{Message: &first}, {Message: &final}}}, &fakeSearcher{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var messages []string
+	var report *researcher.Result
+	for result, err := range c.Research(t.Context(), "question", nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Progress != "" {
+			messages = append(messages, result.Progress)
+		} else {
+			report = result
+		}
+	}
+	if report == nil || report.Content != "cited report" {
+		t.Fatalf("result = %+v", report)
+	}
+	want := []string{"Planning research", "Gathering evidence: 1 search requests, 0 source reads; evidence", "Processed 1 research tool calls", "Reviewing evidence and planning next steps", "Drafting research response"}
+	if !slices.Equal(messages, want) {
+		t.Fatalf("progress = %v, want %v", messages, want)
+	}
+}
+
+func TestResearchStopsWhenConsumerBreaks(t *testing.T) {
+	answer := provider.AssistantMessage("answer")
+	completer := &fakeCompleter{script: []provider.Completion{{Message: &answer}}}
+	c, err := New(completer, &fakeSearcher{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := c.Research(t.Context(), "question", nil)
+	if len(completer.calls) != 0 {
+		t.Fatal("research ran before iteration")
+	}
+	for result, err := range stream {
+		if err != nil || result.Progress != "Planning research" {
+			t.Fatalf("first result = %+v, error = %v", result, err)
+		}
+		break
+	}
+	if len(completer.calls) != 0 {
+		t.Fatal("model called after consumer stopped at planning")
+	}
+}
+
 func TestResearch_ContinuesBeyondAdvisoryTarget(t *testing.T) {
 	first := assistantToolCalls(
 		provider.ToolCall{ID: "1", Name: "web_search", Arguments: `{"query":"a"}`},
@@ -61,7 +112,7 @@ func TestResearch_ContinuesBeyondAdvisoryTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := c.Research(t.Context(), "question", nil)
+	result, err := researcher.Collect(c.Research(t.Context(), "question", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +152,7 @@ func TestResearch_StopsWithoutToolCalls(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	result, err := c.Research(context.Background(), "question", nil)
+	result, err := researcher.Collect(c.Research(context.Background(), "question", nil))
 	if err != nil {
 		t.Fatalf("Research: %v", err)
 	}
@@ -110,5 +161,25 @@ func TestResearch_StopsWithoutToolCalls(t *testing.T) {
 	}
 	if len(completer.calls) != 1 {
 		t.Errorf("completer calls = %d, want 1", len(completer.calls))
+	}
+}
+
+func TestResearch_RejectsTruncatedOrEmptyAnswer(t *testing.T) {
+	partial := provider.AssistantMessage("partial rep")
+
+	for name, completion := range map[string]provider.Completion{
+		"truncated": {Status: provider.CompletionStatusIncomplete, StopReason: provider.StopReasonMaxTokens, Message: &partial},
+		"failed":    {Status: provider.CompletionStatusFailed},
+		"empty":     {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := New(&fakeCompleter{script: []provider.Completion{completion}}, &fakeSearcher{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result, err := researcher.Collect(c.Research(context.Background(), "question", nil)); err == nil {
+				t.Fatalf("accepted %s answer: %+v", name, result)
+			}
+		})
 	}
 }

@@ -17,6 +17,10 @@ import (
 type URLList []string
 
 func (u *URLList) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*u = nil
+		return nil
+	}
 	var single string
 	if json.Unmarshal(data, &single) == nil {
 		*u = []string{single}
@@ -92,10 +96,14 @@ func (h *Retriever) SearchContents(r *http.Request, model string, hits []searche
 	return results, nil
 }
 
+// Extract bounds the whole batch by timeout, which SDKs also use as their HTTP
+// timeout, so slow pages fail individually instead of losing every result.
 func Extract(ctx context.Context, p scraper.Provider, urls []string, timeout time.Duration) []Extraction {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	results := make([]Extraction, len(urls))
 	var wg sync.WaitGroup
 	workers := make(chan struct{}, 4)
@@ -110,13 +118,11 @@ func Extract(ctx context.Context, p scraper.Provider, urls []string, timeout tim
 				return
 			}
 			defer func() { <-workers }()
-			callCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
 			if err := ValidateURLs([]string{value}); err != nil {
 				result.Err = err
 				return
 			}
-			doc, err := p.Scrape(callCtx, value, &scraper.ScrapeOptions{})
+			doc, err := p.Scrape(ctx, value, &scraper.ScrapeOptions{})
 			if err != nil {
 				result.Err = err
 				return

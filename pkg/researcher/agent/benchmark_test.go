@@ -18,8 +18,10 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
+	"github.com/adrianliechti/wingman/pkg/researcher"
 	"github.com/adrianliechti/wingman/pkg/scraper"
 	"github.com/adrianliechti/wingman/pkg/searcher"
+	"github.com/joho/godotenv"
 )
 
 // Fixed evidence, real model. Opt in because this makes billable model calls.
@@ -43,6 +45,7 @@ type benchmarkCase struct {
 
 type benchmarkMetrics struct {
 	Case                                                          string
+	Effort                                                        provider.Effort
 	Repeat                                                        int
 	ModelCalls, ToolCalls, SearchRequests, FetchRequests          int
 	InputTokens, CachedInputTokens, OutputTokens, ToolResultChars int
@@ -160,6 +163,7 @@ func TestResearchFixedBenchmark(t *testing.T) {
 	if os.Getenv("RESEARCH_BENCHMARK") != "1" {
 		t.Skip("set RESEARCH_BENCHMARK=1 for real-model fixed-evidence benchmark")
 	}
+	_ = godotenv.Load("../../../.env")
 	endpoint := os.Getenv("RESEARCH_BENCHMARK_URL")
 	if endpoint == "" {
 		endpoint = "http://localhost:4242/v1/"
@@ -172,7 +176,22 @@ func TestResearchFixedBenchmark(t *testing.T) {
 	if repeats < 1 {
 		repeats = 2
 	}
-	completer, err := openai.NewResponder(endpoint, model, openai.WithToken(os.Getenv("RESEARCH_BENCHMARK_TOKEN")), openai.WithMaxRetries(0))
+	token := os.Getenv("RESEARCH_BENCHMARK_TOKEN")
+	if token == "" {
+		token = os.Getenv("OPENAI_API_KEY")
+	}
+	efforts := []provider.Effort{provider.EffortLow}
+	if profiles := os.Getenv("RESEARCH_BENCHMARK_EFFORTS"); profiles != "" {
+		efforts = nil
+		for _, profile := range strings.Split(profiles, ",") {
+			effort := provider.Effort(strings.TrimSpace(profile))
+			if effort != provider.EffortLow && effort != provider.EffortMedium && effort != provider.EffortHigh {
+				t.Fatalf("invalid benchmark effort %q", effort)
+			}
+			efforts = append(efforts, effort)
+		}
+	}
+	completer, err := openai.NewResponder(endpoint, model, openai.WithToken(token), openai.WithMaxRetries(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,28 +202,30 @@ func TestResearchFixedBenchmark(t *testing.T) {
 	var results []benchmarkMetrics
 	for repeat := range repeats {
 		for _, fixture := range cases {
-			metrics := benchmarkMetrics{Case: fixture.ID, Repeat: repeat + 1}
-			t.Run(fmt.Sprintf("%s/%d", fixture.ID, repeat+1), func(t *testing.T) {
-				evidence := &benchmarkEvidence{fixture: fixture, metrics: &metrics, observed: map[string]bool{}}
-				client, err := New(&benchmarkCompleter{Completer: completer, metrics: &metrics}, evidence, WithScraper(evidence), WithEffort(provider.EffortLow))
-				if err != nil {
-					t.Fatal(err)
-				}
-				ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-				defer cancel()
-				start := time.Now()
-				result, err := client.Research(ctx, fixture.Question, nil)
-				metrics.Milliseconds = time.Since(start).Milliseconds()
-				if err != nil {
-					metrics.Error = err.Error()
-					t.Errorf("Research: %v", err)
-				} else {
-					metrics.Answer = result.Content
-					metrics.AnswerRecall, metrics.CitationRecall = gradeBenchmark(fixture, result.Content, evidence.observed)
-				}
-				t.Logf("tools=%d requests=%d input=%d answer=%.2f citations=%.2f elapsed=%dms", metrics.ToolCalls, metrics.SearchRequests+metrics.FetchRequests, metrics.InputTokens, metrics.AnswerRecall, metrics.CitationRecall, metrics.Milliseconds)
-			})
-			results = append(results, metrics)
+			for _, effort := range efforts {
+				metrics := benchmarkMetrics{Case: fixture.ID, Effort: effort, Repeat: repeat + 1}
+				t.Run(fmt.Sprintf("%s/%s/%d", fixture.ID, effort, repeat+1), func(t *testing.T) {
+					evidence := &benchmarkEvidence{fixture: fixture, metrics: &metrics, observed: map[string]bool{}}
+					client, err := New(&benchmarkCompleter{Completer: completer, metrics: &metrics}, evidence, WithScraper(evidence), WithEffort(effort))
+					if err != nil {
+						t.Fatal(err)
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+					defer cancel()
+					start := time.Now()
+					result, err := researcher.Collect(client.Research(ctx, fixture.Question, nil))
+					metrics.Milliseconds = time.Since(start).Milliseconds()
+					if err != nil {
+						metrics.Error = err.Error()
+						t.Errorf("Research: %v", err)
+					} else {
+						metrics.Answer = result.Content
+						metrics.AnswerRecall, metrics.CitationRecall = gradeBenchmark(fixture, result.Content, evidence.observed)
+					}
+					t.Logf("tools=%d requests=%d input=%d answer=%.2f citations=%.2f elapsed=%dms", metrics.ToolCalls, metrics.SearchRequests+metrics.FetchRequests, metrics.InputTokens, metrics.AnswerRecall, metrics.CitationRecall, metrics.Milliseconds)
+				})
+				results = append(results, metrics)
+			}
 		}
 	}
 	if path := os.Getenv("RESEARCH_BENCHMARK_OUTPUT"); path != "" {

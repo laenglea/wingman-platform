@@ -206,6 +206,9 @@ func agentResearcher(cfg researcherConfig, context researcherContext) (researche
 
 func openaiResearcher(cfg researcherConfig, context researcherContext) (researcher.Provider, error) {
 	var options []openai.Option
+	if cfg.Model != "" {
+		options = append(options, openai.WithModel(cfg.Model))
+	}
 
 	if context.Client != nil {
 		options = append(options, openai.WithClient(context.Client))
@@ -216,6 +219,9 @@ func openaiResearcher(cfg researcherConfig, context researcherContext) (research
 
 func perplexityResearcher(cfg researcherConfig, context researcherContext) (researcher.Provider, error) {
 	var options []perplexity.Option
+	if cfg.Model != "" {
+		options = append(options, perplexity.WithModel(cfg.Model))
+	}
 
 	if context.Client != nil {
 		options = append(options, perplexity.WithClient(context.Client))

@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/researcher"
 	"github.com/adrianliechti/wingman/pkg/scraper"
 	"github.com/adrianliechti/wingman/pkg/searcher/duckduckgo"
 	"github.com/adrianliechti/wingman/pkg/tool"
@@ -31,7 +32,7 @@ func TestResearch_PromptAndSchemaRespectCapabilities(t *testing.T) {
 		t.Fatal("cache wrapper lost capabilities")
 	}
 	c, _ := New(completer, p)
-	if _, err := c.Research(t.Context(), "a question", nil); err != nil {
+	if _, err := researcher.Collect(c.Research(t.Context(), "a question", nil)); err != nil {
 		t.Fatal(err)
 	}
 	call := completer.calls[0]
@@ -90,7 +91,7 @@ func TestResearch_ReusesPagesOnlyWithinRun(t *testing.T) {
 	scraper := &countingScraper{}
 	client, _ := New(completer, &fakeSearcher{}, WithScraper(scraper), WithMaxFetchChars(2000))
 	for run := range 2 {
-		if _, err := client.Research(context.Background(), "launch budget", nil); err != nil {
+		if _, err := researcher.Collect(client.Research(context.Background(), "launch budget", nil)); err != nil {
 			t.Fatal(err)
 		}
 		if scraper.calls.Load() != int32(run+1) {
@@ -292,7 +293,7 @@ func TestResearch_CancellationDoesNotCallModelAgain(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	c, _ := New(&fakeCompleter{}, &fakeSearcher{})
-	if _, err := c.Research(ctx, "question", nil); !errors.Is(err, context.Canceled) {
+	if _, err := researcher.Collect(c.Research(ctx, "question", nil)); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err=%v", err)
 	}
 }

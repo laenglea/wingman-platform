@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"strings"
 
-	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/researcher"
 	"github.com/adrianliechti/wingman/pkg/tool"
 )
@@ -14,8 +14,8 @@ import (
 const ToolName = "web_research"
 
 var (
+	_ tool.Streamer = (*Client)(nil)
 	_ tool.Provider = (*Client)(nil)
-	_ tool.Resulter = (*Client)(nil)
 )
 
 type Client struct {
@@ -42,7 +42,7 @@ func (c *Client) Tools(ctx context.Context) ([]tool.Tool, error) {
 	return []tool.Tool{
 		{
 			Name:        ToolName,
-			Description: "Delegate a self-contained web research question requiring several searches, source comparisons, or a cited report. Returns the configured researcher's report; check its evidence before drawing further conclusions. May take seconds to minutes. When available, use web_search for targeted lookups and web_fetch to read a supplied URL.",
+			Description: "Delegate a complete question that needs multiple source reads, source comparison, cross-source verification, or dependent search steps. Call this first for those tasks, including quick comparisons of supplied URLs; the researcher performs the searches and reads and returns a cited report. Include all known URLs and constraints in instructions. Use web_search for an excerpt-level lookup or independent lookup batch; use web_fetch when one supplied page alone is sufficient.",
 
 			Parameters: map[string]any{
 				"type": "object",
@@ -59,33 +59,56 @@ func (c *Client) Tools(ctx context.Context) ([]tool.Tool, error) {
 }
 
 func (c *Client) Execute(ctx context.Context, name string, parameters map[string]any) (any, error) {
-	if name != ToolName {
-		return nil, tool.ErrInvalidTool
-	}
-
-	instructions, err := tool.StringParameter(parameters, "instructions")
-	if err != nil {
-		return nil, fmt.Errorf("research: %w", err)
-	}
-	instructions = strings.TrimSpace(instructions)
-	if instructions == "" {
-		return nil, errors.New("research: missing instructions parameter")
-	}
-
-	data, err := c.provider.Research(ctx, instructions, &researcher.ResearchOptions{})
-	if err != nil {
-		return nil, err
-	}
-	if data == nil {
-		return nil, errors.New("research: empty response")
-	}
-
-	return data.Content, nil
+	return tool.Collect(c.ExecuteStream(ctx, name, parameters), nil)
 }
 
-// Result implements tool.Resulter so the agent chain sees the research report
-// as plain markdown text instead of a JSON-quoted blob.
-func (c *Client) Result(name string, value any) provider.ToolResult {
-	text, _ := value.(string)
-	return tool.TextResult(text)
+func (c *Client) ExecuteStream(ctx context.Context, name string, parameters map[string]any) iter.Seq2[*tool.Execution, error] {
+	return func(yield func(*tool.Execution, error) bool) {
+		if name != ToolName {
+			yield(nil, tool.ErrInvalidTool)
+			return
+		}
+		instructions, err := tool.StringParameter(parameters, "instructions")
+		if err != nil {
+			yield(nil, fmt.Errorf("research: %w", err))
+			return
+		}
+		instructions = strings.TrimSpace(instructions)
+		if instructions == "" {
+			yield(nil, errors.New("research: missing instructions parameter"))
+			return
+		}
+		var final *researcher.Result
+		for result, err := range c.provider.Research(ctx, instructions, &researcher.ResearchOptions{}) {
+			if err != nil {
+				if !yield(&tool.Execution{Progress: "Research failed"}, nil) {
+					return
+				}
+				yield(nil, err)
+				return
+			}
+			if result == nil {
+				continue
+			}
+			if result.Progress != "" {
+				if !yield(&tool.Execution{Progress: result.Progress}, nil) {
+					return
+				}
+			} else {
+				final = result
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
+		if final == nil {
+			yield(nil, errors.New("research: empty response"))
+			return
+		}
+		if !yield(&tool.Execution{Progress: "Research complete"}, nil) {
+			return
+		}
+		yield(&tool.Execution{Result: final.Content}, nil)
+	}
 }

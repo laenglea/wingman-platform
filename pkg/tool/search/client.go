@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/searcher"
 	"github.com/adrianliechti/wingman/pkg/tool"
 )
@@ -21,10 +20,7 @@ const (
 	concurrency = 4
 )
 
-var (
-	_ tool.Provider = (*Client)(nil)
-	_ tool.Resulter = (*Client)(nil)
-)
+var _ tool.Provider = (*Client)(nil)
 
 type Client struct {
 	provider searcher.Provider
@@ -67,7 +63,7 @@ func (c *Client) Tools(ctx context.Context) ([]tool.Tool, error) {
 			"type":        "array",
 			"minItems":    1,
 			"maxItems":    maxQueries,
-			"description": fmt.Sprintf("Up to %d independent queries to run in parallel instead of query; the other filters apply to all of them. Batch distinct lookups, not near-identical variants.", maxQueries),
+			"description": fmt.Sprintf("Up to %d independent natural-language queries to run in parallel instead of query. Do not include site: or other search operators in any query; use allowed_domains/blocked_domains, which apply to the whole batch. Batch distinct lookups, not near-identical variants.", maxQueries),
 			"items":       map[string]any{"type": "string", "minLength": 1},
 		},
 		"recency": map[string]any{
@@ -134,13 +130,12 @@ func (c *Client) Tools(ctx context.Context) ([]tool.Tool, error) {
 			Name:        ToolName,
 			Description: "Search the public web for ranked sources, excerpts and publication dates when available. Pass query or queries for independent lookups with the same filters. Repeated excerpts are deduplicated; distinct evidence from the same URL is retained. Answer from excerpts when sufficient; fetch for missing facts, context or quotations.",
 
+			// No top-level anyOf for query/queries: Anthropic and OpenAI Chat
+			// Completions reject combinators at the schema root. Execute
+			// enforces that one of them is present.
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": props,
-				"anyOf": []map[string]any{
-					{"required": []string{"query"}},
-					{"required": []string{"queries"}},
-				},
 			},
 		},
 	}, nil
@@ -274,7 +269,9 @@ func (c *Client) Execute(ctx context.Context, name string, parameters map[string
 			}
 			fresh = append(fresh, hit)
 		}
-		b.WriteString(formatResults(fresh, c.maxSnippetChars))
+		if len(fresh) > 0 || omitted == 0 {
+			b.WriteString(formatResults(fresh, c.maxSnippetChars))
+		}
 		if omitted > 0 {
 			fmt.Fprintf(&b, "%d result(s) already listed above omitted.\n", omitted)
 		}
@@ -332,16 +329,9 @@ func canonicalURL(raw string) string {
 	return strings.TrimSuffix(u.String(), "/")
 }
 
-// Result implements tool.Resulter so the agent chain sees the same markdown
-// the MCP server emits, instead of a JSON-quoted blob.
-func (c *Client) Result(name string, value any) provider.ToolResult {
-	text, _ := value.(string)
-	return tool.TextResult(text)
-}
-
 func formatResults(hits []searcher.Result, maxChars int) string {
 	if len(hits) == 0 {
-		return "No results."
+		return "No results.\n"
 	}
 
 	var b strings.Builder

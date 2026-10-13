@@ -58,7 +58,7 @@ func TestSearchDomainUnionExclusionsAndLimit(t *testing.T) {
 		}
 		body := `<div class="result"><a class="result__a" href="https://blocked.example.com/ad">Excluded</a></div><div class="result"><a class="result__a" href="https://other.example/no">Related fallback</a></div>`
 		if strings.HasSuffix(r.URL.Query().Get("q"), "site:example.com") {
-			body += `<div class="result"><a class="result__a" href="https://example.com/a">First</a></div>`
+			body += `<div class="result"><a class="result__a" href="https://example.com/a">First</a></div><div class="result"><a class="result__a" href="https://example.com/z">Crowds out later domains</a></div>`
 		} else {
 			body += `<div class="result"><a class="result__a" href="https://example.com/a">Duplicate</a></div><div class="result"><a class="result__a" href="https://docs.example.org/b">Second</a></div><div class="result"><a class="result__a" href="https://example.org/c">Over limit</a></div>`
 		}

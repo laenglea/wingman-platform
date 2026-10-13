@@ -41,6 +41,12 @@ func (cfg *proxyConfig) proxyClient() (*http.Client, error) {
 		return nil, err
 	}
 
+	// An empty URL (e.g. an unset ${HTTPS_PROXY}) means no proxy; a typed nil
+	// transport would pass otel's nil check and panic on the first request.
+	if transport == nil {
+		transport = provider.DefaultTransport()
+	}
+
 	return &http.Client{
 		Transport: otel.Transport(transport),
 	}, nil

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime"
 	"net/http"
 	"strings"
@@ -33,7 +34,7 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := request.Query
+	var query string
 	for _, value := range []string{request.Input, request.Prompt, request.Query, request.Instructions} {
 		if strings.TrimSpace(value) != "" {
 			query = value
@@ -49,14 +50,14 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	since, err := searcher.ParseDateBound(request.Since, false)
 
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid since: %w", err))
 		return
 	}
 
 	until, err := searcher.ParseDateBound(request.Until, true)
 
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid until: %w", err))
 		return
 	}
 

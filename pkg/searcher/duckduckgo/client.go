@@ -71,34 +71,51 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 	for _, domain := range exclude {
 		query += " -site:" + domain
 	}
-	queries := []string{query}
+	queries, scopes := []string{query}, [][]string{nil}
 	if len(include) > 0 {
-		queries = nil
+		queries, scopes = nil, nil
 		for _, domain := range include {
 			// A separate site query for each domain gives union semantics.
 			queries = append(queries, query+" site:"+domain)
+			scopes = append(scopes, []string{domain})
 		}
 	}
-	var results []searcher.Result
-	seen := make(map[string]bool)
-	for _, query := range queries {
+	lists := make([][]searcher.Result, len(queries))
+	for i, query := range queries {
 		hits, err := c.search(ctx, query, region)
 		if err != nil {
 			return nil, err
 		}
 		for _, hit := range hits {
 			u, err := url.Parse(hit.Source)
-			if err != nil || (len(include) > 0 && !matchesDomain(u.Hostname(), include)) || matchesDomain(u.Hostname(), exclude) || seen[hit.Source] {
+			if err != nil || (scopes[i] != nil && !matchesDomain(u.Hostname(), scopes[i])) || matchesDomain(u.Hostname(), exclude) {
 				continue
 			}
-			seen[hit.Source] = true
-			results = append(results, hit)
-			if options.Limit != nil && len(results) >= *options.Limit {
-				return results, nil
-			}
+			lists[i] = append(lists[i], hit)
 		}
 	}
-	return results, nil
+	// Interleave the per-domain rankings so the limit cannot exclude later domains.
+	var results []searcher.Result
+	seen := make(map[string]bool)
+	for rank := 0; ; rank++ {
+		more := false
+		for _, hits := range lists {
+			if rank >= len(hits) {
+				continue
+			}
+			more = true
+			if hit := hits[rank]; !seen[hit.Source] {
+				seen[hit.Source] = true
+				results = append(results, hit)
+				if options.Limit != nil && len(results) >= *options.Limit {
+					return results, nil
+				}
+			}
+		}
+		if !more {
+			return results, nil
+		}
+	}
 }
 
 func (c *Client) search(ctx context.Context, query, region string) ([]searcher.Result, error) {

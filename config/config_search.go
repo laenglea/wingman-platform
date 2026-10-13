@@ -146,6 +146,9 @@ func exaSearch(cfg searcherConfig, context searcherContext) (searcher.Provider, 
 
 func tavilySearch(cfg searcherConfig, context searcherContext) (searcher.Provider, error) {
 	var options []tavily.Option
+	if depth := cfg.Vars["depth"]; depth != "" {
+		options = append(options, tavily.WithDepth(depth))
+	}
 
 	if context.Client != nil {
 		options = append(options, tavily.WithClient(context.Client))
