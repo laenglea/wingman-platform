@@ -105,3 +105,44 @@ func TestStreamingThoughtSignatureAttachesToText(t *testing.T) {
 		t.Fatalf("expected text part carrying the signature, got %+v", parts)
 	}
 }
+
+func TestStreamingFunctionCallSignatureSurvivesReplay(t *testing.T) {
+	for _, summary := range []string{"", "Checking both cities"} {
+		t.Run(summary, func(t *testing.T) {
+			out := collectStream(t,
+				assistantChunk(provider.TextContent("Let me check.")),
+				assistantChunk(provider.ReasoningContent(provider.Reasoning{ID: "rs_1", Summary: summary})),
+				assistantChunk(provider.ReasoningContent(provider.Reasoning{ID: "rs_1", Signature: "U0lH"})),
+				assistantChunk(provider.ToolCallContent(provider.ToolCall{ID: "c1", Name: "get_weather"})),
+				assistantChunk(provider.ToolCallContent(provider.ToolCall{ID: "c1", Arguments: `{"city":"Bern"}`})),
+				assistantChunk(provider.ToolCallContent(provider.ToolCall{ID: "c2", Name: "get_weather", Arguments: `{"city":"Zurich"}`})),
+			)
+			reply := &Content{Role: "model"}
+			signatures := 0
+			for _, chunk := range out {
+				for _, part := range partsOf(chunk) {
+					reply.Parts = append(reply.Parts, part)
+					if len(part.ThoughtSignature) > 0 {
+						signatures++
+					}
+				}
+			}
+			final := partsOf(out[len(out)-1])
+			if len(final) != 2 || final[0].FunctionCall == nil || string(final[0].ThoughtSignature) != "SIG" || len(final[1].ThoughtSignature) != 0 || signatures != 1 {
+				t.Fatalf("signature must appear once, on the first call: final=%+v signatures=%d", final, signatures)
+			}
+			messages, err := toMessages(nil, []*Content{reply})
+			if err != nil {
+				t.Fatal(err)
+			}
+			content := messages[0].Content
+			for i, c := range content {
+				if c.ToolCall != nil && c.ToolCall.ID == "c1" {
+					if i == 0 || content[i-1].Reasoning == nil || content[i-1].Reasoning.Signature != "U0lH" || c.ToolCall.Arguments != `{"city":"Bern"}` {
+						t.Fatalf("replayed call lost signature or arguments: %+v", content)
+					}
+				}
+			}
+		})
+	}
+}

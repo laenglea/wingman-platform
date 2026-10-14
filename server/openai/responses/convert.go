@@ -109,6 +109,10 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 			}
 
 			if role == provider.MessageRoleAssistant {
+				// Calls preceding this message must stay ahead of its text.
+				if len(pendingCalls) > 0 {
+					flushCalls()
+				}
 				flushResults()
 
 				content = append(pendingReasoning, content...)
@@ -168,6 +172,12 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 				continue
 			}
 
+			// Signed reasoning belongs at this point in the timeline, not
+			// ahead of earlier calls or results buffered for grouping.
+			if len(pendingCalls) > 0 {
+				flushCalls()
+			}
+			flushResults()
 			pendingReasoning = append(pendingReasoning, provider.ReasoningContent(r))
 
 		case InputItemTypeCompaction:

@@ -2,10 +2,88 @@ package responses
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
+
+func TestInputPreservesSignedToolTimeline(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		want    []string
+	}{
+		{
+			name: "reasoning between calls",
+			payload: `[
+				{"type":"reasoning","encrypted_content":"sig1"},
+				{"type":"function_call","call_id":"c1","name":"lookup","arguments":"{}"},
+				{"type":"reasoning","encrypted_content":"sig2"},
+				{"type":"function_call","call_id":"c2","name":"lookup","arguments":"{}"},
+				{"type":"function_call_output","call_id":"c1","output":"ok"},
+				{"type":"function_call_output","call_id":"c2","output":"ok"}
+			]`,
+			want: []string{"sig1", "c1", "sig2", "c2", "result:c1", "result:c2"},
+		},
+		{
+			name: "message after call",
+			payload: `[
+				{"type":"function_call","call_id":"c1","name":"lookup","arguments":"{}"},
+				{"type":"reasoning","encrypted_content":"sig1"},
+				{"type":"message","role":"assistant","content":"working"},
+				{"type":"function_call_output","call_id":"c1","output":"ok"}
+			]`,
+			want: []string{"c1", "sig1", "working", "result:c1"},
+		},
+		{
+			name: "message between calls",
+			payload: `[
+				{"type":"function_call","call_id":"c1","name":"lookup","arguments":"{}"},
+				{"type":"message","role":"assistant","content":"working"},
+				{"type":"function_call","call_id":"c2","name":"lookup","arguments":"{}"}
+			]`,
+			want: []string{"c1", "working", "c2"},
+		},
+		{
+			name: "reasoning after result",
+			payload: `[
+				{"type":"function_call_output","call_id":"c1","output":"ok"},
+				{"type":"reasoning","encrypted_content":"sig1"}
+			]`,
+			want: []string{"result:c1", "sig1"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var input ResponsesInput
+			if err := json.Unmarshal([]byte(tc.payload), &input); err != nil {
+				t.Fatal(err)
+			}
+			messages, err := toMessages(input.Items, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, message := range messages {
+				for _, content := range message.Content {
+					switch {
+					case content.Reasoning != nil:
+						got = append(got, content.Reasoning.Signature)
+					case content.ToolCall != nil:
+						got = append(got, content.ToolCall.ID)
+					case content.ToolResult != nil:
+						got = append(got, "result:"+content.ToolResult.ID)
+					default:
+						got = append(got, content.Text)
+					}
+				}
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("timeline = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestResponseUsageIncludesCachedTokens(t *testing.T) {
 	usage := responseUsage(&provider.Usage{

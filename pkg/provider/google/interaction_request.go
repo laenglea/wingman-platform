@@ -16,6 +16,11 @@ import (
 	"google.golang.org/genai/interactions/models/interactions"
 )
 
+// Google's documented placeholder permits replaying tool traces from other
+// models that cannot provide Gemini thought signatures. Real signatures are
+// always replayed unchanged. The Interactions API accepts it on thought steps.
+const unsignedThoughtSignature = "skip_thought_signature_validator"
+
 func convertInteraction(model string, messages []provider.Message, options *provider.CompleteOptions) (*interactions.CreateModelInteraction, error) {
 	steps, err := convertMessages(messages)
 	if err != nil {
@@ -126,6 +131,9 @@ func convertMessages(messages []provider.Message) ([]interactions.Step, error) {
 		}
 	}
 	steps := make([]interactions.Step, 0, len(messages))
+	// Responses can split one assistant turn across several messages. A
+	// signature covers its parallel calls until a user input or tool result.
+	hasSignature := false
 	for _, message := range messages {
 		if message.Role != provider.MessageRoleUser && message.Role != provider.MessageRoleAssistant {
 			continue
@@ -136,9 +144,16 @@ func convertMessages(messages []provider.Message) ([]interactions.Step, error) {
 				return
 			}
 			if message.Role == provider.MessageRoleAssistant {
+				// Thinking turns must begin with a thought, including when
+				// imported text precedes a later summary or tool call.
+				if !hasSignature {
+					steps = append(steps, interactions.NewStep(interactions.ThoughtStep{Signature: new(unsignedThoughtSignature)}))
+					hasSignature = true
+				}
 				steps = append(steps, interactions.NewStep(interactions.ModelOutputStep{Content: content}))
 			} else {
 				steps = append(steps, interactions.NewStep(interactions.UserInputStep{Content: content}))
+				hasSignature = false
 			}
 			content = nil
 		}
@@ -167,7 +182,11 @@ func convertMessages(messages []provider.Message) ([]interactions.Step, error) {
 					thought.Summary = []interactions.ThoughtSummaryContent{interactions.NewThoughtSummaryContent(interactions.TextContent{Text: text})}
 				}
 				if thought.Signature != nil || len(thought.Summary) > 0 {
+					if thought.Signature == nil {
+						thought.Signature = new(unsignedThoughtSignature)
+					}
 					steps = append(steps, interactions.NewStep(thought))
+					hasSignature = true
 				}
 			}
 			if call := part.ToolCall; call != nil {
@@ -192,6 +211,11 @@ func convertMessages(messages []provider.Message) ([]interactions.Step, error) {
 				// Interactions represents it as a preceding thought step.
 				if signature != "" {
 					steps = append(steps, interactions.NewStep(interactions.ThoughtStep{Signature: &signature}))
+					hasSignature = true
+				}
+				if !hasSignature {
+					steps = append(steps, interactions.NewStep(interactions.ThoughtStep{Signature: new(unsignedThoughtSignature)}))
+					hasSignature = true
 				}
 				steps = append(steps, interactions.NewStep(interactions.FunctionCallStep{ID: id, Name: name, Arguments: data}))
 			}
@@ -240,6 +264,7 @@ func convertMessages(messages []provider.Message) ([]interactions.Step, error) {
 					response.Name = &name
 				}
 				steps = append(steps, interactions.NewStep(response))
+				hasSignature = false
 			}
 		}
 		flush()

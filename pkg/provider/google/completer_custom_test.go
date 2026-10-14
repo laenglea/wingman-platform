@@ -44,7 +44,7 @@ func TestComplete_CustomToolUnwrapsStreamedInput(t *testing.T) {
 		t.Fatalf("custom input lost: %+v", calls)
 	}
 	steps, err := convertMessages([]provider.Message{*result.Message})
-	if err != nil || len(steps) != 1 || steps[0].FunctionCallStep.Name != "scripts_run_python" || steps[0].FunctionCallStep.Arguments[custom.InputParameter] != source {
+	if err != nil || len(steps) != 2 || value(steps[0].ThoughtStep.Signature) != unsignedThoughtSignature || steps[1].FunctionCallStep.Name != "scripts_run_python" || steps[1].FunctionCallStep.Arguments[custom.InputParameter] != source {
 		t.Fatalf("custom tool does not replay: %+v / %v", steps, err)
 	}
 }
