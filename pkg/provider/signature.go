@@ -1,6 +1,10 @@
 package provider
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
 
 // Reasoning and compaction signatures (Anthropic thinking signatures, OpenAI
 // encrypted reasoning, Gemini thought signatures) are opaque blobs that only
@@ -32,9 +36,39 @@ func ParseSignature(value string) (realm, signature string) {
 	}
 
 	realm, signature, ok = strings.Cut(raw, ":")
-	if !ok || realm == "" {
+	if !ok || !validSignatureRealm(realm) || !validSignaturePayload(signature) {
 		return "", value
 	}
 
 	return realm, signature
+}
+
+func validSignatureRealm(realm string) bool {
+	if realm == "" || !utf8.ValidString(realm) {
+		return false
+	}
+
+	// Model aliases may contain spaces and Unicode; binary signatures must
+	// still be distinguished from realm tags.
+	for _, r := range realm {
+		if !unicode.IsPrint(r) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func validSignaturePayload(signature string) bool {
+	if signature == "" {
+		return false
+	}
+
+	for i := 0; i < len(signature); i++ {
+		if signature[i] < ' ' || signature[i] > '~' {
+			return false
+		}
+	}
+
+	return true
 }

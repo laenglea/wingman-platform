@@ -426,3 +426,39 @@ func TestResponseOutputsPreservesCompactionOrder(t *testing.T) {
 		t.Fatalf("output 2: expected cmp_2, got %+v", outputs[2])
 	}
 }
+
+func TestStreamEventsIncludeCustomToolKind(t *testing.T) {
+	var events []StreamEvent
+	acc := NewStreamingAccumulator(func(event StreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err := acc.Add(provider.Completion{
+		Message: &provider.Message{
+			Role: provider.MessageRoleAssistant,
+			Content: []provider.Content{
+				provider.ToolCallContent(provider.ToolCall{
+					ID:        "call_custom",
+					Kind:      provider.ToolKindCustom,
+					Name:      "exec_sql",
+					Arguments: "SELECT 1;",
+				}),
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := acc.Complete(); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := responseOutputOptions{}
+	for _, event := range events {
+		switch event.Type {
+		case StreamEventFunctionCallAdded, StreamEventFunctionCallArgumentsDelta, StreamEventFunctionCallArgumentsDone, StreamEventFunctionCallDone:
+			if got := opts.kind(event.ToolCallKind, event.ToolCallName); got != provider.ToolKindCustom {
+				t.Fatalf("%s resolved kind = %q, want %q", event.Type, got, provider.ToolKindCustom)
+			}
+		}
+	}
+}

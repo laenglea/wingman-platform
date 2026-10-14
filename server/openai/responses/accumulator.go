@@ -74,6 +74,7 @@ type StreamEvent struct {
 
 	// For function call events
 	ToolCallID        string
+	ToolCallKind      provider.ToolKind
 	ToolCallName      string
 	ToolCallNamespace string
 	ToolCallExecution string
@@ -370,6 +371,10 @@ func (s *StreamingAccumulator) ensureToolCallStarted(callID string, toolCall pro
 
 	tc.Started = true
 
+	if toolCall.Kind != "" {
+		tc.Kind = toolCall.Kind
+	}
+
 	if toolCall.Name != "" {
 		tc.Name = toolCall.Name
 	}
@@ -388,6 +393,7 @@ func (s *StreamingAccumulator) ensureToolCallStarted(callID string, toolCall pro
 	return s.emitEvent(StreamEvent{
 		Type:              StreamEventFunctionCallAdded,
 		ToolCallID:        callID,
+		ToolCallKind:      tc.Kind,
 		ToolCallName:      tc.Name,
 		ToolCallNamespace: tc.Namespace,
 		ToolCallExecution: tc.Execution,
@@ -423,6 +429,7 @@ func (s *StreamingAccumulator) closeToolCall(callID string) error {
 		if err := s.emitEvent(StreamEvent{
 			Type:              StreamEventFunctionCallArgumentsDelta,
 			ToolCallID:        tc.ID,
+			ToolCallKind:      tc.Kind,
 			ToolCallName:      tc.Name,
 			ToolCallNamespace: tc.Namespace,
 			Delta:             tc.Arguments,
@@ -436,6 +443,7 @@ func (s *StreamingAccumulator) closeToolCall(callID string) error {
 		if err := s.emitEvent(StreamEvent{
 			Type:              StreamEventFunctionCallArgumentsDone,
 			ToolCallID:        tc.ID,
+			ToolCallKind:      tc.Kind,
 			ToolCallName:      tc.Name,
 			ToolCallNamespace: tc.Namespace,
 			ToolCallExecution: tc.Execution,
@@ -450,6 +458,7 @@ func (s *StreamingAccumulator) closeToolCall(callID string) error {
 	return s.emitEvent(StreamEvent{
 		Type:              StreamEventFunctionCallDone,
 		ToolCallID:        tc.ID,
+		ToolCallKind:      tc.Kind,
 		ToolCallName:      tc.Name,
 		ToolCallNamespace: tc.Namespace,
 		ToolCallExecution: tc.Execution,
@@ -1064,6 +1073,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 				if err := s.emitEvent(StreamEvent{
 					Type:              StreamEventFunctionCallArgumentsDelta,
 					ToolCallID:        currentID,
+					ToolCallKind:      entry.Kind,
 					ToolCallName:      entry.Name,
 					ToolCallNamespace: entry.Namespace,
 					Delta:             tc.Arguments,

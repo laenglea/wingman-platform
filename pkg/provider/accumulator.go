@@ -211,8 +211,8 @@ func (a *CompletionAccumulator) addReasoning(r *Reasoning) {
 				break
 			}
 		}
-	} else if len(a.reasonings) > 0 {
-		// A signed or redacted entry is complete; ID-less deltas start a new one
+	} else if len(a.reasonings) > 0 && len(a.contentOrder) > 0 && a.contentOrder[len(a.contentOrder)-1].kind == accumulatedContentReasoning {
+		// A signed, redacted, or interrupted entry is complete; ID-less deltas start a new one
 		if last := &a.reasonings[len(a.reasonings)-1]; !last.Redacted && last.Signature == "" {
 			target = last
 		}

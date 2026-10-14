@@ -24,6 +24,53 @@ func TestSignatureCodec(t *testing.T) {
 	if id != "" || signature != "RAW" {
 		t.Fatalf("expected raw value as signature, got %q %q", id, signature)
 	}
+
+	tagged := encodeSignature("rs_1", "@gpt-5:BLOB")
+	if realm, raw := provider.ParseSignature(tagged); realm != "gpt-5" || len(raw) == 0 {
+		t.Fatalf("expected outer realm tag on wrapped signature, got %q (realm=%q raw=%q)", tagged, realm, raw)
+	}
+	if id, signature = decodeSignature(tagged); id != "rs_1" || signature != "@gpt-5:BLOB" {
+		t.Fatalf("tagged round-trip mismatch: %q %q", id, signature)
+	}
+}
+
+func TestStopReasonIgnoresServerToolSearchAndNilMessage(t *testing.T) {
+	completion := &provider.Completion{
+		Status: provider.CompletionStatusCompleted,
+		Message: &provider.Message{
+			Role: provider.MessageRoleAssistant,
+			Content: []provider.Content{
+				provider.ToolCallContent(provider.ToolCall{
+					ID:        "srv_1",
+					Name:      "tool_search_tool_regex",
+					Kind:      provider.ToolKindToolSearch,
+					Execution: "server",
+					Arguments: `{"pattern":"lookup"}`,
+				}),
+				provider.TextContent("Found it."),
+			},
+		},
+	}
+	if got := toStopReason(completion); got != StopReasonEndTurn {
+		t.Fatalf("expected end_turn after hosted tool search, got %q", got)
+	}
+
+	var stop StopReason
+	acc := NewStreamingAccumulator("msg_1", "claude-test", func(event StreamEvent) error {
+		if event.Type == StreamEventMessageDelta && event.MessageDelta != nil {
+			stop = event.MessageDelta.StopReason
+		}
+		return nil
+	})
+	if err := acc.Add(provider.Completion{StopReason: provider.StopReasonMaxTokens}); err != nil {
+		t.Fatal(err)
+	}
+	if err := acc.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if stop != StopReasonMaxTokens {
+		t.Fatalf("expected max_tokens stop reason on message-less completion, got %q", stop)
+	}
 }
 
 func TestThinkingBlockRoundTrip(t *testing.T) {

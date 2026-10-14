@@ -22,3 +22,18 @@ func TestTagParseSignature(t *testing.T) {
 		t.Error("empty signature must stay empty")
 	}
 }
+
+func TestParseSignaturePreservesBinaryValues(t *testing.T) {
+	for _, value := range []string{
+		"@\x01:signature",
+		"@\xff:signature",
+		"@model:\x80\xff\x00",
+		"@\x01:\x80\xff\x00",
+	} {
+		t.Run(value, func(t *testing.T) {
+			if realm, raw := ParseSignature(value); realm != "" || raw != value {
+				t.Fatalf("binary signature parsed as tagged: realm=%q raw=%q", realm, raw)
+			}
+		})
+	}
+}

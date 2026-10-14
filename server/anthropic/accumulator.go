@@ -518,9 +518,7 @@ func (s *StreamingAccumulator) Complete() error {
 	}
 
 	// Determine final stop reason from accumulated result
-	if result.Message != nil {
-		s.stopReason = toStopReason(result)
-	}
+	s.stopReason = toStopReason(result)
 
 	// Get final usage from accumulated result (prefer accumulated result over tracked values)
 	inputTokens := s.inputTokens

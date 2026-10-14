@@ -184,3 +184,22 @@ func TestNativeTextSignatureStaysOnItsPart(t *testing.T) {
 		t.Fatalf("signature moved to another text part: %+v", reply)
 	}
 }
+
+func TestBinaryThoughtSignatureWithAtAndColonIsNotParsedAsRealm(t *testing.T) {
+	// Protobuf wire bytes starting with '@' (0x40 = field 8 varint) and containing
+	// ':' (0x3a = field 7 length-delimited) plus binary control/high bytes.
+	rawSig := []byte{0x40, 0x01, 0x3a, 0x80, 0xff, 0x00}
+	want := google.EncodeThoughtSignature(rawSig)
+
+	messages, err := toMessages(nil, []*Content{
+		{Role: "user", Parts: []*Part{{Text: "Hi"}}},
+		{Role: "model", Parts: []*Part{{FunctionCall: &FunctionCall{ID: "call_1", Name: "lookup", Args: map[string]any{}}, ThoughtSignature: rawSig}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := messages[1].Content
+	if len(got) != 2 || got[0].Reasoning == nil || got[0].Reasoning.Signature != want {
+		t.Fatalf("binary signature was corrupted as realm-tagged: got %+v, want %q", got, want)
+	}
+}

@@ -411,3 +411,25 @@ func TestCompletionAccumulatorRepeatedMessageIDJoinsItem(t *testing.T) {
 		t.Fatalf("deltas of one item split: %+v", messages)
 	}
 }
+
+func TestCompletionAccumulatorSeparatesInterruptedUnsignedReasoning(t *testing.T) {
+	var acc CompletionAccumulator
+	acc.Add(Completion{Message: &Message{Role: MessageRoleAssistant, Content: []Content{ReasoningContent(Reasoning{Text: "first "})}}})
+	acc.Add(Completion{Message: &Message{Content: []Content{ReasoningContent(Reasoning{Text: "thought"})}}})
+	acc.Add(Completion{Message: &Message{Content: []Content{ToolCallContent(ToolCall{ID: "call_1", Name: "lookup", Arguments: "{}"})}}})
+	acc.Add(Completion{Message: &Message{Content: []Content{ReasoningContent(Reasoning{Text: "second thought"})}}})
+
+	content := acc.Result().Message.Content
+	if len(content) != 3 {
+		t.Fatalf("expected 3 content items (reasoning, tool_call, reasoning), got %d: %+v", len(content), content)
+	}
+	if content[0].Reasoning == nil || content[0].Reasoning.Text != "first thought" {
+		t.Fatalf("unexpected first reasoning: %+v", content[0])
+	}
+	if content[1].ToolCall == nil || content[1].ToolCall.ID != "call_1" {
+		t.Fatalf("unexpected tool call: %+v", content[1])
+	}
+	if content[2].Reasoning == nil || content[2].Reasoning.Text != "second thought" {
+		t.Fatalf("unexpected second reasoning: %+v", content[2])
+	}
+}

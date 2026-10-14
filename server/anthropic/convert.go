@@ -648,7 +648,7 @@ func toStopReason(completion *provider.Completion) StopReason {
 
 	if completion.Message != nil {
 		for _, c := range completion.Message.Content {
-			if c.ToolCall != nil {
+			if c.ToolCall != nil && !(c.ToolCall.Kind == provider.ToolKindToolSearch && c.ToolCall.Execution != "client") {
 				return StopReasonToolUse
 			}
 		}
