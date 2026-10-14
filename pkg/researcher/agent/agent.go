@@ -12,6 +12,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/researcher"
 	"github.com/adrianliechti/wingman/pkg/scraper"
@@ -355,7 +356,7 @@ func (s *state) runCall(ctx context.Context, tc provider.ToolCall, fetchLimit in
 	}
 
 	var params map[string]any
-	if err := json.Unmarshal([]byte(tc.Arguments), &params); err != nil {
+	if err := jsonutil.Unmarshal([]byte(tc.Arguments), &params); err != nil {
 		return provider.ToolMessage(tc.ID, "Error: invalid arguments"), 0
 	}
 	if params == nil {
@@ -365,8 +366,8 @@ func (s *state) runCall(ctx context.Context, tc provider.ToolCall, fetchLimit in
 		// Leave space for source/excerpt labels. The final clamp also bounds
 		// long URLs, notices and optional summarizer output.
 		limit := max(1, min(s.client.maxFetchChars, fetchLimit-512))
-		if n, ok := params["max_chars"].(float64); params["max_chars"] == nil || (ok && n > float64(limit)) {
-			params["max_chars"] = float64(limit)
+		if n, err := tool.IntegerParameter(params, "max_chars", limit, 1, limit); err == nil {
+			params["max_chars"] = n
 		}
 	}
 

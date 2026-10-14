@@ -12,7 +12,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/otel"
 	"github.com/adrianliechti/wingman/pkg/researcher"
-	researchtool "github.com/adrianliechti/wingman/pkg/tool/research"
+	"github.com/adrianliechti/wingman/pkg/tool/research"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -24,7 +24,7 @@ func (f researchFunc) Research(ctx context.Context, instructions string, options
 
 func researchServer(t *testing.T, f researchFunc) *Server {
 	t.Helper()
-	p, err := researchtool.New(otel.NewResearcher("agent", "research", f))
+	p, err := research.New(otel.NewResearcher("agent", "research", f))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestResearchProgressHTTP(t *testing.T) {
 				}
 			})
 			session, updates := progressClient(t, s, true)
-			params := &mcp.CallToolParams{Name: researchtool.ToolName, Arguments: map[string]any{"instructions": "question"}}
+			params := &mcp.CallToolParams{Name: research.ToolName, Arguments: map[string]any{"instructions": "question"}}
 			params.SetProgressToken(token)
 			result, err := session.CallTool(t.Context(), params)
 			if err != nil || result.IsError || result.Content[0].(*mcp.TextContent).Text != "Report: question" {
@@ -136,7 +136,7 @@ func TestResearchWithoutProgressToken(t *testing.T) {
 				}
 			})
 			session, updates := progressClient(t, s, true)
-			params := &mcp.CallToolParams{Name: researchtool.ToolName, Arguments: map[string]any{"instructions": "q"}}
+			params := &mcp.CallToolParams{Name: research.ToolName, Arguments: map[string]any{"instructions": "q"}}
 			if token != nil {
 				params.SetMeta(map[string]any{"progressToken": token})
 			}
@@ -173,7 +173,7 @@ func TestResearchProgressBeforeCompletion(t *testing.T) {
 	session, updates := progressClient(t, s, false)
 	finished := make(chan error, 1)
 	go func() {
-		params := &mcp.CallToolParams{Name: researchtool.ToolName, Arguments: map[string]any{"instructions": "q"}}
+		params := &mcp.CallToolParams{Name: research.ToolName, Arguments: map[string]any{"instructions": "q"}}
 		params.SetProgressToken("active")
 		_, err := session.CallTool(t.Context(), params)
 		finished <- err
@@ -209,7 +209,7 @@ func TestResearchProgressConcurrentCalls(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, token := range []string{"first", "second"} {
 		wg.Go(func() {
-			params := &mcp.CallToolParams{Name: researchtool.ToolName, Arguments: map[string]any{"instructions": token}}
+			params := &mcp.CallToolParams{Name: research.ToolName, Arguments: map[string]any{"instructions": token}}
 			params.SetProgressToken(token)
 			if _, err := session.CallTool(t.Context(), params); err != nil {
 				t.Error(err)
@@ -242,7 +242,7 @@ func TestResearchProgressFailure(t *testing.T) {
 		}
 	})
 	session, updates := progressClient(t, s, true)
-	params := &mcp.CallToolParams{Name: researchtool.ToolName, Arguments: map[string]any{"instructions": "q"}}
+	params := &mcp.CallToolParams{Name: research.ToolName, Arguments: map[string]any{"instructions": "q"}}
 	params.SetProgressToken("failure")
 	result, err := session.CallTool(t.Context(), params)
 	if err == nil && !result.IsError {
@@ -283,7 +283,7 @@ func testResearchProgressCancellation(t *testing.T, httpTransport bool) {
 	t.Cleanup(cancel)
 	finished := make(chan error, 1)
 	go func() {
-		params := &mcp.CallToolParams{Name: researchtool.ToolName, Arguments: map[string]any{"instructions": "q"}}
+		params := &mcp.CallToolParams{Name: research.ToolName, Arguments: map[string]any{"instructions": "q"}}
 		params.SetProgressToken("cancel")
 		_, err := session.CallTool(ctx, params)
 		finished <- err

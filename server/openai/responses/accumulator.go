@@ -85,6 +85,7 @@ type StreamEvent struct {
 	MessageID         string
 	MessagePhase      provider.MessagePhase
 	MessageIndex      int
+	TextPresent       bool
 
 	// Incomplete marks an item or summary part finalized before generation
 	// finished (e.g. truncated by max_tokens or a cancelled stream).
@@ -732,6 +733,7 @@ func (s *StreamingAccumulator) closeMessage() error {
 
 	return s.emitEvent(StreamEvent{
 		Type:         StreamEventOutputItemDone,
+		TextPresent:  s.message.hasContentPart,
 		Text:         text,
 		RefusalText:  refusal,
 		RefusalFirst: s.message.refusalFirst,
@@ -974,7 +976,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 		// Native message IDs identify a new item even after tool calls.
 		// Stream these messages in place so subsequent signed reasoning
 		// retains its position. ID-less trailing text is flushed at completion.
-		if content.Text != "" {
+		if content.Text != "" || content.TextPresent {
 			if err := s.closeCompaction(); err != nil {
 				return err
 			}
@@ -993,13 +995,15 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 					return err
 				}
 
-				if err := s.emitEvent(StreamEvent{
-					Type:         StreamEventTextDelta,
-					Delta:        content.Text,
-					OutputIndex:  s.message.messageOutputIndex,
-					ContentIndex: s.textContentIndex(),
-				}); err != nil {
-					return err
+				if content.Text != "" {
+					if err := s.emitEvent(StreamEvent{
+						Type:         StreamEventTextDelta,
+						Delta:        content.Text,
+						OutputIndex:  s.message.messageOutputIndex,
+						ContentIndex: s.textContentIndex(),
+					}); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -1151,7 +1155,7 @@ func (s *StreamingAccumulator) beginMessage(id string, phase provider.MessagePha
 		return nil
 	}
 
-	if s.message.streamedText.Len() > 0 || s.message.streamedRefusal.Len() > 0 {
+	if s.message.hasContentPart || s.message.streamedText.Len() > 0 || s.message.streamedRefusal.Len() > 0 {
 		return s.nextMessage(id, phase)
 	}
 
@@ -1264,8 +1268,8 @@ func (s *StreamingAccumulator) Result() *provider.Completion {
 
 	appendMessage := func(m *streamMessage) {
 		start := len(content)
-		if m.streamedText.Len() > 0 {
-			content = append(content, provider.Content{MessageID: m.id, Phase: m.phase, Text: m.streamedText.String()})
+		if m.hasContentPart || m.streamedText.Len() > 0 {
+			content = append(content, provider.Content{MessageID: m.id, Phase: m.phase, Text: m.streamedText.String(), TextPresent: m.streamedText.Len() == 0})
 		}
 		if m.streamedRefusal.Len() > 0 {
 			content = append(content, provider.Content{MessageID: m.id, Phase: m.phase, Refusal: m.streamedRefusal.String()})

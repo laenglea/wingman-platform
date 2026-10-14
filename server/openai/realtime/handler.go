@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/adrianliechti/wingman/config"
+	"github.com/adrianliechti/wingman/pkg/policy"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -26,6 +27,14 @@ func (h *Handler) Attach(r chi.Router) {
 
 func (h *Handler) handleRealtime(w http.ResponseWriter, r *http.Request) {
 	model := r.URL.Query().Get("model")
+
+	if h.Policy != nil {
+		if err := h.Policy.Verify(r.Context(), policy.ResourceModel, model, policy.ActionAccess); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+	}
+
 	realtime, err := h.Realtime(model)
 
 	if err != nil {

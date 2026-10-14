@@ -12,6 +12,46 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func TestRealtimeDialerAfterHTTP2Request(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ws" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err == nil {
+			conn.Close()
+		}
+	}))
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+	client := server.Client()
+	response, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.ProtoMajor != 2 {
+		t.Fatalf("warmup used %s, want HTTP/2", response.Proto)
+	}
+	conn, _, err := websocketDialer(client).Dial("wss"+strings.TrimPrefix(server.URL, "https")+"/ws", nil)
+	if err != nil {
+		t.Fatalf("WebSocket after shared HTTP/2 request: %v", err)
+	}
+	conn.Close()
+	// The HTTP client must retain its own HTTP/2 capability.
+	response, err = client.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.ProtoMajor != 2 {
+		t.Fatalf("HTTP client lost HTTP/2: %s", response.Proto)
+	}
+}
+
 // newOpenAIWireCapture returns a session whose outgoing events are readable
 // from the returned channel.
 func newOpenAIWireCapture(t *testing.T) (*openAIRealtimeSession, <-chan map[string]any) {

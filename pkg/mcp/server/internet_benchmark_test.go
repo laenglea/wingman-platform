@@ -35,7 +35,7 @@ import (
 	searchexa "github.com/adrianliechti/wingman/pkg/searcher/exa"
 	searchtavily "github.com/adrianliechti/wingman/pkg/searcher/tavily"
 	"github.com/adrianliechti/wingman/pkg/tool"
-	researchtool "github.com/adrianliechti/wingman/pkg/tool/research"
+	"github.com/adrianliechti/wingman/pkg/tool/research"
 	"github.com/adrianliechti/wingman/pkg/tool/scrape"
 	"github.com/adrianliechti/wingman/pkg/tool/search"
 	"github.com/joho/godotenv"
@@ -150,7 +150,7 @@ func TestInternetBenchmark(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		pTool, err := researchtool.New(p)
+		pTool, err := research.New(p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -252,7 +252,7 @@ func TestInternetBenchmark(t *testing.T) {
 					continue
 				}
 				count := repeats
-				if scenario.Tool == researchtool.ToolName {
+				if scenario.Tool == research.ToolName {
 					count = researchRepeats
 				}
 				for repeat := range count {
@@ -408,7 +408,7 @@ func gradeInternetOutput(scenario internetBenchmarkCase, output string) (terms, 
 	} else {
 		sources = 1
 	}
-	if scenario.Tool == researchtool.ToolName {
+	if scenario.Tool == research.ToolName {
 		seen := map[string]bool{}
 		for _, raw := range outputURLs.FindAllString(output, -1) {
 			u, err := url.Parse(strings.TrimRight(raw, ".,;]"))
@@ -460,7 +460,7 @@ func summarizeInternetRuns(runs []internetBenchmarkRun) []internetBenchmarkSumma
 }
 
 func TestInternetBenchmarkGrading(t *testing.T) {
-	scenario := internetBenchmarkCase{Tool: researchtool.ToolName, RequiredTerms: [][]string{{"increase", "monotonic"}, {"cancel"}}, ExpectedSources: []string{"https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/progress"}}
+	scenario := internetBenchmarkCase{Tool: research.ToolName, RequiredTerms: [][]string{{"increase", "monotonic"}, {"cancel"}}, ExpectedSources: []string{"https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/progress"}}
 	terms, sources, unexpected := gradeInternetOutput(scenario, "monotonic progress; cancel https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/progress https://www.progress.com/")
 	if terms != 1 || sources != 1 || len(unexpected) != 1 {
 		t.Fatalf("terms=%v sources=%v unexpected=%v", terms, sources, unexpected)
@@ -492,7 +492,7 @@ func TestInternetClientRouting(t *testing.T) {
 	researcher, _ := openai.New("test")
 	searchTool, _ := search.New(searcher)
 	fetchTool, _ := scrape.New(scraper)
-	researchTool, _ := researchtool.New(researcher)
+	researchTool, _ := research.New(researcher)
 	instructions := internetTestInstructions
 	if path := os.Getenv("INTERNET_BENCHMARK_CONFIG"); path != "" {
 		data, err := os.ReadFile(path)

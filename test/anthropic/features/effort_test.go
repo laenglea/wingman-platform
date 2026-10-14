@@ -3,6 +3,7 @@ package features_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adrianliechti/wingman/test/anthropic"
 	"github.com/adrianliechti/wingman/test/harness"
@@ -10,6 +11,7 @@ import (
 
 func TestAdaptiveThinkingEffortHTTP(t *testing.T) {
 	h := anthropic.New(t)
+	h.Client.Timeout = 180 * time.Second
 
 	efforts := []string{"low", "medium", "high", "xhigh", "max"}
 
@@ -34,14 +36,19 @@ func TestAdaptiveThinkingEffortHTTP(t *testing.T) {
 							"effort": effort,
 						},
 						"messages": []map[string]any{
-							{"role": "user", "content": "How many r's are in strawberry?"},
+							{"role": "user", "content": harness.ReasoningPrompt},
 						},
 					}
 
 					anthropicResp, wingmanResp := anthropic.CompareHTTP(t, h, model.Name, body)
 
-					requireThinkingBlock(t, "anthropic", anthropicResp.Body)
-					requireThinkingBlock(t, "wingman", wingmanResp.Body)
+					if effort == "low" || effort == "medium" {
+						requireAdaptiveEffortAnswer(t, "anthropic", anthropicResp.Body)
+						requireAdaptiveEffortAnswer(t, "wingman", wingmanResp.Body)
+					} else {
+						requireThinkingBlock(t, "anthropic", anthropicResp.Body)
+						requireThinkingBlock(t, "wingman", wingmanResp.Body)
+					}
 
 					rules := anthropic.DefaultMessagesResponseRules()
 					rules["content.*.thinking"] = harness.FieldIgnore
@@ -55,6 +62,7 @@ func TestAdaptiveThinkingEffortHTTP(t *testing.T) {
 
 func TestAdaptiveThinkingEffortSSE(t *testing.T) {
 	h := anthropic.New(t)
+	h.Client.Timeout = 180 * time.Second
 
 	efforts := []string{"low", "medium", "high", "xhigh", "max"}
 
@@ -79,17 +87,70 @@ func TestAdaptiveThinkingEffortSSE(t *testing.T) {
 							"effort": effort,
 						},
 						"messages": []map[string]any{
-							{"role": "user", "content": "How many r's are in strawberry?"},
+							{"role": "user", "content": harness.ReasoningPrompt},
 						},
 					}
 
 					anthropicEvents, wingmanEvents := anthropic.CompareSSE(t, h, model.Name, body)
 
-					requireThinkingSSEEvent(t, "anthropic", anthropicEvents)
-					requireThinkingSSEEvent(t, "wingman", wingmanEvents)
+					if effort == "low" || effort == "medium" {
+						requireAdaptiveEffortStream(t, "anthropic", anthropicEvents)
+						requireAdaptiveEffortStream(t, "wingman", wingmanEvents)
+					} else {
+						requireThinkingSSEEvent(t, "anthropic", anthropicEvents)
+						requireThinkingSSEEvent(t, "wingman", wingmanEvents)
+					}
 				})
 			}
 		})
+	}
+}
+
+// Low and medium effort permit a model to skip thinking. Validate the actual
+// solution in that case, and still validate signed thinking whenever emitted.
+func requireAdaptiveEffortAnswer(t *testing.T, label string, body map[string]any) {
+	t.Helper()
+	content, ok := body["content"].([]any)
+	if !ok {
+		t.Fatalf("[%s] content is not an array", label)
+	}
+	var answer strings.Builder
+	for _, raw := range content {
+		block, _ := raw.(map[string]any)
+		if block["type"] == "thinking" {
+			requireThinkingBlock(t, label, body)
+		}
+		if text, ok := block["text"].(string); ok {
+			answer.WriteString(text)
+		}
+	}
+	if !strings.Contains(strings.ReplaceAll(answer.String(), ",", ""), "2425") {
+		t.Errorf("[%s] missing correct solution 2425: %q", label, answer.String())
+	}
+}
+
+func requireAdaptiveEffortStream(t *testing.T, label string, events []*harness.SSEEvent) {
+	t.Helper()
+	var answer strings.Builder
+	thinking, signed := false, false
+	for _, event := range events {
+		if block, ok := event.Data["content_block"].(map[string]any); ok && block["type"] == "thinking" {
+			thinking = true
+		}
+		if delta, ok := event.Data["delta"].(map[string]any); ok {
+			if text, ok := delta["text"].(string); ok {
+				answer.WriteString(text)
+			}
+			if signature, _ := delta["signature"].(string); signature != "" {
+				signed = true
+			}
+		}
+	}
+	if thinking && !signed {
+		t.Errorf("[%s] thinking stream has no signature", label)
+	}
+	if !strings.Contains(strings.ReplaceAll(answer.String(), ",", ""), "2425") {
+		t.Errorf("[%s] missing correct streamed solution 2425: %q", label, answer.String())
 	}
 }
 
@@ -108,7 +169,7 @@ func TestAdaptiveThinkingNoEffortHTTP(t *testing.T) {
 					"type": "adaptive",
 				},
 				"messages": []map[string]any{
-					{"role": "user", "content": "How many r's are in strawberry?"},
+					{"role": "user", "content": harness.ReasoningPrompt},
 				},
 			}
 
@@ -142,7 +203,7 @@ func TestAdaptiveThinkingDisplayOmittedHTTP(t *testing.T) {
 				},
 				"output_config": map[string]any{"effort": "high"},
 				"messages": []map[string]any{
-					{"role": "user", "content": "Find the smallest positive integer x such that x mod 7 = 3, x mod 11 = 5, and x mod 13 = 7. Show your steps and verify all remainders."},
+					{"role": "user", "content": harness.ReasoningPrompt},
 				},
 			}
 

@@ -323,7 +323,7 @@ func responsesUsageFromMap(t *testing.T, usage any) responsesUsageResult {
 
 // reasoningPuzzle needs a couple of solving steps so adaptive-thinking models
 // reliably engage thinking, while the visible answer stays short.
-const reasoningPuzzle = "Alice, Bob and Carol have 17 coins between them. Alice has twice as many as Bob, and Carol has 3 fewer than Alice. How many coins does each person have? Answer with just the three numbers."
+const reasoningPuzzle = harness.ReasoningPrompt
 
 func buildLongUserPrompt(seed string) string {
 	var b strings.Builder

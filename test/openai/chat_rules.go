@@ -16,8 +16,9 @@ func DefaultChatResponseRules() map[string]harness.FieldRule {
 		"usage.completion_tokens": harness.FieldNonEmpty,
 		"usage.total_tokens":      harness.FieldNonEmpty,
 
-		"usage.prompt_tokens_details.cached_tokens": harness.FieldPresence,
-		"usage.prompt_tokens_details.audio_tokens":  harness.FieldIgnore,
+		"usage.prompt_tokens_details.cached_tokens":      harness.FieldPresence,
+		"usage.prompt_tokens_details.audio_tokens":       harness.FieldIgnore,
+		"usage.prompt_tokens_details.cache_write_tokens": harness.FieldIgnore,
 
 		"usage.completion_tokens_details.reasoning_tokens":           harness.FieldPresence,
 		"usage.completion_tokens_details.audio_tokens":               harness.FieldIgnore,
@@ -47,8 +48,9 @@ func DefaultChatSSERules() map[string]harness.FieldRule {
 		"usage.completion_tokens": harness.FieldNonEmpty,
 		"usage.total_tokens":      harness.FieldNonEmpty,
 
-		"usage.prompt_tokens_details.cached_tokens": harness.FieldPresence,
-		"usage.prompt_tokens_details.audio_tokens":  harness.FieldIgnore,
+		"usage.prompt_tokens_details.cached_tokens":      harness.FieldPresence,
+		"usage.prompt_tokens_details.audio_tokens":       harness.FieldIgnore,
+		"usage.prompt_tokens_details.cache_write_tokens": harness.FieldIgnore,
 
 		"usage.completion_tokens_details.reasoning_tokens":           harness.FieldPresence,
 		"usage.completion_tokens_details.audio_tokens":               harness.FieldIgnore,

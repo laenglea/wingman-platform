@@ -10,7 +10,10 @@
 package toolsearch
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
@@ -67,7 +70,7 @@ func Tools(payload []byte) []provider.Tool {
 		} `json:"tools"`
 	}
 
-	if err := json.Unmarshal(payload, &raw); err != nil {
+	if err := decodeJSON(payload, &raw); err != nil {
 		return nil
 	}
 
@@ -109,4 +112,21 @@ func Tools(payload []byte) []provider.Tool {
 	}
 
 	return result
+}
+
+// Tool schemas may contain numeric enums and defaults that cannot round-trip
+// through float64. Keep their original numbers when loading a search result.
+func decodeJSON(data []byte, value any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("expected a single JSON value")
+	}
+	return nil
 }

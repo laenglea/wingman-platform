@@ -14,7 +14,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/policy/noop"
 	provider "github.com/adrianliechti/wingman/pkg/provider/openai"
 	"github.com/adrianliechti/wingman/server"
-	wire "github.com/adrianliechti/wingman/server/openai/decisions"
+	"github.com/adrianliechti/wingman/server/openai/decisions"
 	"github.com/adrianliechti/wingman/test/harness"
 	"github.com/adrianliechti/wingman/test/openai"
 )
@@ -141,7 +141,7 @@ func postDecisions(t *testing.T, h *openai.Harness, ep harness.Endpoint, model s
 
 func requireDecision(t *testing.T, response *harness.RawResponse, checkPredicate bool) {
 	t.Helper()
-	var result wire.Response
+	var result decisions.Response
 	if err := json.Unmarshal(response.RawBody, &result); err != nil {
 		t.Fatal(err)
 	}

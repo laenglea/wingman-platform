@@ -29,6 +29,32 @@ func (b *responderLifecycleBody) Read(p []byte) (int, error) {
 }
 func (b *responderLifecycleBody) Close() error { b.closed = true; return nil }
 
+func TestResponderPreservesEmptyFinalText(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_empty","type":"message","role":"assistant","phase":"final_answer","status":"in_progress","content":[]}}`,
+		`data: {"type":"response.content_part.added","output_index":0,"item_id":"msg_empty","content_index":0,"part":{"type":"output_text","text":"","annotations":[],"logprobs":[]}}`,
+		`data: {"type":"response.completed","response":{"status":"completed","output":[]}}`,
+	}, "\n\n") + "\n\n"
+	client := &http.Client{Transport: responderLifecycleTransport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(stream)), Request: r}, nil
+	})}
+	r, err := NewResponder("http://upstream.test", "test", WithToken("test"), WithClient(client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var acc provider.CompletionAccumulator
+	for c, err := range r.Complete(t.Context(), []provider.Message{provider.UserMessage("Go")}, nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		acc.Add(*c)
+	}
+	parts := acc.Result().Message.Content
+	if len(parts) != 1 || !parts[0].TextPresent || parts[0].Text != "" || parts[0].MessageID != "msg_empty" || parts[0].Phase != provider.MessagePhaseFinalAnswer {
+		t.Fatalf("empty final text lost: %+v", parts)
+	}
+}
+
 func TestResponderStreamLifecycle(t *testing.T) {
 	commentary := "data: " + `{"type":"response.output_text.delta","item_id":"msg_1","delta":"Checking."}` + "\n\n"
 	for _, tc := range []struct {

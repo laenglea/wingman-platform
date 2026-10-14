@@ -2,11 +2,27 @@ package anthropic
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 
 	"github.com/adrianliechti/wingman/test/harness"
 )
+
+func TestStreamingReferenceRejection(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"unsupported system role"}}`))
+	}))
+	defer s.Close()
+	h := &Harness{Client: harness.NewClient()}
+	events := PostMessagesSSEAllowRejection(t, h, harness.Endpoint{Name: "reference", BaseURL: s.URL}, map[string]any{"stream": true})
+	if len(events) != 1 || events[0].Event != "error" || events[0].Data["type"] != "error" {
+		t.Fatalf("reference rejection lost: %+v", events)
+	}
+}
 
 func TestThinkingStreamComparisonPreservesLifecycleChecks(t *testing.T) {
 	var events []*harness.SSEEvent

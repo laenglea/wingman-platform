@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,15 +34,22 @@ func TestCodexHard(t *testing.T) {
 	h := openai.New(t)
 	binary := codexBinary(t, true)
 
-	// The repair conversation passes this limit after the first tool results,
-	// so Codex compacts at least once and typically several times. The
-	// scenario keeps its own fixture: verification compares against the
-	// files that setup wrote.
+	// One large tool result forces compaction. The resumed conversation has
+	// room for the tools, summary, and repairs, rather than compacting on
+	// every subsequent turn and exhausting the bounded request allowance.
 	compactionProject := harness.NewProjectFixture(t)
 	compaction := projectScenario(t)
 	compaction.name = "auto_compact"
-	compaction.options.setup = compactionProject.Setup
-	compaction.options.autoCompactTokenLimit = 4000
+	compaction.options.setup = func(t *testing.T, dir string) {
+		compactionProject.Setup(t, dir)
+		var context strings.Builder
+		for i := 0; i < 400; i++ {
+			fmt.Fprintf(&context, "Context %04d: Keep invoice pricing and item counts correct; use the fixture tests to verify every change.\n", i)
+		}
+		writeArtifact(t, filepath.Join(dir, "compaction_context.txt"), []byte(context.String()))
+	}
+	compaction.prompt = "First use exec_command to run exactly `cat compaction_context.txt` with max_output_tokens set to 10000. Read that background context before starting the repair.\n" + compaction.prompt
+	compaction.options.autoCompactTokenLimit = 8000
 	compaction.options.maxRequests = 30
 	compaction.options.timeout = 6 * time.Minute
 	// Compaction discards the tool outputs, so the model re-reads files and

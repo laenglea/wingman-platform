@@ -462,3 +462,17 @@ func TestStreamEventsIncludeCustomToolKind(t *testing.T) {
 		}
 	}
 }
+
+func TestToolChoiceAllowedToolsDefaultMode(t *testing.T) {
+	var tc ToolChoice
+	if err := json.Unmarshal([]byte(`{"type":"allowed_tools","tools":[{"type":"function","name":"get_weather"}]}`), &tc); err != nil {
+		t.Fatal(err)
+	}
+	if tc.Mode != ToolChoiceModeAuto {
+		t.Fatalf("Mode = %q, want %q", tc.Mode, ToolChoiceModeAuto)
+	}
+	opts := toToolOptions(&tc)
+	if opts == nil || opts.Choice != provider.ToolChoiceAuto || len(opts.Allowed) != 1 || opts.Allowed[0] != "get_weather" {
+		t.Fatalf("toToolOptions = %+v", opts)
+	}
+}

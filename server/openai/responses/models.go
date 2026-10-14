@@ -1,9 +1,12 @@
 package responses
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 )
 
 // https://platform.openai.com/docs/api-reference/responses/create
@@ -273,6 +276,9 @@ func (t *ToolChoice) UnmarshalJSON(data []byte) error {
 
 	if err := json.Unmarshal(data, &allowedTools); err == nil && allowedTools.Type == "allowed_tools" {
 		t.Mode = allowedTools.Mode
+		if t.Mode == "" {
+			t.Mode = ToolChoiceModeAuto
+		}
 		t.AllowedTools = allowedTools.Tools
 		return nil
 	}
@@ -296,6 +302,7 @@ func (t *ToolChoice) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
+	value.raw = t.raw
 	*t = ToolChoice(value)
 
 	return nil
@@ -680,7 +687,9 @@ func (ri *ResponsesInput) UnmarshalJSON(data []byte) error {
 
 		case InputItemTypeAdditionalTools:
 			var additionalTools InputAdditionalTools
-			if err := json.Unmarshal(raw, &additionalTools); err != nil {
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.UseNumber()
+			if err := decoder.Decode(&additionalTools); err != nil {
 				return err
 			}
 			item.InputAdditionalTools = &additionalTools
@@ -750,14 +759,14 @@ func (ri *ResponsesInput) UnmarshalJSON(data []byte) error {
 
 		case InputItemTypeComputerCall:
 			var cc InputComputerCall
-			if err := json.Unmarshal(raw, &cc); err != nil {
+			if err := jsonutil.Unmarshal(raw, &cc); err != nil {
 				return err
 			}
 			item.InputComputerCall = &cc
 
 		case InputItemTypeComputerCallOutput:
 			var cco InputComputerCallOutput
-			if err := json.Unmarshal(raw, &cco); err != nil {
+			if err := jsonutil.Unmarshal(raw, &cco); err != nil {
 				return err
 			}
 			item.InputComputerCallOutput = &cco

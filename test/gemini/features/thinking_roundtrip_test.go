@@ -24,7 +24,7 @@ import (
 func TestThinkingRoundTripHTTP(t *testing.T) {
 	h := gemini.New(t)
 
-	const turn1Prompt = "I have 3 apples and give away 1. Then I buy 5 more and give away 2. Then I eat 1. My friend gives me 3 and I give her back 2. How many apples do I have? Show your reasoning step by step."
+	const turn1Prompt = harness.ReasoningPrompt
 	const turn2Prompt = "Are you sure? Recount very carefully, listing each step, and tell me the final number."
 
 	for _, model := range gemini.DefaultModels() {

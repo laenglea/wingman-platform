@@ -14,7 +14,7 @@ import (
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/server"
-	wire "github.com/adrianliechti/wingman/server/openai/decisions"
+	"github.com/adrianliechti/wingman/server/openai/decisions"
 )
 
 func TestOpenAIDecisionsRoutes(t *testing.T) {
@@ -33,7 +33,7 @@ func TestOpenAIDecisionsRoutes(t *testing.T) {
 			io.WriteString(w, `{"error":{"message":"busy","type":"rate_limit_exceeded","code":"rate_limit_exceeded"}}`)
 			return
 		}
-		var req wire.Request
+		var req decisions.Request
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
 		}
@@ -92,7 +92,7 @@ providers:
 	if w.Code != 200 {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
-	var result wire.Response
+	var result decisions.Response
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestOpenAIDecisionsAdapterAndValidation(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
-	var result wire.Response
+	var result decisions.Response
 	json.Unmarshal(w.Body.Bytes(), &result)
 	if result.Answers[1].Choice != "false" || result.Answers[0].Name != nil || result.Answers[2].Name != nil || *result.Answers[2].Score != 0 {
 		t.Fatalf("lost adapted answer: %s", w.Body.String())

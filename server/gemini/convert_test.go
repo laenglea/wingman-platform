@@ -203,3 +203,33 @@ func TestBinaryThoughtSignatureWithAtAndColonIsNotParsedAsRealm(t *testing.T) {
 		t.Fatalf("binary signature was corrupted as realm-tagged: got %+v, want %q", got, want)
 	}
 }
+
+func TestFinishReasonAndRefusalFromCompletion(t *testing.T) {
+	if got := toFinishReason(&provider.Completion{StopReason: provider.StopReasonMaxTokens}); got != FinishReasonMaxTokens {
+		t.Fatalf("StopReasonMaxTokens -> %q, want %q", got, FinishReasonMaxTokens)
+	}
+	if got := toFinishReason(&provider.Completion{StopReason: provider.StopReasonRefusal}); got != FinishReasonSafety {
+		t.Fatalf("StopReasonRefusal -> %q, want %q", got, FinishReasonSafety)
+	}
+
+	content := toContent([]provider.Content{provider.RefusalContent("cannot comply")})
+	if content == nil || len(content.Parts) != 1 || content.Parts[0].Text != "cannot comply" {
+		t.Fatalf("refusal content = %+v", content)
+	}
+}
+
+func TestToMessagesRejectsInvalidRoleAndSkipsNilElements(t *testing.T) {
+	if _, err := toMessages(nil, []*Content{{Role: "system", Parts: []*Part{{Text: "hi"}}}}); err == nil {
+		t.Fatal("expected error for invalid role 'system'")
+	}
+
+	msgs, err := toMessages(&Content{Parts: []*Part{nil, {Text: "sys"}}}, []*Content{nil, {Role: "user", Parts: []*Part{nil, {Text: "hello"}}}})
+	if err != nil || len(msgs) != 2 {
+		t.Fatalf("toMessages with nil elements: len=%d, err=%v", len(msgs), err)
+	}
+
+	tools := toTools([]*Tool{nil, {FunctionDeclarations: []*FunctionDeclaration{nil, {Name: "fn"}}}}, false)
+	if len(tools) != 1 || tools[0].Name != "fn" {
+		t.Fatalf("toTools with nil elements: %+v", tools)
+	}
+}

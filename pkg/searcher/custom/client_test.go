@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/adrianliechti/wingman/pkg/searcher"
-	searchtool "github.com/adrianliechti/wingman/pkg/tool/search"
+	"github.com/adrianliechti/wingman/pkg/tool/search"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -144,7 +144,7 @@ func TestDiscoveredCategoriesAndDateFilters(t *testing.T) {
 	if c.Capabilities().Categories[0].Name != "publication" {
 		t.Fatal("caller mutated cached categories")
 	}
-	tool, err := searchtool.New(c)
+	tool, err := search.New(c)
 	if err != nil {
 		t.Fatal(err)
 	}

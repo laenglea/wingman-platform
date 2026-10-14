@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
@@ -28,7 +29,7 @@ const (
 // input ({command, restart}).
 func BashInput(args string) map[string]any {
 	var input map[string]any
-	json.Unmarshal([]byte(args), &input)
+	jsonutil.Unmarshal([]byte(args), &input)
 
 	if input == nil {
 		return map[string]any{}
@@ -53,7 +54,7 @@ func BashInput(args string) map[string]any {
 // list of the shell dialect.
 func Commands(args string) []string {
 	var input map[string]any
-	json.Unmarshal([]byte(args), &input)
+	jsonutil.Unmarshal([]byte(args), &input)
 
 	if commands := stringList(input["commands"]); len(commands) > 0 {
 		return commands
@@ -111,7 +112,7 @@ func stringList(v any) []string {
 // action ({commands, timeout_ms, max_output_length}).
 func ShellAction(args string) map[string]any {
 	var input map[string]any
-	json.Unmarshal([]byte(args), &input)
+	jsonutil.Unmarshal([]byte(args), &input)
 
 	if input != nil && len(stringList(input["commands"])) > 0 {
 		delete(input, "command")
@@ -125,7 +126,7 @@ func ShellAction(args string) map[string]any {
 // local_shell_call exec action ({type, command, ...}).
 func LocalShellAction(args string) map[string]any {
 	var input map[string]any
-	json.Unmarshal([]byte(args), &input)
+	jsonutil.Unmarshal([]byte(args), &input)
 
 	if input != nil && len(stringList(input["command"])) > 0 {
 		input["type"] = "exec"

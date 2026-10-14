@@ -9,11 +9,11 @@ import (
 
 	"cloud.google.com/go/auth"
 	"cloud.google.com/go/auth/httptransport"
-	cloudtranslate "cloud.google.com/go/translate/apiv3"
+	translate "cloud.google.com/go/translate/apiv3"
 	"google.golang.org/api/option"
 )
 
-func (c *Client) translationClient(ctx context.Context) (*cloudtranslate.TranslationClient, string, error) {
+func (c *Client) translationClient(ctx context.Context) (*translate.TranslationClient, string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
 	}
@@ -82,7 +82,7 @@ func (c *Client) translationClient(ctx context.Context) (*cloudtranslate.Transla
 	client := *c.client
 	client.Transport = authenticated.Transport
 
-	c.sdk, err = cloudtranslate.NewTranslationRESTClient(ctx,
+	c.sdk, err = translate.NewTranslationRESTClient(ctx,
 		option.WithEndpoint(strings.TrimRight(c.url, "/")),
 		option.WithHTTPClient(&client),
 	)

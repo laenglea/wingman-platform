@@ -308,7 +308,9 @@ func TestUnicodeStreaming(t *testing.T) {
 		t.Run(model.Name, func(t *testing.T) {
 			h.SkipUnlessConfigured(t, model.Name)
 
-			body := map[string]any{"max_tokens": 256, "messages": user(hardtest.UnicodePrompt)}
+			// The shared limit includes hidden reasoning on some backends.
+			// Unicode preservation needs a complete answer, not a token-limit cut.
+			body := map[string]any{"max_tokens": 2048, "messages": user(hardtest.UnicodePrompt)}
 
 			for _, tg := range targets(h, model) {
 				hardtest.RequireUnicode(t, tg.label, streamedText(postSSE(t, h, tg, body)))

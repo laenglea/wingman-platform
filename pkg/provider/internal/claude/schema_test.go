@@ -229,3 +229,40 @@ func TestSanitizeStrictSchemaNullableEnumConstraints(t *testing.T) {
 		})
 	}
 }
+
+func TestSanitizeSchemaLosslessNumbers(t *testing.T) {
+	for _, useNumber := range []bool{false, true} {
+		decoder := json.NewDecoder(strings.NewReader(`{"type":"object","properties":{"list":{"type":"array","minItems":1},"choice":{"type":["integer","null"],"enum":[1,2,null]}}}`))
+		if useNumber {
+			decoder.UseNumber()
+		}
+		var schema map[string]any
+		if err := decoder.Decode(&schema); err != nil {
+			t.Fatal(err)
+		}
+		got, err := json.Marshal(SanitizeSchema(schema))
+		if err != nil {
+			t.Fatal(err)
+		}
+		const want = `{"properties":{"choice":{"enum":[1,2,null]},"list":{"minItems":1,"type":"array"}},"type":"object"}`
+		if string(got) != want {
+			t.Errorf("UseNumber=%t: got %s, want %s", useNumber, got, want)
+		}
+	}
+	for _, tc := range []struct {
+		value   string
+		integer bool
+	}{
+		{"9007199254740993", true}, {"1e400", true}, {"2.0", true}, {"1.0000000000000000001", false}, {"1e-400", false},
+	} {
+		schema := map[string]any{"type": []any{"integer", "null"}, "enum": []any{json.Number(tc.value), nil}}
+		got := SanitizeSchema(schema)
+		_, hasType := got["type"]
+		if hasType == tc.integer {
+			t.Errorf("%s: incorrect integer classification: %v", tc.value, got)
+		}
+		if got["enum"].([]any)[0] != json.Number(tc.value) {
+			t.Errorf("number changed: %v", got)
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 	"github.com/adrianliechti/wingman/pkg/tool"
 
 	"google.golang.org/grpc"
@@ -72,7 +73,7 @@ func (c *Client) Tools(ctx context.Context) ([]tool.Tool, error) {
 		}
 		var schema map[string]any
 		if strings.TrimSpace(d.Parameters) != "" {
-			if err := json.Unmarshal([]byte(d.Parameters), &schema); err != nil {
+			if err := jsonutil.Unmarshal([]byte(d.Parameters), &schema); err != nil {
 				return nil, fmt.Errorf("custom tool %s: invalid parameter schema: %w", d.Name, err)
 			}
 			if schema == nil {
@@ -121,7 +122,7 @@ func (c *Client) Execute(ctx context.Context, name string, parameters map[string
 	data := resp.GetData()
 
 	var value any
-	if err := json.Unmarshal([]byte(data), &value); err == nil {
+	if err := jsonutil.Unmarshal([]byte(data), &value); err == nil {
 		return value, nil
 	}
 

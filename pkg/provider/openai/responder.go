@@ -204,6 +204,9 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 				}
 
 			case responses.ResponseContentPartAddedEvent:
+				if event.Part.Type == "output_text" && !emit(provider.Content{MessageID: event.ItemID, TextPresent: true}, "") {
+					return
+				}
 			case responses.ResponseTextDeltaEvent:
 				if !emit(provider.Content{MessageID: event.ItemID, Text: event.Delta}, "") {
 					return
@@ -296,7 +299,17 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 							searchCallID = fmt.Sprintf("search_%s_%d", responseID, event.OutputIndex)
 						}
 					}
-					args, _ := json.Marshal(item.Arguments)
+					var raw struct {
+						Arguments json.RawMessage `json:"arguments"`
+					}
+					if err := json.Unmarshal([]byte(item.RawJSON()), &raw); err != nil {
+						yield(nil, err)
+						return
+					}
+					args := raw.Arguments
+					if len(args) == 0 {
+						args = json.RawMessage("null")
+					}
 					if !emit(provider.ToolCallContent(provider.ToolCall{
 						ID:        searchCallID,
 						Kind:      provider.ToolKindToolSearch,
@@ -311,14 +324,16 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 					if id == "" {
 						id = searchCallID
 					}
-					loaded := make([]responses.ToolUnionParam, len(item.Tools))
-					for i, tool := range item.Tools {
-						loaded[i] = tool.ToParam()
+					var raw struct {
+						Tools json.RawMessage `json:"tools"`
 					}
-					payload, err := json.Marshal(loaded)
-					if err != nil {
+					if err := json.Unmarshal([]byte(item.RawJSON()), &raw); err != nil {
 						yield(nil, err)
 						return
+					}
+					payload := raw.Tools
+					if len(payload) == 0 || string(payload) == "null" {
+						payload = json.RawMessage("[]")
 					}
 					if !emit(provider.ToolResultContent(provider.ToolResult{ID: id, Kind: provider.ToolKindToolSearch, Execution: string(item.Execution), Payload: payload}), "") {
 						return
@@ -527,6 +542,10 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 				properties = ensureStrictSchema(properties)
 			}
 
+			properties, err := schemaFields(properties)
+			if err != nil {
+				return nil, err
+			}
 			schema := &responses.ResponseFormatTextJSONSchemaConfigParam{
 				Name:   options.Schema.Name,
 				Schema: properties,
@@ -820,9 +839,11 @@ func (r *Responder) convertResponsesInput(messages []provider.Message, freeformP
 							tso.Execution = responses.ResponseToolSearchOutputItemParamExecution(c.ToolResult.Execution)
 						}
 						if len(c.ToolResult.Payload) > 0 {
-							var raw []responses.ResponseToolSearchOutputItemParamToolUnion
+							var raw []json.RawMessage
 							if err := json.Unmarshal(c.ToolResult.Payload, &raw); err == nil {
-								tso.Tools = raw
+								for _, tool := range raw {
+									tso.Tools = append(tso.Tools, param.Override[responses.ResponseToolSearchOutputItemParamToolUnion](tool))
+								}
 							}
 						}
 						result = append(result, responses.ResponseInputItemUnionParam{
@@ -1032,8 +1053,8 @@ func (r *Responder) convertResponsesInput(messages []provider.Message, freeformP
 							ts.Execution = c.ToolCall.Execution
 						}
 						if c.ToolCall.Arguments != "" {
-							var args any
-							if err := json.Unmarshal([]byte(c.ToolCall.Arguments), &args); err == nil {
+							args := json.RawMessage(c.ToolCall.Arguments)
+							if json.Valid(args) {
 								ts.Arguments = args
 							} else {
 								ts.Arguments = c.ToolCall.Arguments
@@ -1284,7 +1305,11 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 				search.Execution = responses.ToolSearchToolExecution(t.Execution)
 			}
 			if len(t.Parameters) > 0 {
-				search.Parameters = t.Parameters
+				parameters, err := schemaFields(t.Parameters)
+				if err != nil {
+					return nil, err
+				}
+				search.Parameters = parameters
 			}
 			result = append(result, responses.ToolUnionParam{
 				OfToolSearch: search,
@@ -1319,6 +1344,10 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 					parameters = ensureStrictSchema(parameters)
 				}
 
+				parameters, err := schemaFields(parameters)
+				if err != nil {
+					return nil, err
+				}
 				fn := responses.NamespaceToolToolFunctionParam{
 					Name:       inner.Name,
 					Parameters: parameters,
@@ -1364,6 +1393,10 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 			parameters = ensureStrictSchema(parameters)
 		}
 
+		parameters, err := schemaFields(parameters)
+		if err != nil {
+			return nil, err
+		}
 		function := &responses.FunctionToolParam{
 			Name: t.Name,
 

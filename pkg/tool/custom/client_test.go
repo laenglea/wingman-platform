@@ -2,6 +2,7 @@ package custom
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -53,9 +54,9 @@ func TestExecute_DecodesJSONAndPreservesPlainText(t *testing.T) {
 		data string
 		want any
 	}{
-		{`{"answer":42}`, map[string]any{"answer": float64(42)}}, {`["a","b"]`, []any{"a", "b"}},
+		{`{"answer":42}`, map[string]any{"answer": json.Number("42")}}, {`["a","b"]`, []any{"a", "b"}},
 		{`"Report\nwith citations"`, "Report\nwith citations"},
-		{"42", float64(42)}, {"true", true}, {"null", nil},
+		{"42", json.Number("42")}, {"true", true}, {"null", nil},
 		{"Plain text\nwith a source", "Plain text\nwith a source"},
 		{"answer: yes", map[string]any{"answer": "yes"}},
 	} {
@@ -111,5 +112,30 @@ func TestCustomTool_Errors(t *testing.T) {
 	}
 	if _, err := c.Execute(t.Context(), "lookup", nil); !errors.Is(err, f.err) {
 		t.Fatalf("lost execution error: %v", err)
+	}
+}
+
+func TestSchemaAndResultPreserveNumbers(t *testing.T) {
+	const data = `{"id":9007199254740993,"values":[1.234567890123456789,1e400]}`
+	const schema = `{"properties":{"id":{"enum":[9007199254740993,1e400]}},"type":"object"}`
+	c := &Client{client: &fakeToolClient{
+		definitions: &ToolsResponse{Definitions: []*Definition{{Name: "lookup", Parameters: schema}}},
+		response:    &ResultResponse{Data: data},
+	}}
+	tools, err := c.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(tools[0].Parameters)
+	if err != nil || string(encoded) != schema {
+		t.Fatalf("schema changed: %s (%v)", encoded, err)
+	}
+	value, err := c.Execute(t.Context(), "lookup", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tool.RenderResult(c, "lookup", value)
+	if err != nil || result.Parts[0].Text != data {
+		t.Fatalf("result changed: %+v (%v)", result, err)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
 func (h *Handler) handleAudioTranscription(w http.ResponseWriter, r *http.Request) {
@@ -20,15 +21,15 @@ func (h *Handler) handleAudioTranscription(w http.ResponseWriter, r *http.Reques
 
 	model := r.FormValue("model")
 
-	transcriber, err := h.Transcriber(model)
-
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, model, policy.ActionAccess); err != nil {
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(model))
 		return
 	}
 
-	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, model, policy.ActionAccess); err != nil {
-		writeError(w, http.StatusNotFound, err)
+	transcriber, err := h.Transcriber(model)
+
+	if err != nil {
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(model))
 		return
 	}
 
@@ -131,7 +132,7 @@ func (h *Handler) handleAudioTranscription(w http.ResponseWriter, r *http.Reques
 
 	for delta, err := range seq {
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
+			writeError(w, provider.CodeFromError(err, http.StatusBadRequest), err)
 			return
 		}
 

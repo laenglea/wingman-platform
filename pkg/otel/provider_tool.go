@@ -8,7 +8,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/tool"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/semconv/v1.41.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 )
 
 type Tool interface {

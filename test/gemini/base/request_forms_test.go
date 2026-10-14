@@ -67,6 +67,11 @@ func TestProtobufToolFormsHTTP(t *testing.T) {
 					"function_calling_config": map[string]any{"mode": "ANY", "allowed_function_names": "get_weather"},
 				},
 			}
+			if model.Capabilities.NoForcedToolChoice {
+				body["tool_config"] = map[string]any{
+					"function_calling_config": map[string]any{"mode": "AUTO"},
+				}
+			}
 
 			geminiResp, wingmanResp := gemini.CompareHTTP(t, h, model.Name, body)
 

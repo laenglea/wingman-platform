@@ -74,7 +74,7 @@ func TestCountTokensHTTP(t *testing.T) {
 					requirePositiveTotalTokens(t, "wingman", wingmanResp.Body)
 
 					rules := map[string]harness.FieldRule{
-						"totalTokens":                     harness.FieldNonEmpty,
+						"totalTokens":                      harness.FieldNonEmpty,
 						"promptTokensDetails.*.tokenCount": harness.FieldNonEmpty,
 					}
 					harness.CompareStructure(t, "response", geminiResp.Body, wingmanResp.Body, harness.CompareOption{Rules: rules})

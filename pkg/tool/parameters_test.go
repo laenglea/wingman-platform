@@ -29,6 +29,20 @@ func TestParameters_PreserveTextAndValidateArrays(t *testing.T) {
 	}
 }
 
+func TestIntegerParameterLosslessNumbers(t *testing.T) {
+	for _, value := range []json.Number{"3.0", "3e0", "30e-1"} {
+		got, err := IntegerParameter(map[string]any{"limit": value}, "limit", 1, 1, 10)
+		if err != nil || got != 3 {
+			t.Fatalf("%s: %d (%v)", value, got, err)
+		}
+	}
+	for _, value := range []json.Number{"1.0000000000000000001", "1e-400", "1e400", "2/1"} {
+		if _, err := IntegerParameter(map[string]any{"limit": value}, "limit", 1, 1, 10); err == nil {
+			t.Fatalf("accepted %s", value)
+		}
+	}
+}
+
 func TestIntegerParameter_ValidatesBeforeConversion(t *testing.T) {
 	for _, test := range []struct {
 		value any

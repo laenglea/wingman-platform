@@ -154,7 +154,7 @@ func codexCatalog(t *testing.T, model string) []byte {
 		"apply_patch_tool_type":     "freeform",
 		"default_reasoning_summary": "none", "support_verbosity": false,
 		"truncation_policy": map[string]any{"mode": "tokens", "limit": 10000},
-		"context_window":    128000, "input_modalities": []string{"text"},
+		"context_window":    128000, "input_modalities": []string{"text", "image"},
 		"experimental_supported_tools": []string{},
 	}}}, "", "  ")
 	if err != nil {

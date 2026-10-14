@@ -43,17 +43,17 @@ func (h *Handler) handleGenerateContent(w http.ResponseWriter, r *http.Request) 
 
 	result.UsageMetadata = toUsageMetadata(completion.Usage)
 
+	var content *Content
 	if completion.Message != nil {
-		content := toContent(completion.Message.Content)
-		finishReason := toFinishReason(completion.Status, completion.Message.Content)
+		content = toContent(completion.Message.Content)
+	}
 
-		result.Candidates = []*Candidate{
-			{
-				Content:      content,
-				FinishReason: finishReason,
-				Index:        0,
-			},
-		}
+	result.Candidates = []*Candidate{
+		{
+			Content:      content,
+			FinishReason: toFinishReason(completion),
+			Index:        0,
+		},
 	}
 
 	writeJson(w, result)
@@ -238,7 +238,11 @@ func (h *Handler) parseGenerateRequest(r *http.Request) (provider.Completer, []p
 		wantThinking := tc.IncludeThoughts || tc.ThinkingLevel != "" ||
 			(tc.ThinkingBudget != nil && *tc.ThinkingBudget != 0)
 
-		if wantThinking {
+		if tc.ThinkingBudget != nil && *tc.ThinkingBudget == 0 && tc.ThinkingLevel == "" && !tc.IncludeThoughts {
+			options.ReasoningOptions = &provider.ReasoningOptions{
+				Type: provider.ReasoningTypeDisabled,
+			}
+		} else if wantThinking {
 			options.ReasoningOptions = &provider.ReasoningOptions{
 				Type: provider.ReasoningTypeAdaptive,
 

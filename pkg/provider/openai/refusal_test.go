@@ -1,8 +1,9 @@
 package openai
 
 import (
-	"github.com/adrianliechti/wingman/pkg/provider"
 	"testing"
+
+	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
 func TestRefusalReplayedInAssistantHistory(t *testing.T) {

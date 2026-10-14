@@ -2,13 +2,13 @@ package react
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"iter"
 	"maps"
 	"slices"
 
 	"github.com/adrianliechti/wingman/pkg/agent"
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/template"
 	"github.com/adrianliechti/wingman/pkg/tool"
@@ -304,7 +304,7 @@ func (c *Agent) Complete(ctx context.Context, messages []provider.Message, optio
 
 				var params map[string]any
 
-				if err := json.Unmarshal([]byte(call.Arguments), &params); err != nil {
+				if err := jsonutil.Unmarshal([]byte(call.Arguments), &params); err != nil {
 					yield(nil, err)
 					return
 				}

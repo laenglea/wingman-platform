@@ -75,6 +75,6 @@ type EmbeddingList struct {
 }
 
 type Usage struct {
-	PromptTokens int `json:"prompt_tokens,omitempty"`
-	TotalTokens  int `json:"total_tokens,omitempty"`
+	PromptTokens int `json:"prompt_tokens"`
+	TotalTokens  int `json:"total_tokens"`
 }

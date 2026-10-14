@@ -14,7 +14,7 @@ import (
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/pkg/policy/noop"
 	"github.com/adrianliechti/wingman/pkg/provider/bedrock"
-	server "github.com/adrianliechti/wingman/server/anthropic"
+	"github.com/adrianliechti/wingman/server/anthropic"
 	"github.com/adrianliechti/wingman/test/harness"
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/go-chi/chi/v5"
@@ -90,7 +90,7 @@ func TestClaudeCodeOfflineBedrock(t *testing.T) {
 	cfg := &config.Config{Policy: noop.New()}
 	cfg.RegisterCompleter(model, p)
 	router := chi.NewRouter()
-	router.Route("/v1", server.New(cfg).Attach)
+	router.Route("/v1", anthropic.New(cfg).Attach)
 	const trailingInstruction = "WINGMAN_E2E_SYSTEM_GUIDANCE"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/messages" {

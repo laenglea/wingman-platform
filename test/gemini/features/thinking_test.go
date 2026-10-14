@@ -18,7 +18,7 @@ func TestThinkingHTTP(t *testing.T) {
 		t.Run(model.Name, func(t *testing.T) {
 			body := map[string]any{
 				"contents": []map[string]any{
-					{"role": "user", "parts": []map[string]any{{"text": "I have 3 apples and give away 1. Then I buy 5 more and give away 2. Then I eat 1. My friend gives me 3 and I give her back 2. How many apples do I have? Show your reasoning step by step."}}},
+					{"role": "user", "parts": []map[string]any{{"text": harness.ReasoningPrompt}}},
 				},
 				"generationConfig": map[string]any{
 					"thinkingConfig": map[string]any{
@@ -55,7 +55,7 @@ func TestThinkingSSE(t *testing.T) {
 		t.Run(model.Name, func(t *testing.T) {
 			body := map[string]any{
 				"contents": []map[string]any{
-					{"role": "user", "parts": []map[string]any{{"text": "I have 3 apples and give away 1. Then I buy 5 more and give away 2. Then I eat 1. My friend gives me 3 and I give her back 2. How many apples do I have? Show your reasoning step by step."}}},
+					{"role": "user", "parts": []map[string]any{{"text": harness.ReasoningPrompt}}},
 				},
 				"generationConfig": map[string]any{
 					"thinkingConfig": map[string]any{

@@ -2,8 +2,9 @@ package openai
 
 import (
 	"fmt"
-	"github.com/adrianliechti/wingman/pkg/provider"
 	"testing"
+
+	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
 func TestResponderReplaysAccumulatedMessagePhases(t *testing.T) {

@@ -196,6 +196,9 @@ type Content struct {
 
 	Text    string
 	Refusal string
+	// TextPresent distinguishes an explicit empty output_text part from a
+	// message-start marker that has not produced any content yet.
+	TextPresent bool
 
 	File *File
 
@@ -471,7 +474,7 @@ func (m Message) SplitMessages() []Message {
 	filled := false
 
 	for _, content := range m.Content {
-		part := content.Text != "" || content.Refusal != ""
+		part := content.Text != "" || content.TextPresent || content.Refusal != ""
 
 		if part && content.MessageID != "" && content.MessageID != currentID {
 			if filled {

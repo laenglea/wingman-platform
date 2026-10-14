@@ -69,4 +69,3 @@ func (p *Provider) createSplitter(options *segmenter.SegmentOptions) text.Splitt
 
 	return &splitter
 }
-

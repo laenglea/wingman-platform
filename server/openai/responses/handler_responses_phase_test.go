@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/adrianliechti/wingman/config"
-	"github.com/adrianliechti/wingman/pkg/policy/noop"
-	"github.com/adrianliechti/wingman/pkg/provider"
 	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/adrianliechti/wingman/config"
+	"github.com/adrianliechti/wingman/pkg/policy/noop"
+	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
 type phaseCompleter struct {

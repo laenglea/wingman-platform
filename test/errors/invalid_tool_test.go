@@ -335,4 +335,3 @@ func TestAnthropicMessages_RejectsProprietaryTool(t *testing.T) {
 		t.Errorf("error.message = %q, expected to contain 'web_search_20250305'", parsed.Error.Message)
 	}
 }
-

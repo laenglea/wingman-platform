@@ -27,7 +27,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/transport/http"
@@ -115,6 +114,24 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		toolAliases := provider.ToolAliases(options.Tools)
 		toolCallIDs := map[int32]string{}
 		toolArgsSeen := map[int32]bool{}
+
+		// The shared Reasoning signature is a whole opaque value; Converse
+		// signature deltas must be joined before it reaches an accumulator.
+		signatures := map[int32]string{}
+		flushSignature := func(index int32) bool {
+			signature := signatures[index]
+			delete(signatures, index)
+			if signature == "" {
+				return true
+			}
+			return yield(&provider.Completion{
+				ID: id, Model: c.model,
+				Message: &provider.Message{
+					Role:    provider.MessageRoleAssistant,
+					Content: []provider.Content{provider.ReasoningContent(provider.Reasoning{Signature: signature})},
+				},
+			}, nil)
+		}
 
 		// Schema mode emulates structured output with a forced tool; its
 		// blocks stream as text while every other tool call stays a call.
@@ -230,24 +247,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 						}
 
 					case *types.ReasoningContentBlockDeltaMemberSignature:
-						delta := &provider.Completion{
-							ID:    id,
-							Model: c.model,
-
-							Message: &provider.Message{
-								Role: provider.MessageRoleAssistant,
-
-								Content: []provider.Content{
-									provider.ReasoningContent(provider.Reasoning{
-										Signature: r.Value,
-									}),
-								},
-							},
-						}
-
-						if !yield(delta, nil) {
-							return
-						}
+						signatures[blockIndex] += r.Value
 
 					case *types.ReasoningContentBlockDeltaMemberRedactedContent:
 						delta := &provider.Completion{
@@ -334,6 +334,9 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				// Tool use blocks without input deltas would otherwise
 				// accumulate empty arguments downstream — normalize to "{}"
 				blockIndex := aws.ToInt32(v.Value.ContentBlockIndex)
+				if !flushSignature(blockIndex) {
+					return
+				}
 
 				if buffer, ok := customArgs[blockIndex]; ok {
 					delete(customArgs, blockIndex)
@@ -385,6 +388,11 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				}
 
 			case *types.ConverseStreamOutputMemberMessageStop:
+				for _, index := range slices.Sorted(maps.Keys(signatures)) {
+					if !flushSignature(index) {
+						return
+					}
+				}
 				messageStopped = true
 				if v.Value.StopReason == "" {
 					yield(nil, errors.New("bedrock: messageStop without a stop reason"))
@@ -799,7 +807,7 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 		}
 
 		tool.InputSchema = &types.ToolInputSchemaMemberJson{
-			Value: document.NewLazyDocument(properties),
+			Value: newDocument(properties),
 		}
 
 		if claude.MatchesModel(c.model, claude.NoForcedToolChoiceModels) {
@@ -855,7 +863,7 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 	fields, _ := c.converseAdditionalFields(options)
 
 	if len(fields) > 0 {
-		req.AdditionalModelRequestFields = document.NewLazyDocument(fields)
+		req.AdditionalModelRequestFields = newDocument(fields)
 	}
 
 	return req, nil
@@ -1104,7 +1112,9 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 
 			var data map[string]any
 
-			if err := json.Unmarshal([]byte(arguments), &data); err != nil || data == nil {
+			decoder := json.NewDecoder(strings.NewReader(arguments))
+			decoder.UseNumber()
+			if err := decoder.Decode(&data); err != nil || data == nil || decoder.Decode(new(any)) != io.EOF {
 				data = map[string]any{}
 			}
 
@@ -1113,7 +1123,7 @@ func convertAssistantContent(m provider.Message) ([]types.ContentBlock, error) {
 					ToolUseId: aws.String(toolid.Sanitize(c.ToolCall.ID, 64)),
 
 					Name:  aws.String(provider.FlattenToolName(*c.ToolCall)),
-					Input: document.NewLazyDocument(data),
+					Input: newDocument(data),
 				},
 			})
 		}
@@ -1177,7 +1187,7 @@ func (c *Completer) convertToolConfigPolicy(tools []provider.Tool, options *prov
 
 		if len(params) > 0 {
 			tool.InputSchema = &types.ToolInputSchemaMemberJson{
-				Value: document.NewLazyDocument(params),
+				Value: newDocument(params),
 			}
 		}
 

@@ -7,7 +7,7 @@ require (
 	cloud.google.com/go/translate v1.19.0
 	github.com/abemedia/go-cfb v0.2.0
 	github.com/adrianliechti/go-extract v0.0.0-20261002175639-224d63da6ec1
-	github.com/anthropics/anthropic-sdk-go v1.78.0
+	github.com/anthropics/anthropic-sdk-go v1.81.0
 	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.20
 	github.com/aws/aws-sdk-go-v2/config v1.33.6

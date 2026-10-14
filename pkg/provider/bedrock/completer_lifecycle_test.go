@@ -25,6 +25,7 @@ func (f lifecycleTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 // and its JSON payload.
 func scriptedCompleter(t *testing.T, events ...[2]string) *Completer {
 	t.Helper()
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
 
 	var body bytes.Buffer
 	encoder := eventstream.NewEncoder()

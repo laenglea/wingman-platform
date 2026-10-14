@@ -48,7 +48,7 @@ func TestDictionarySchemaStreamsAsText(t *testing.T) {
 		Config: &Config{model: "anthropic.claude-sonnet-4-6"},
 		client: bedrockruntime.New(bedrockruntime.Options{
 			Region: "us-east-1", Credentials: credentials.NewStaticCredentialsProvider("test", "test", ""),
-			HTTPClient: client, BaseEndpoint: aws.String("http://bedrock.test"),
+			HTTPClient: client, BaseEndpoint: aws.String("https://bedrock.test"),
 		}),
 	}
 	options := &provider.CompleteOptions{Schema: &provider.Schema{

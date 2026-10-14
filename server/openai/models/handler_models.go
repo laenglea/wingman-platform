@@ -10,6 +10,7 @@ import (
 func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 	result := &ModelList{
 		Object: "list",
+		Models: []Model{},
 	}
 
 	for _, m := range h.Models() {

@@ -19,7 +19,9 @@ import (
 func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 	var req ResponsesRequest
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -507,7 +509,7 @@ func responseOutputs(message *provider.Message, ids *messageIDs, status string, 
 
 		var messageID string
 		for _, content := range part.Content {
-			if content.Text != "" || content.Refusal != "" {
+			if content.Text != "" || content.TextPresent || content.Refusal != "" {
 				messageID = ids.get(i, content.MessageID)
 				break
 			}
@@ -571,7 +573,7 @@ func messageOutputs(message *provider.Message, messageID, status string, opts re
 			}
 		}
 
-		if messageItem == nil && (content.Text != "" || content.Refusal != "") {
+		if messageItem == nil && (content.Text != "" || content.TextPresent || content.Refusal != "") {
 			messageItem = &OutputMessage{ID: messageID, Role: MessageRoleAssistant, Status: status, Phase: phase, Contents: []OutputContent{}}
 			output = append(output, ResponseOutput{
 				Type:          ResponseOutputTypeMessage,
@@ -582,7 +584,7 @@ func messageOutputs(message *provider.Message, messageID, status string, opts re
 			refusalEmitted = true
 			messageItem.Contents = append(messageItem.Contents, OutputContent{Type: "refusal", Text: refusal})
 		}
-		if content.Text != "" && !textEmitted {
+		if (content.Text != "" || content.TextPresent) && !textEmitted {
 			textEmitted = true
 			messageItem.Contents = append(messageItem.Contents, OutputContent{
 				Type: "output_text", Text: text, Annotations: []any{}, Logprobs: []any{},
@@ -1314,7 +1316,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 
 		case StreamEventOutputItemDone:
 			content := []OutputContent{}
-			if event.Text != "" {
+			if event.Text != "" || event.TextPresent {
 				content = append(content, OutputContent{
 					Type:        "output_text",
 					Text:        event.Text,

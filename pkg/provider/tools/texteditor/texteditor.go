@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
@@ -79,7 +80,7 @@ func (in Input) Map() map[string]any {
 	data, _ := json.Marshal(in)
 
 	result := map[string]any{}
-	json.Unmarshal(data, &result)
+	jsonutil.Unmarshal(data, &result)
 
 	return result
 }

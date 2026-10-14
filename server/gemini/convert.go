@@ -21,6 +21,9 @@ func toMessages(systemInstruction *Content, contents []*Content) ([]provider.Mes
 	if systemInstruction != nil && len(systemInstruction.Parts) > 0 {
 		var systemText string
 		for _, part := range systemInstruction.Parts {
+			if part == nil {
+				continue
+			}
 			if part.Text != "" {
 				if systemText != "" {
 					systemText += "\n"
@@ -41,6 +44,9 @@ func toMessages(systemInstruction *Content, contents []*Content) ([]provider.Mes
 	pendingCallIDs := map[string][]string{}
 
 	for _, c := range contents {
+		if c == nil {
+			continue
+		}
 		message, err := toMessage(*c, pendingCallIDs)
 		if err != nil {
 			return nil, err
@@ -55,17 +61,20 @@ func toMessage(c Content, pendingCallIDs map[string][]string) (*provider.Message
 	var role provider.MessageRole
 
 	switch c.Role {
-	case "user":
+	case "", "user":
 		role = provider.MessageRoleUser
 	case "model":
 		role = provider.MessageRoleAssistant
 	default:
-		role = provider.MessageRoleUser
+		return nil, fmt.Errorf("Please use a valid role: user, model.")
 	}
 
 	var content []provider.Content
 
 	for _, part := range c.Parts {
+		if part == nil {
+			continue
+		}
 		sig := string(part.ThoughtSignature)
 		// Native Gemini signatures are binary; Interactions expects base64.
 		// Wingman's realm-tagged signatures already hold the encoded value.
@@ -130,7 +139,11 @@ func toMessage(c Content, pendingCallIDs map[string][]string) (*provider.Message
 
 		// Function call (in model/assistant messages)
 		if part.FunctionCall != nil {
-			args, err := toJSONString(part.FunctionCall.Args)
+			arguments := part.FunctionCall.Args
+			if arguments == nil {
+				arguments = map[string]any{}
+			}
+			args, err := toJSONString(arguments)
 			if err != nil {
 				return nil, err
 			}
@@ -180,13 +193,25 @@ func toMessage(c Content, pendingCallIDs map[string][]string) (*provider.Message
 					})
 				}
 				if p.FileData != nil {
-					parts = append(parts, provider.Part{
-						File: &provider.File{
-							Name:        p.FileData.DisplayName,
-							Content:     []byte(p.FileData.FileUri),
-							ContentType: p.FileData.MimeType,
-						},
-					})
+					uri := p.FileData.FileUri
+
+					if !strings.HasPrefix(uri, "http://") && !strings.HasPrefix(uri, "https://") {
+						return nil, fmt.Errorf("fileData.fileUri %q is not supported: only http(s) URLs can be fetched", uri)
+					}
+
+					file, err := files.FromURL(uri)
+					if err != nil {
+						return nil, err
+					}
+
+					if p.FileData.DisplayName != "" {
+						file.Name = p.FileData.DisplayName
+					}
+					if p.FileData.MimeType != "" {
+						file.ContentType = p.FileData.MimeType
+					}
+
+					parts = append(parts, provider.Part{File: file})
 				}
 			}
 
@@ -237,7 +262,13 @@ func toTools(tools []*Tool, strict bool) []provider.Tool {
 	var result []provider.Tool
 
 	for _, t := range tools {
+		if t == nil {
+			continue
+		}
 		for _, fd := range t.FunctionDeclarations {
+			if fd == nil {
+				continue
+			}
 			// Handle parameters - could be from Parameters or ParametersJsonSchema (CLI format)
 			var params map[string]any
 
@@ -291,7 +322,7 @@ func toContent(content []provider.Content) *Content {
 				if c.Reasoning.Signature != "" {
 					// A replayed signature precedes the part it belongs to; a
 					// terminal signature-only delta belongs to the preceding part.
-					beforePart := beforeCall || i+1 < len(content) && content[i+1].Text != ""
+					beforePart := beforeCall || i+1 < len(content) && (content[i+1].Text != "" || content[i+1].Refusal != "")
 					if n := len(parts); !beforePart && n > 0 && len(parts[n-1].ThoughtSignature) == 0 && !parts[n-1].Thought {
 						parts[n-1].ThoughtSignature = google.DecodeThoughtSignature(c.Reasoning.Signature)
 					} else {
@@ -317,9 +348,9 @@ func toContent(content []provider.Content) *Content {
 			parts = append(parts, part)
 		}
 
-		if c.Text != "" {
+		if text := c.Text + c.Refusal; text != "" {
 			part := &Part{
-				Text: c.Text,
+				Text: text,
 			}
 			if pendingSig != "" {
 				part.ThoughtSignature = google.DecodeThoughtSignature(pendingSig)
@@ -332,7 +363,9 @@ func toContent(content []provider.Content) *Content {
 			var args map[string]any
 
 			if c.ToolCall.Arguments != "" {
-				json.Unmarshal([]byte(c.ToolCall.Arguments), &args)
+				if err := decodeJSON(strings.NewReader(c.ToolCall.Arguments), &args); err != nil {
+					args = nil
+				}
 			}
 
 			if args == nil {
@@ -374,8 +407,21 @@ func toContent(content []provider.Content) *Content {
 	}
 }
 
-func toFinishReason(status provider.CompletionStatus, content []provider.Content) FinishReason {
-	switch status {
+func toFinishReason(completion *provider.Completion) FinishReason {
+	if completion == nil {
+		return FinishReasonStop
+	}
+
+	switch completion.StopReason {
+	case provider.StopReasonMaxTokens, provider.StopReasonContextExceeded:
+		return FinishReasonMaxTokens
+	case provider.StopReasonRefusal:
+		return FinishReasonSafety
+	case provider.StopReasonEndTurn, provider.StopReasonStopSequence, provider.StopReasonToolUse:
+		return FinishReasonStop
+	}
+
+	switch completion.Status {
 	case provider.CompletionStatusIncomplete:
 		return FinishReasonMaxTokens
 	case provider.CompletionStatusRefused:
@@ -384,11 +430,13 @@ func toFinishReason(status provider.CompletionStatus, content []provider.Content
 		return FinishReasonOther
 	}
 
-	for _, c := range content {
-		if c.ToolCall != nil {
-			// Gemini reports STOP for assistant turns that include function
-			// calls; the SDK detects the calls in the candidate parts.
-			return FinishReasonStop
+	if completion.Message != nil {
+		for _, c := range completion.Message.Content {
+			if c.ToolCall != nil {
+				// Gemini reports STOP for assistant turns that include function
+				// calls; the SDK detects the calls in the candidate parts.
+				return FinishReasonStop
+			}
 		}
 	}
 
