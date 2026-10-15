@@ -48,6 +48,15 @@ func NewCompleter(model string, options ...Option) (*Completer, error) {
 }
 
 func (c *Completer) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
+	if options != nil {
+		switch options.Tier {
+		case "", provider.TierDefault, provider.TierPriority:
+		default:
+			cloned := *options
+			cloned.Tier = ""
+			options = &cloned
+		}
+	}
 	messages = provider.ResolveInstructions(messages)
 	messages, options = provider.ResolveConfigurationUpdates(messages, options)
 	messages, options = toolsearch.Inline(messages, options)

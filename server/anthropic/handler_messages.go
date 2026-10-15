@@ -84,6 +84,12 @@ func toCompleteOptions(req MessageRequest) (*provider.CompleteOptions, error) {
 
 		Stop: req.StopSequences,
 	}
+	switch req.Speed {
+	case "standard":
+		options.Tier = provider.TierDefault
+	case "fast":
+		options.Tier = provider.TierPriority
+	}
 
 	if req.ToolChoice != nil {
 		switch req.ToolChoice.Type {
@@ -405,6 +411,8 @@ func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request,
 			}
 		}
 	}
+
+	result.Usage.Speed = speedFromTier(completion.Tier)
 
 	if completion.Message != nil {
 		result.Content = toContentBlocks(completion.Message.Content)

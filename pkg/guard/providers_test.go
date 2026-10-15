@@ -60,7 +60,7 @@ func (p *stubSearcher) Search(ctx context.Context, query string, options *search
 	return []searcher.Result{{Source: "https://example.com"}}, nil
 }
 
-func (p *stubSearcher) Capabilities() searcher.Capabilities {
+func (p *stubSearcher) SearchCapabilities() searcher.Capabilities {
 	return searcher.Capabilities{DateFilters: true}
 }
 
@@ -130,7 +130,7 @@ func TestGuardForwardsAllowedRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !guardedSearcher.Capabilities().DateFilters {
+	if !guardedSearcher.SearchCapabilities().DateFilters {
 		t.Fatal("capabilities not forwarded")
 	}
 

@@ -16,13 +16,17 @@ const (
 
 // GenerateContentRequest is the request body for generateContent
 type GenerateContentRequest struct {
-	Model             string            `json:"model,omitempty"` // only inside countTokens.generateContentRequest
-	Contents          []*Content        `json:"contents,omitempty"`
-	SystemInstruction *Content          `json:"systemInstruction,omitempty"`
-	Tools             []*Tool           `json:"tools,omitempty"`
-	ToolConfig        *ToolConfig       `json:"toolConfig,omitempty"`
-	GenerationConfig  *GenerationConfig `json:"generationConfig,omitempty"`
-	SafetySettings    []*SafetySetting  `json:"safetySettings,omitempty"`
+	Model string `json:"model,omitempty"` // only inside countTokens.generateContentRequest
+	Tier  string `json:"serviceTier,omitempty"`
+
+	Contents          []*Content `json:"contents,omitempty"`
+	SystemInstruction *Content   `json:"systemInstruction,omitempty"`
+
+	Tools      []*Tool     `json:"tools,omitempty"`
+	ToolConfig *ToolConfig `json:"toolConfig,omitempty"`
+
+	GenerationConfig *GenerationConfig `json:"generationConfig,omitempty"`
+	SafetySettings   []*SafetySetting  `json:"safetySettings,omitempty"`
 }
 
 type ThinkingConfig struct {
@@ -120,20 +124,25 @@ type FunctionCallingConfig struct {
 
 // GenerationConfig contains generation parameters
 type GenerationConfig struct {
-	StopSequences      []string        `json:"stopSequences,omitempty"`
-	MaxOutputTokens    *int            `json:"maxOutputTokens,omitempty"`
-	CandidateCount     *int            `json:"candidateCount,omitempty"`
-	Seed               *int            `json:"seed,omitempty"`
-	PresencePenalty    *float32        `json:"presencePenalty,omitempty"`
-	FrequencyPenalty   *float32        `json:"frequencyPenalty,omitempty"`
-	ResponseLogprobs   bool            `json:"responseLogprobs,omitempty"`
-	Logprobs           *int            `json:"logprobs,omitempty"`
-	ResponseMimeType   string          `json:"responseMimeType,omitempty"`
-	ResponseSchema     any             `json:"responseSchema,omitempty"`
-	ResponseJsonSchema any             `json:"responseJsonSchema,omitempty"`
-	ResponseModalities []string        `json:"responseModalities,omitempty"`
-	MediaResolution    string          `json:"mediaResolution,omitempty"`
-	ThinkingConfig     *ThinkingConfig `json:"thinkingConfig,omitempty"`
+	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
+	StopSequences   []string `json:"stopSequences,omitempty"`
+	CandidateCount  *int     `json:"candidateCount,omitempty"`
+
+	ThinkingConfig *ThinkingConfig `json:"thinkingConfig,omitempty"`
+
+	ResponseMimeType   string `json:"responseMimeType,omitempty"`
+	ResponseSchema     any    `json:"responseSchema,omitempty"`
+	ResponseJsonSchema any    `json:"responseJsonSchema,omitempty"`
+
+	ResponseModalities []string `json:"responseModalities,omitempty"`
+	MediaResolution    string   `json:"mediaResolution,omitempty"`
+
+	Seed             *int     `json:"seed,omitempty"`
+	PresencePenalty  *float32 `json:"presencePenalty,omitempty"`
+	FrequencyPenalty *float32 `json:"frequencyPenalty,omitempty"`
+
+	ResponseLogprobs bool `json:"responseLogprobs,omitempty"`
+	Logprobs         *int `json:"logprobs,omitempty"`
 }
 
 // SafetySetting configures safety thresholds
@@ -144,12 +153,15 @@ type SafetySetting struct {
 
 // GenerateContentResponse is the response from generateContent
 type GenerateContentResponse struct {
-	ResponseId     string          `json:"responseId,omitempty"`
-	Candidates     []*Candidate    `json:"candidates,omitempty"`
-	UsageMetadata  *UsageMetadata  `json:"usageMetadata,omitempty"`
-	ModelVersion   string          `json:"modelVersion,omitempty"`
+	ResponseId   string `json:"responseId,omitempty"`
+	ModelVersion string `json:"modelVersion,omitempty"`
+
+	Candidates []*Candidate `json:"candidates,omitempty"`
+
 	PromptFeedback *PromptFeedback `json:"promptFeedback,omitempty"`
 	Error          *APIError       `json:"error,omitempty"`
+
+	UsageMetadata *UsageMetadata `json:"usageMetadata,omitempty"`
 }
 
 // Candidate is a single response candidate
@@ -181,6 +193,8 @@ type UsageMetadata struct {
 	CacheTokensDetails         []*ModalityTokenCount `json:"cacheTokensDetails,omitempty"`
 	CandidatesTokensDetails    []*ModalityTokenCount `json:"candidatesTokensDetails,omitempty"`
 	ToolUsePromptTokensDetails []*ModalityTokenCount `json:"toolUsePromptTokensDetails,omitempty"`
+
+	Tier string `json:"serviceTier,omitempty"`
 }
 
 // ModalityTokenCount reports tokens broken down by modality.

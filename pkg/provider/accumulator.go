@@ -3,8 +3,10 @@ package provider
 import "strings"
 
 type CompletionAccumulator struct {
-	id               string
-	model            string
+	id    string
+	model string
+
+	tier             Tier
 	reasoningContext ReasoningContext
 
 	status       CompletionStatus
@@ -12,8 +14,7 @@ type CompletionAccumulator struct {
 	stopDetails  *StopDetails
 	stopSequence string
 
-	role MessageRole
-
+	role     MessageRole
 	messages []*accumulatedMessage
 
 	reasonings  []Reasoning
@@ -23,16 +24,18 @@ type CompletionAccumulator struct {
 	toolCalls   []ToolCall
 	toolResults []ToolResult
 
-	usage *Usage
-
 	contentOrder []accumulatedContentRef
+
+	usage *Usage
 }
 
 type accumulatedMessage struct {
-	id      string
-	phase   MessagePhase
-	text    strings.Builder
+	id    string
+	phase MessagePhase
+
 	hasText bool
+
+	text    strings.Builder
 	refusal strings.Builder
 }
 
@@ -69,9 +72,14 @@ func (a *CompletionAccumulator) Add(c Completion) {
 		a.id = c.ID
 	}
 
+	if c.Tier != "" {
+		a.tier = c.Tier
+	}
+
 	if c.Model != "" {
 		a.model = c.Model
 	}
+
 	if c.Reasoning != "" {
 		a.reasoningContext = c.Reasoning
 	}
@@ -361,6 +369,7 @@ func (a *CompletionAccumulator) Result() *Completion {
 		ID:        a.id,
 		Model:     a.model,
 		Reasoning: a.reasoningContext,
+		Tier:      a.tier,
 
 		Status:       a.status,
 		StopReason:   a.stopReason,

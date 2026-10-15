@@ -49,6 +49,14 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 		if options == nil {
 			options = new(provider.CompleteOptions)
 		}
+		emitted := false
+		forward := yield
+		yield = func(delta *provider.Completion, err error) bool {
+			if delta != nil {
+				emitted = true
+			}
+			return forward(delta, err)
+		}
 
 		req, err := r.convertResponsesRequest(messages, options)
 
@@ -93,6 +101,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 
 		var responseID, responseModel string
 		var reasoningContext provider.ReasoningContext
+		var tier provider.Tier
 		var searchCallID string
 
 		emit := func(content provider.Content, status provider.CompletionStatus) bool {
@@ -101,6 +110,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 				Model:     responseModel,
 				Status:    status,
 				Reasoning: reasoningContext,
+				Tier:      tier,
 
 				Message: &provider.Message{
 					Role:    provider.MessageRoleAssistant,
@@ -122,6 +132,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 				Status:    status,
 				Usage:     usage,
 				Reasoning: reasoningContext,
+				Tier:      tier,
 			}, nil)
 		}
 
@@ -158,6 +169,9 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 			}
 			if data.Response.Reasoning.Context != "" {
 				reasoningContext = provider.ReasoningContext(data.Response.Reasoning.Context)
+			}
+			if data.Response.ServiceTier != "" {
+				tier = provider.NormalizeTier(string(data.Response.ServiceTier))
 			}
 
 			switch event := data.AsAny().(type) {
@@ -401,6 +415,12 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 		}
 
 		if err := stream.Err(); err != nil && (stops == nil || !stops.done) {
+			if !emitted && req.ServiceTier != "" && unsupportedTier(err) {
+				fallback := *options
+				fallback.Tier = ""
+				r.Complete(ctx, messages, &fallback)(yield)
+				return
+			}
 			yield(nil, convertError(err))
 			return
 		}
@@ -439,8 +459,10 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		return nil, err
 	}
 
+	tier := provider.ParseTier(string(options.Tier))
 	req := &responses.ResponseNewParams{
-		Model: r.model,
+		ServiceTier: responses.ResponseNewParamsServiceTier(tier),
+		Model:       r.model,
 
 		Store: openai.Bool(false),
 

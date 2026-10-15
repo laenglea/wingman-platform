@@ -13,10 +13,8 @@ type Completer interface {
 type Message struct {
 	// ID identifies the message as an item of a stateful realtime session so
 	// a client can refer to it later, e.g. to delete it. Empty elsewhere.
-	ID string
-
+	ID   string
 	Role MessageRole
-
 	// Phase labels an assistant message item (commentary or final answer) in
 	// replayed history and in SplitMessages results. Streamed parts carry
 	// their phase on Content instead.
@@ -194,20 +192,19 @@ type Content struct {
 	// cache already covers everything before it.
 	CacheControl *CacheControl
 
-	Text    string
-	Refusal string
+	Text string
 	// TextPresent distinguishes an explicit empty output_text part from a
 	// message-start marker that has not produced any content yet.
 	TextPresent bool
+	Refusal     string
+	File        *File
 
-	File *File
+	Reasoning         *Reasoning
+	Compaction        *Compaction
+	CompactionTrigger bool
 
-	Reasoning  *Reasoning
-	Compaction *Compaction
-
-	CompactionTrigger   bool
-	ConfigurationUpdate *ConfigurationUpdate
 	Instructions        *Instructions
+	ConfigurationUpdate *ConfigurationUpdate
 
 	ToolCall   *ToolCall
 	ToolResult *ToolResult
@@ -288,19 +285,20 @@ const (
 )
 
 type CompleteOptions struct {
-	Stop []string
+	Tier Tier
 
 	MaxTokens *int
+	Stop      []string
 
 	Tools       []Tool
 	ToolOptions *ToolOptions
 
-	OutputOptions     *OutputOptions
-	ReasoningOptions  *ReasoningOptions
+	ReasoningOptions *ReasoningOptions
+	OutputOptions    *OutputOptions
+	Schema           *Schema
+
 	CompactionOptions *CompactionOptions
 	CacheOptions      *CacheOptions
-
-	Schema *Schema
 }
 
 type CompletionStatus string
@@ -328,14 +326,16 @@ const (
 )
 
 type Completion struct {
-	ID string
+	ID    string
+	Model string
 
-	Model  string
-	Status CompletionStatus
-
+	// Tier is the effective tier reported by the backend, not the
+	// request preference. Empty means the backend did not report a tier.
+	Tier Tier
 	// Reasoning is the effective context mode reported by the provider.
 	Reasoning ReasoningContext
 
+	Status       CompletionStatus
 	StopReason   StopReason
 	StopDetails  *StopDetails
 	StopSequence string

@@ -17,7 +17,7 @@ func (stubSearcher) Search(ctx context.Context, query string, options *searcher.
 	return nil, nil
 }
 
-func (stubSearcher) Capabilities() searcher.Capabilities {
+func (stubSearcher) SearchCapabilities() searcher.Capabilities {
 	return searcher.Capabilities{}
 }
 

@@ -30,6 +30,9 @@ func TestResponseEnvelopeMatchesReference(t *testing.T) {
 	for _, field := range []string{"temperature", "top_p", "top_k"} {
 		delete(reference, field)
 	}
+	// Effective billing metadata is tested separately; this fake backend
+	// does not report a service tier.
+	reference["service_tier"] = nil
 	for _, stream := range []bool{false, true} {
 		t.Run(map[bool]string{false: "json", true: "stream"}[stream], func(t *testing.T) {
 			cfg := &config.Config{Policy: noop.New()}

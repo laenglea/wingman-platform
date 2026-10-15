@@ -63,6 +63,7 @@ func TestToolCallingMultiTurnHTTP(t *testing.T) {
 
 	for _, model := range gemini.DefaultModels() {
 		t.Run(model.Name, func(t *testing.T) {
+			h.SkipUnlessConfigured(t, model.Name)
 			turn1 := map[string]any{
 				"contents": []map[string]any{
 					{"role": "user", "parts": []map[string]any{{"text": "What's the weather in London?"}}},

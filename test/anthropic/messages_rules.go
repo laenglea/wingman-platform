@@ -20,6 +20,7 @@ func DefaultMessagesResponseRules() map[string]harness.FieldRule {
 		"usage.cache_creation_input_tokens":           harness.FieldPresence,
 		"usage.cache_read_input_tokens":               harness.FieldPresence,
 		"usage.service_tier":                          harness.FieldIgnore,
+		"usage.speed":                                 harness.FieldIgnore,
 		"usage.inference_geo":                         harness.FieldIgnore,
 	}
 }
@@ -35,6 +36,7 @@ func DefaultMessagesSSERules() map[string]harness.FieldRule {
 		"message.usage.cache_read_input_tokens":     harness.FieldIgnore,
 		"message.usage.cache_creation":              harness.FieldIgnore,
 		"message.usage.service_tier":                harness.FieldIgnore,
+		"message.usage.speed":                       harness.FieldIgnore,
 		"message.usage.inference_geo":               harness.FieldIgnore,
 
 		"delta.text":         harness.FieldIgnore,

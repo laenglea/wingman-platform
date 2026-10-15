@@ -9,17 +9,24 @@ import (
 // Request types
 
 type MessageRequest struct {
-	Model             string             `json:"model"`
-	Messages          []MessageParam     `json:"messages"`
-	System            any                `json:"system,omitempty"` // string or text blocks
-	MaxTokens         *int               `json:"max_tokens"`
-	Stream            bool               `json:"stream,omitempty"`
-	StopSequences     []string           `json:"stop_sequences,omitempty"`
-	Tools             []ToolParam        `json:"tools,omitempty"`
-	ToolChoice        *ToolChoice        `json:"tool_choice,omitempty"`
-	OutputFormat      *OutputFormat      `json:"output_format,omitempty"`
-	OutputConfig      *OutputConfig      `json:"output_config,omitempty"`
-	Thinking          *ThinkingConfig    `json:"thinking,omitempty"`
+	Model string `json:"model"`
+
+	Messages []MessageParam `json:"messages"`
+	System   any            `json:"system,omitempty"` // string or text blocks
+
+	Stream bool `json:"stream,omitempty"`
+
+	Speed         string   `json:"speed,omitempty"`
+	MaxTokens     *int     `json:"max_tokens"`
+	StopSequences []string `json:"stop_sequences,omitempty"`
+
+	Tools      []ToolParam `json:"tools,omitempty"`
+	ToolChoice *ToolChoice `json:"tool_choice,omitempty"`
+
+	Thinking     *ThinkingConfig `json:"thinking,omitempty"`
+	OutputConfig *OutputConfig   `json:"output_config,omitempty"`
+	OutputFormat *OutputFormat   `json:"output_format,omitempty"`
+
 	ContextManagement *ContextManagement `json:"context_management,omitempty"`
 	Compaction        *CompactionConfig  `json:"compaction,omitempty"`
 }
@@ -172,21 +179,24 @@ type CountTokensResponse struct {
 // Response types
 
 type Message struct {
-	ID           string         `json:"id"`
-	Type         string         `json:"type"` // "message"
-	Role         string         `json:"role"` // "assistant"
-	Content      []ContentBlock `json:"content"`
-	Model        string         `json:"model"`
-	StopReason   *StopReason    `json:"stop_reason"`
-	StopDetails  *StopDetails   `json:"stop_details"`
-	StopSequence *string        `json:"stop_sequence"`
-	Usage        Usage          `json:"usage"`
+	ID    string `json:"id"`
+	Type  string `json:"type"` // "message"
+	Model string `json:"model"`
+	Role  string `json:"role"` // "assistant"
+
+	StopReason   *StopReason  `json:"stop_reason"`
+	StopDetails  *StopDetails `json:"stop_details"`
+	StopSequence *string      `json:"stop_sequence"`
+
+	Content []ContentBlock `json:"content"`
 
 	// Container is the code execution container of the turn. No backend runs
 	// one through the gateway, so it is null, as on turns without one.
 	Container *Container `json:"container"`
 	// No prompt-cache diagnostics are requested by the gateway.
 	Diagnostics json.RawMessage `json:"diagnostics"`
+
+	Usage Usage `json:"usage"`
 }
 
 // Container identifies a server-side code execution container.
@@ -271,6 +281,7 @@ type Usage struct {
 	CacheCreationInputTokens int            `json:"cache_creation_input_tokens"`
 	CacheCreation            *CacheCreation `json:"cache_creation,omitempty"`
 
+	Speed        string `json:"speed,omitempty"`
 	ServiceTier  string `json:"service_tier,omitempty"`
 	InferenceGeo string `json:"inference_geo,omitempty"`
 }

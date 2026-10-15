@@ -42,38 +42,32 @@ type ChatCompletionRequest struct {
 
 	Messages []ChatCompletionMessage `json:"messages"`
 
-	ReasoningEffort ReasoningEffort `json:"reasoning_effort,omitempty"`
-	Verbosity       Verbosity       `json:"verbosity,omitempty"`
-
-	Stream bool   `json:"stream,omitempty"`
-	Stop   any    `json:"stop,omitempty"`
-	Tools  []Tool `json:"tools,omitempty"`
-
-	ToolChoice        *ToolChoice `json:"tool_choice,omitempty"`
-	ParallelToolCalls *bool       `json:"parallel_tool_calls,omitempty"`
+	Stream        bool                         `json:"stream,omitempty"`
+	StreamOptions *ChatCompletionStreamOptions `json:"stream_options,omitempty"`
 
 	MaxCompletionTokens *int `json:"max_completion_tokens,omitempty"`
 	MaxTokens           *int `json:"max_tokens,omitempty"` // deprecated alias of max_completion_tokens
+	Stop                any  `json:"stop,omitempty"`
 
-	ResponseFormat *ChatCompletionResponseFormat `json:"response_format,omitempty"`
+	ReasoningEffort ReasoningEffort               `json:"reasoning_effort,omitempty"`
+	Verbosity       Verbosity                     `json:"verbosity,omitempty"`
+	ResponseFormat  *ChatCompletionResponseFormat `json:"response_format,omitempty"`
+
+	Tools             []Tool      `json:"tools,omitempty"`
+	ToolChoice        *ToolChoice `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool       `json:"parallel_tool_calls,omitempty"`
 
 	PromptCacheKey       *string             `json:"prompt_cache_key,omitempty"`
 	PromptCacheRetention *string             `json:"prompt_cache_retention,omitempty"`
 	PromptCacheOptions   *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
 
-	StreamOptions *ChatCompletionStreamOptions `json:"stream_options,omitempty"`
-
 	// frequency_penalty *float32
 	// presence_penalty *float32
-
 	// logit_bias
 	// logprobs *bool
 	// top_logprobs *int
-
 	// n *int
-
 	// seed *int
-
 	// user string
 }
 
@@ -118,19 +112,18 @@ type Schema struct {
 
 // https://platform.openai.com/docs/api-reference/chat/object
 type ChatCompletion struct {
-	Object string `json:"object"` // "chat.completion" | "chat.completion.chunk"
+	ID                string  `json:"id"`
+	Object            string  `json:"object"` // "chat.completion" | "chat.completion.chunk"
+	Model             string  `json:"model"`
+	SystemFingerprint *string `json:"system_fingerprint"`
 
-	ID string `json:"id"`
+	ServiceTier string `json:"service_tier,omitempty"`
 
-	Model   string `json:"model"`
-	Created int64  `json:"created"`
+	Created int64 `json:"created"`
 
 	Choices []ChatCompletionChoice `json:"choices"`
 
 	Usage *Usage `json:"usage,omitempty"`
-
-	ServiceTier       string  `json:"service_tier,omitempty"`
-	SystemFingerprint *string `json:"system_fingerprint"`
 }
 
 // https://platform.openai.com/docs/api-reference/chat/object
@@ -147,14 +140,14 @@ type ChatCompletionChoice struct {
 type ChatCompletionMessage struct {
 	Role MessageRole `json:"role,omitempty"`
 
-	Content *string `json:"content,omitempty"`
-	Refusal *string `json:"refusal,omitempty"`
-
+	Content  *string          `json:"content,omitempty"`
 	Contents []MessageContent `json:"-"`
+	Refusal  *string          `json:"refusal,omitempty"`
 
-	ToolCalls   []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID  string     `json:"tool_call_id,omitempty"`
-	Annotations []any      `json:"annotations,omitzero"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+
+	Annotations []any `json:"annotations,omitzero"`
 }
 
 type MessageContentType string

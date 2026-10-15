@@ -95,6 +95,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 
 			InferenceConfig: req.InferenceConfig,
 			OutputConfig:    req.OutputConfig,
+			ServiceTier:     req.ServiceTier,
 
 			AdditionalModelRequestFields: req.AdditionalModelRequestFields,
 		}
@@ -455,6 +456,9 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					},
 
 					Usage: toUsage(v.Value.Usage),
+				}
+				if v.Value.ServiceTier != nil {
+					delta.Tier = provider.NormalizeTier(string(v.Value.ServiceTier.Type))
 				}
 
 				if !yield(delta, nil) {
@@ -858,6 +862,11 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 
 		InferenceConfig: inference,
 		OutputConfig:    output,
+	}
+	switch options.Tier {
+	case "":
+	case provider.TierDefault, provider.TierFlex, provider.TierPriority:
+		req.ServiceTier = &types.ServiceTier{Type: types.ServiceTierType(options.Tier)}
 	}
 
 	fields, _ := c.converseAdditionalFields(options)

@@ -112,6 +112,7 @@ func TestTextEditorSSE(t *testing.T) {
 		}
 
 		t.Run(model.Name, func(t *testing.T) {
+			h.SkipUnlessConfigured(t, model.Name)
 			anthropicBody := anthropic.WithModel(map[string]any{
 				"max_tokens": 4096,
 				"stream":     true,

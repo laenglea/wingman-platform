@@ -170,6 +170,7 @@ func (c *Agent) Complete(ctx context.Context, messages []provider.Message, optio
 		inputToolOptions := mergeToolOptions(opts.ToolOptions, slices.Collect(maps.Keys(agentTools)))
 
 		inputOptions := &provider.CompleteOptions{
+			Tier:        opts.Tier,
 			Stop:        opts.Stop,
 			Tools:       slices.Collect(maps.Values(inputTools)),
 			ToolOptions: inputToolOptions,
@@ -202,6 +203,7 @@ func (c *Agent) Complete(ctx context.Context, messages []provider.Message, optio
 					ID:        accID,
 					Model:     c.model,
 					Reasoning: completion.Reasoning,
+					Tier:      completion.Tier,
 
 					Usage: completion.Usage,
 				}

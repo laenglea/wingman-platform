@@ -43,6 +43,7 @@ Prompt caching is on by default on every backend that supports it: the stable pr
 | `model`                | String       | Model ID                                            |
 | `input`                | String/Array | Input text or conversation messages                 |
 | `stream`               | Boolean      | Enable streaming                                    |
+| `service_tier`         | String       | Best-effort processing tier: `auto`, `default`, `flex`, or `priority` |
 | `max_output_tokens`    | Integer      | Maximum tokens to generate                          |
 | `tools`                | Array        | Available tools/functions                           |
 | `tool_choice`          | String/Object| Tool selection mode (auto, none, required)          |
@@ -58,6 +59,25 @@ Prompt caching is on by default on every backend that supports it: the stable pr
 | `prompt_cache_options` | Object       | `mode` `implicit` (default) or `explicit`; explicit caches only at `prompt_cache_breakpoint` parts |
 
 Prompt caching is on by default on every backend that supports it: the stable prefix is cached automatically, as on OpenAI, and cached tokens are reported in `usage.input_tokens_details.cached_tokens`. A `prompt_cache_breakpoint` on an input content part marks the end of a reusable prefix: GPT-5.6 and later take it natively, Claude backends receive it as a cache breakpoint, and other backends keep caching implicitly.
+
+Processing tier preferences use `Tier` internally and `service_tier` on the OpenAI-compatible wire. `auto`, omission, and unknown values keep the backend's default and share the empty internal value. `default` explicitly requests standard processing. Known values map as follows; unsupported preferences are omitted:
+
+| Provider | `auto` | `default` | `flex` | `priority` |
+|----------|--------|-----------|--------|------------|
+| OpenAI / Azure OpenAI | Omit | `default` | `flex` | `priority` |
+| Gemini Interactions | Omit | `standard` | `flex` | `priority` |
+| Bedrock Converse | Omit | `default` | `flex` | `priority` |
+| Claude direct | Omit | `speed: standard` | Omit | `speed: fast` |
+| xAI | Omit | `default` | Omit | `priority` |
+| Other OpenAI-compatible endpoints | Pass through | Pass through | Pass through | Pass through |
+
+Availability still depends on the model, account, and region. OpenAI-compatible endpoints that explicitly reject `service_tier` with HTTP 400/422 are retried once without it, before any output is delivered. OpenAI-compatible capacity errors such as HTTP 429 are returned normally. Mistral's native selectors are `auto` and `standard_only`; through the generic adapter, rejected common values fall back to omission. OpenRouter supports Flex routing and priority routing with its own fallback rules.
+
+Claude's mapping uses fast inference rather than its legacy Priority Tier capacity. `usage.speed: fast` maps back to `priority`, and `standard` maps to `default`. Unsupported fast mode (HTTP 400/422 referring to speed/fast) or unavailable fast capacity (HTTP 429/529) triggers one retry at standard speed before any completion is delivered. Bedrock uses AWS's native processing tiers separately. See [Claude fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode).
+
+The response's `service_tier` reports the provider's effective tier, including downgrades. Native `standard` is returned as `default`. It is `null` before the provider reports it or when that metadata is unavailable; the requested preference is never used as proof of the tier actually served.
+
+References (checked 2026-10-16): [OpenAI Flex](https://developers.openai.com/api/docs/guides/flex-processing), [OpenAI Priority/Fast](https://developers.openai.com/api/docs/guides/fast-mode), [Azure](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/flex-processing), [Gemini Flex](https://ai.google.dev/gemini-api/docs/flex-inference?hl=en), [Gemini Priority](https://ai.google.dev/gemini-api/docs/priority-inference), [Bedrock](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ServiceTier.html), [Claude](https://platform.claude.com/docs/en/api/service-tiers), [xAI](https://docs.x.ai/developers/advanced-api-usage/priority-processing), [OpenRouter](https://openrouter.ai/docs/guides/features/service-tiers), [Mistral](https://docs.mistral.ai/inference/priority-tier).
 
 ## Decisions
 
@@ -212,6 +232,7 @@ Anthropic-compatible endpoints. See [Anthropic API Reference](https://docs.anthr
 | `output_format`       | Object       | Structured output with JSON schema             |
 | `output_config`       | Object       | Structured output and reasoning effort         |
 | `thinking`            | Object       | Thinking configuration (type, budget_tokens)   |
+| `speed`               | String       | `standard` maps to `TierDefault`; `fast` maps to `TierPriority`, with best-effort backend support |
 | `context_management`  | Object       | Context management with compaction edits       |
 | `compaction`          | Object       | `{"type":"summarize"}` requests on-demand Claude compaction |
 | `cache_control`       | Object       | Breakpoints on system and message blocks; the prefix is cached by default on Claude backends, GPT-5.6 and later receive them as `prompt_cache_breakpoint`, and `ttl: "1h"` asks for extended retention |
@@ -245,6 +266,9 @@ Gemini-compatible endpoints. See [Gemini API Reference](https://ai.google.dev/ap
 | `toolConfig`         | Object | Tool configuration (mode: AUTO, ANY, NONE)   |
 | `generationConfig`   | Object | Generation parameters                        |
 | `safetySettings`     | Array  | Safety filter settings                       |
+| `serviceTier`        | String | Best-effort processing tier: `standard`, `flex`, or `priority`; `service_tier` spelling is also accepted |
+
+The tier is a top-level request field for both `generateContent` and `streamGenerateContent`. Native `standard` maps to the shared `TierDefault`; unknown values keep the backend's default. When available, the effective tier is returned as `usageMetadata.serviceTier` and as `X-Gemini-Service-Tier` if known before response headers are sent. See the [Gemini Flex guide](https://ai.google.dev/gemini-api/docs/generate-content/flex-inference).
 
 **Generation Config:**
 

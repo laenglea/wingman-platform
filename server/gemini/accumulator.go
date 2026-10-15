@@ -9,10 +9,11 @@ import (
 
 // StreamingAccumulator manages streaming state and emits Gemini-format responses
 type StreamingAccumulator struct {
-	accumulator provider.CompletionAccumulator
 	handler     StreamEventHandler
-	responseID  string
-	model       string
+	accumulator provider.CompletionAccumulator
+
+	responseID string
+	model      string
 
 	// Hold signatures until the next text or buffered function call establishes
 	// which part carries them. Upstream often sends them in a separate chunk.
@@ -50,6 +51,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 	} else {
 		response.UsageMetadata = &UsageMetadata{}
 	}
+	response.UsageMetadata = withTier(response.UsageMetadata, c.Tier)
 
 	// Text and thought summaries stream as they arrive. Function calls are
 	// delivered with their signatures in Complete(), once arguments are complete.
@@ -114,7 +116,7 @@ func (s *StreamingAccumulator) Complete() error {
 		ModelVersion: s.model,
 	}
 
-	response.UsageMetadata = toUsageMetadata(result.Usage)
+	response.UsageMetadata = withTier(toUsageMetadata(result.Usage), result.Tier)
 
 	// Determine finish reason
 	finishReason := toFinishReason(result)
