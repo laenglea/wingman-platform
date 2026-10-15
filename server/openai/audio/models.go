@@ -1,18 +1,45 @@
 package audio
 
+import (
+	"encoding/json"
+	"errors"
+)
+
 // https://platform.openai.com/docs/api-reference/audio/createSpeech
 type SpeechRequest struct {
 	Model string `json:"model"`
 	Input string `json:"input"`
 
-	Voice string   `json:"voice,omitempty"`
-	Speed *float32 `json:"speed,omitempty"`
+	Voice SpeechVoice `json:"voice,omitempty"`
+	Speed *float32    `json:"speed,omitempty"`
 
 	Instructions string `json:"instructions,omitempty"`
 
 	ResponseFormat string `json:"response_format,omitempty"`
 
 	StreamFormat string `json:"stream_format,omitempty"`
+}
+
+// SpeechVoice accepts either a built-in voice name ("alloy") or a custom voice
+// reference object ({"id": "voice_1234"}).
+type SpeechVoice string
+
+func (v *SpeechVoice) UnmarshalJSON(data []byte) error {
+	var name string
+	if err := json.Unmarshal(data, &name); err == nil {
+		*v = SpeechVoice(name)
+		return nil
+	}
+
+	var custom struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(data, &custom); err == nil && custom.ID != "" {
+		*v = SpeechVoice(custom.ID)
+		return nil
+	}
+
+	return errors.New("voice must be a string or an object with id")
 }
 
 type SpeechDeltaEvent struct {

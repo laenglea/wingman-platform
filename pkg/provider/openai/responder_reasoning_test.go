@@ -219,12 +219,21 @@ func TestConfigurationUpdateRejectsAutomaticCompaction(t *testing.T) {
 	}
 }
 
-func TestResponseToolCallAsyncReadsUnknownSDKField(t *testing.T) {
-	if !responseToolCallAsync(`{"type":"function_call","async":true}`) {
-		t.Fatal("expected async=true")
+func TestResponseToolCallAsyncUnmarshal(t *testing.T) {
+	var fnCall responses.ResponseFunctionToolCall
+	if err := json.Unmarshal([]byte(`{"type":"function_call","call_id":"c1","name":"fn","arguments":"{}","async":true}`), &fnCall); err != nil {
+		t.Fatal(err)
 	}
-	if responseToolCallAsync(`{"type":"function_call"}`) {
-		t.Fatal("expected missing async to be false")
+	if !fnCall.Async {
+		t.Fatal("expected async=true on function_call")
+	}
+
+	var customCall responses.ResponseCustomToolCall
+	if err := json.Unmarshal([]byte(`{"type":"custom_tool_call","call_id":"c2","name":"custom","input":"x","async":true}`), &customCall); err != nil {
+		t.Fatal(err)
+	}
+	if !customCall.Async {
+		t.Fatal("expected async=true on custom_tool_call")
 	}
 }
 

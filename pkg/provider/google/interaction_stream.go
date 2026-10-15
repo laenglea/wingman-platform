@@ -91,7 +91,7 @@ func (s *interactionState) event(event interactions.InteractionSSEEvent) (*provi
 				return nil, err
 			}
 		}
-		return s.finish(status, nil), nil
+		return s.finish(status, event.InteractionStatusUpdate.Usage), nil
 	case event.InteractionCompletedEvent != nil:
 		interaction := event.InteractionCompletedEvent.Interaction
 		status := string(interaction.Status)

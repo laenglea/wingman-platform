@@ -124,16 +124,20 @@ from September 1 through October 8 against the current adapters.
   already select content by type, replay signature-only blocks, omit sampling,
   support adaptive thinking, and propagate refusals. Defaults allow 128K output.
   See the [migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide).
-- **Next: computer/browser toolsets.** These close the remaining model
-  migration gaps above. Optional thinking binding controls and
-  `input_transformations` diagnostics are intentionally omitted. Until then, native computer
-  use through the Claude API remains incompatible on the new models. Signed
-  histories must stay append-only and use the originating account; Converse
-  lowering of instruction/effort updates can change the signed prefix.
-- **Next: cache diagnostics and model discovery.** Diagnostics reached GA
-  September 23. Support its request/response fields without requiring the old
-  beta header. Model discovery gained `line` (October 1), disabled-thinking
-  support (October 5), and server-tool support (October 6).
+- **Next: computer/browser toolsets.** Reached GA in `anthropic-sdk-go` v1.82.0
+  (`computer_toolset_20260801`, `browser_toolset_20260801`, `toolset_tool_use`,
+  `browser_state`). These close the remaining model migration gaps above.
+  Optional thinking binding controls and `input_transformations` diagnostics
+  are intentionally omitted. Until then, native computer use through the Claude
+  API remains incompatible on the new models. Signed histories must stay
+  append-only and use the originating account; Converse lowering of
+  instruction/effort updates can change the signed prefix.
+- **Next: cache diagnostics and model discovery.** Both reached GA in
+  `anthropic-sdk-go` v1.82.0 (`MessageNewParams.Include` / `Message.CacheDiagnostics`
+  and `ModelInfo` capabilities). Diagnostics reached GA September 23; support
+  its request/response fields without requiring the old beta header. Model
+  discovery gained `line` (October 1), disabled-thinking support (October 5),
+  and server-tool support (October 6).
 - **Later: inline tool definitions.** September 22 added definitions inside
   positional system messages; implement with tool additions/removals above.
   On-demand compaction and progress displays already have adapter support.

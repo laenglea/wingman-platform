@@ -115,3 +115,26 @@ func TestWriteSpeechStream(t *testing.T) {
 		t.Error("stream is missing the speech.audio.done event")
 	}
 }
+
+func TestSpeechRequestVoiceUnmarshal(t *testing.T) {
+	var builtIn SpeechRequest
+	if err := json.Unmarshal([]byte(`{"model":"tts-1","input":"hello","voice":"alloy"}`), &builtIn); err != nil {
+		t.Fatalf("unmarshal built-in voice: %v", err)
+	}
+	if builtIn.Voice != "alloy" {
+		t.Errorf("voice = %q, want alloy", builtIn.Voice)
+	}
+
+	var custom SpeechRequest
+	if err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini-tts","input":"hello","voice":{"id":"voice_1234"}}`), &custom); err != nil {
+		t.Fatalf("unmarshal custom voice id: %v", err)
+	}
+	if custom.Voice != "voice_1234" {
+		t.Errorf("voice = %q, want voice_1234", custom.Voice)
+	}
+
+	var invalid SpeechRequest
+	if err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini-tts","input":"hello","voice":{}}`), &invalid); err == nil {
+		t.Error("expected error for empty voice object")
+	}
+}

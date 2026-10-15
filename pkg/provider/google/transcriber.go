@@ -240,6 +240,11 @@ func (s *transcriptState) convert(resp *genai.GenerateContentResponse) *provider
 					Text: content,
 				}
 
+				if utterance.StartOffset > 0 || utterance.EndOffset > 0 {
+					segment.Start = utterance.StartOffset.Seconds()
+					segment.End = utterance.EndOffset.Seconds()
+				}
+
 				if len(words) > 0 {
 					segment.Start = words[0].Start
 					segment.End = words[len(words)-1].End
@@ -248,6 +253,10 @@ func (s *transcriptState) convert(resp *genai.GenerateContentResponse) *provider
 				result.Segments = append(result.Segments, segment)
 
 				s.segments++
+			}
+
+			if utterance.EndOffset > 0 {
+				s.end = max(s.end, utterance.EndOffset.Seconds())
 			}
 
 			if len(words) > 0 {

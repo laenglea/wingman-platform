@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"iter"
+	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 
@@ -51,9 +52,21 @@ func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *p
 		}
 
 		if options.Voice != "" {
-			params.Voice = openai.AudioSpeechNewParamsVoiceUnion{
-				OfString: openai.String(options.Voice),
+			if strings.HasPrefix(options.Voice, "voice_") {
+				params.Voice = openai.AudioSpeechNewParamsVoiceUnion{
+					OfAudioSpeechNewsVoiceID: &openai.AudioSpeechNewParamsVoiceID{
+						ID: options.Voice,
+					},
+				}
+			} else {
+				params.Voice = openai.AudioSpeechNewParamsVoiceUnion{
+					OfString: openai.String(options.Voice),
+				}
 			}
+		}
+
+		if options.Instructions != "" {
+			params.Instructions = openai.String(options.Instructions)
 		}
 
 		if options.Speed != nil {
