@@ -161,11 +161,8 @@ func TestCredentials(t *testing.T) {
 	}
 }
 
-func TestRejectsUnsupportedOrInvalidRequestsBeforeRetrieval(t *testing.T) {
+func TestRejectsInvalidSupportedFieldsBeforeRetrieval(t *testing.T) {
 	for _, tc := range []struct{ path, body string }{
-		{"/v1/exa/search", `{"query":"test","type":"neural"}`},
-		{"/v1/exa/search", `{"query":"test","contents":{"text":true,"unknown":false}}`},
-		{"/v1/exa/search", `{"query":"test","contents":{"highlights":{"query":"different query"}}}`},
 		{"/v1/exa/search", `{"query":"test","contents":{"text":{"maxCharacters":1000001}}}`},
 		{"/v1/exa/search", `{"query":"test","numResults":21}`},
 		{"/v1/exa/search", `{"query":"test","model":"exa","category":"company"}`},

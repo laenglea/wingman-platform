@@ -41,7 +41,7 @@ type Provider struct {
 	Results           []searcher.Result
 }
 
-func (p *Provider) Capabilities() searcher.Capabilities { return p.Caps }
+func (p *Provider) SearchCapabilities() searcher.Capabilities { return p.Caps }
 func (p *Provider) Search(_ context.Context, query string, options *searcher.SearchOptions) ([]searcher.Result, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

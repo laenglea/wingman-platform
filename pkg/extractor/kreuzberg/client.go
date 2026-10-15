@@ -52,7 +52,7 @@ func (c *Client) Extract(ctx context.Context, file extractor.File, options *extr
 		options = new(extractor.ExtractOptions)
 	}
 
-	if !c.Capabilities().MaySupport(file) {
+	if !c.ExtractCapabilities().MaySupport(file) {
 		return nil, extractor.ErrUnsupported
 	}
 
@@ -124,7 +124,7 @@ func (c *Client) Extract(ctx context.Context, file extractor.File, options *extr
 	}, nil
 }
 
-func (c *Client) Capabilities() extractor.Capabilities {
+func (c *Client) ExtractCapabilities() extractor.Capabilities {
 	return extractor.Capabilities{
 		MediaTypes: append(slices.Clone(SupportedMimeTypes), "image/*"),
 		Extensions: slices.Clone(SupportedExtensions),

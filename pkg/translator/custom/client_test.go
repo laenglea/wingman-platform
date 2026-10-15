@@ -41,7 +41,7 @@ func TestDiscoveredModesAndDocumentMetadata(t *testing.T) {
 	if err := c.loadCapabilities(); err != nil {
 		t.Fatal(err)
 	}
-	if caps := c.Capabilities(); caps != (translator.Capabilities{FileToDocument: translator.Supported}) {
+	if caps := c.TranslateCapabilities(); caps != (translator.Capabilities{FileToDocument: translator.Supported}) {
 		t.Fatalf("discovered modes = %+v", caps)
 	}
 	if _, err := c.Translate(t.Context(), translator.Input{Text: "hello"}, nil); !errors.Is(err, translator.ErrUnsupported) || rpc.calls != 0 {
@@ -66,7 +66,7 @@ func TestUnknownModesRemainCandidates(t *testing.T) {
 	if err := c.loadCapabilities(); err != nil {
 		t.Fatal(err)
 	}
-	caps := c.Capabilities()
+	caps := c.TranslateCapabilities()
 	if caps.TextToText != translator.Unknown || caps.FileToText != translator.Unknown || caps.FileToDocument != translator.Unknown {
 		t.Fatalf("unconfigured modes = %+v", caps)
 	}
@@ -80,7 +80,7 @@ func TestDiscoveryDefaultsAndInvalidModes(t *testing.T) {
 	if err := c.loadCapabilities(); err != nil {
 		t.Fatal(err)
 	}
-	if got := c.Capabilities(); got != (translator.Capabilities{TextToText: translator.Unknown, FileToText: translator.Supported, FileToDocument: translator.Unknown}) {
+	if got := c.TranslateCapabilities(); got != (translator.Capabilities{TextToText: translator.Unknown, FileToText: translator.Supported, FileToDocument: translator.Unknown}) {
 		t.Fatalf("omitted modes = %+v", got)
 	}
 	for _, response := range []*CapabilitiesResponse{

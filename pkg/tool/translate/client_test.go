@@ -18,11 +18,11 @@ type fakeTranslator struct {
 
 type fileOnlyTranslator struct{ fakeTranslator }
 
-func (*fakeTranslator) Capabilities() translator.Capabilities {
+func (*fakeTranslator) TranslateCapabilities() translator.Capabilities {
 	return translator.Capabilities{TextToText: translator.Supported}
 }
 
-func (*fileOnlyTranslator) Capabilities() translator.Capabilities {
+func (*fileOnlyTranslator) TranslateCapabilities() translator.Capabilities {
 	return translator.Capabilities{FileToDocument: translator.Supported}
 }
 

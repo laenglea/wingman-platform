@@ -62,7 +62,7 @@ type benchmarkEvidence struct {
 	observed map[string]bool
 }
 
-func (b *benchmarkEvidence) Capabilities() searcher.Capabilities {
+func (b *benchmarkEvidence) SearchCapabilities() searcher.Capabilities {
 	return searcher.Capabilities{DateFilters: true}
 }
 

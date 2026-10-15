@@ -91,7 +91,7 @@ func (r *Realtime) Defaults() provider.RealtimeOptions {
 	return defaults
 }
 
-func (r *Realtime) Capabilities() provider.RealtimeCapabilities {
+func (r *Realtime) RealtimeCapabilities() provider.RealtimeCapabilities {
 	return provider.RealtimeCapabilities{
 		// Gemini reports automatic and manually-signaled activity using native
 		// voiceActivity messages.

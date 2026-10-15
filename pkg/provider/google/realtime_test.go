@@ -176,7 +176,7 @@ func TestGeminiAffectiveDialogIsOptInAndModelGated(t *testing.T) {
 	if setup["enableAffectiveDialog"] != true {
 		t.Errorf("enableAffectiveDialog = %v, want true", setup["enableAffectiveDialog"])
 	}
-	if !realtime.Capabilities().Interruption {
+	if !realtime.RealtimeCapabilities().Interruption {
 		t.Error("Gemini 2.5 should support clientContent interruption")
 	}
 
@@ -188,7 +188,7 @@ func TestGeminiAffectiveDialogIsOptInAndModelGated(t *testing.T) {
 	if _, exists := threeOneSetup["enableAffectiveDialog"]; exists {
 		t.Fatal("Gemini 3.1 setup unexpectedly enabled affective dialog")
 	}
-	capabilities := threeOne.Capabilities()
+	capabilities := threeOne.RealtimeCapabilities()
 	if capabilities.Interruption || !capabilities.InputActivityEvents {
 		t.Errorf("Gemini 3.1 capabilities = %#v", capabilities)
 	}

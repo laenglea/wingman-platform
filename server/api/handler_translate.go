@@ -48,7 +48,7 @@ func (h *Handler) handleTranslate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	input := translator.Input{}
-	capabilities := p.Capabilities()
+	capabilities := p.TranslateCapabilities()
 
 	if acceptText {
 		input, err = h.readTranslationText(r, capabilities)

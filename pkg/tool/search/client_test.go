@@ -34,7 +34,7 @@ func (f *fakeSearcher) Search(ctx context.Context, q string, o *searcher.SearchO
 	return f.results, f.err
 }
 
-func (f *fakeSearcher) Capabilities() searcher.Capabilities {
+func (f *fakeSearcher) SearchCapabilities() searcher.Capabilities {
 	return searcher.Capabilities{DateFilters: true, Categories: f.categories}
 }
 
@@ -286,7 +286,7 @@ func (f *batchSearcher) Search(ctx context.Context, q string, o *searcher.Search
 	return f.results[q], nil
 }
 
-func (f *batchSearcher) Capabilities() searcher.Capabilities {
+func (f *batchSearcher) SearchCapabilities() searcher.Capabilities {
 	return searcher.Capabilities{DateFilters: true}
 }
 

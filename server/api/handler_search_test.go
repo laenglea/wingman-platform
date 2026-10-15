@@ -87,6 +87,7 @@ func TestSearchRejectsLegacyTextQueryAndInvalidOptions(t *testing.T) {
 		{"application/json", `{"query":"test","text":[]}`},
 		{"application/x-www-form-urlencoded", "query=test&text=%7B%7D+%7B%7D"},
 		{"application/json", `{"query":"test"} {}`},
+		{"application/json", `{"query":"test","future_vendor_option":true}`},
 	} {
 		s, providers := webtest.NewServer(t, false)
 		r := httptest.NewRequest(http.MethodPost, "/v1/search", strings.NewReader(tc.body))

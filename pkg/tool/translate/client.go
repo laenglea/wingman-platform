@@ -28,7 +28,7 @@ func New(provider translator.Provider, options ...Option) (*Client, error) {
 	if provider == nil {
 		return nil, errors.New("translate: missing translator provider")
 	}
-	if !provider.Capabilities().TextToText.MaySupport() {
+	if !provider.TranslateCapabilities().TextToText.MaySupport() {
 		return nil, fmt.Errorf("translate: provider does not support text translation: %w", translator.ErrUnsupported)
 	}
 

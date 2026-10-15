@@ -93,7 +93,7 @@ func (c *Client) Research(ctx context.Context, instructions string, options *res
 		defer cancel()
 		prompt, err := c.prompt.Execute(map[string]any{
 			"HasScraper":     c.scraper != nil,
-			"HasDateFilters": c.searcher.Capabilities().DateFilters,
+			"HasDateFilters": c.searcher.SearchCapabilities().DateFilters,
 			"HasSummarizer":  c.summarizer != nil,
 			"ToolCallTarget": c.toolCallTarget,
 		})

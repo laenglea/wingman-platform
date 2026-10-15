@@ -43,7 +43,7 @@ func New(url string, options ...Option) (*Client, error) {
 	return c, nil
 }
 
-func (c *Client) Capabilities() translator.Capabilities {
+func (c *Client) TranslateCapabilities() translator.Capabilities {
 	return translator.Capabilities{TextToText: translator.Supported, FileToDocument: translator.Supported}
 }
 

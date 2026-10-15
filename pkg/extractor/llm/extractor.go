@@ -27,7 +27,7 @@ type Extractor struct {
 	completer provider.Completer
 }
 
-func (a *Extractor) Capabilities() extractor.Capabilities {
+func (a *Extractor) ExtractCapabilities() extractor.Capabilities {
 	return extractor.Capabilities{
 		MediaTypes: slices.Compact(slices.Sorted(maps.Values(contentTypes))),
 		Extensions: slices.Sorted(maps.Keys(contentTypes)),

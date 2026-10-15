@@ -12,18 +12,10 @@ import (
 	"github.com/google/uuid"
 )
 
-var tavilySearchDefaults = map[string]any{
-	"search_depth": "basic", "include_answer": false,
-	"include_images": false, "include_image_descriptions": false, "include_favicon": false,
-	"include_usage": false, "auto_parameters": false, "exact_match": false,
-	"safe_search": false, "filter_by_language": false, "filter_by_published_date": false,
-	"include_domains_mode": "restrict",
-}
-
 func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	var request SearchRequest
-	if err := web.ReadRequest(w, r, &request, tavilySearchDefaults); err != nil {
+	if err := web.ReadCompatibleRequest(w, r, &request); err != nil {
 		web.WriteError(w, r, 400, err.Error())
 		return
 	}
@@ -51,10 +43,10 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	options := searcher.SearchOptions{Limit: &limit, Category: topic, Include: request.Include, Exclude: request.Exclude}
 	switch string(request.IncludeRawContent) {
 	case "", "null", "false":
-	case "true", `"markdown"`:
+	case "true", `"markdown"`, `"text"`:
 		options.Text = &searcher.TextOptions{}
 	default:
-		web.WriteError(w, r, 400, "include_raw_content must be false, true or markdown; plain-text format conversion is unsupported")
+		web.WriteError(w, r, 400, "include_raw_content must be false, true, markdown or text")
 		return
 	}
 	if len(options.Include) > 300 || len(options.Exclude) > 150 {

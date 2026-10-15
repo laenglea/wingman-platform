@@ -11,7 +11,7 @@ import (
 // Protocol handlers translate their wire events to and from this interface.
 type Realtime interface {
 	Defaults() RealtimeOptions
-	Capabilities() RealtimeCapabilities
+	RealtimeCapabilities() RealtimeCapabilities
 	Connect(ctx context.Context, options *RealtimeOptions) (RealtimeSession, error)
 }
 

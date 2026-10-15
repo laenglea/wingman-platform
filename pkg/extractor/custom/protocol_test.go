@@ -105,8 +105,8 @@ func TestCapabilityProtocolsOverGRPC(t *testing.T) {
 			if err := e.loadCapabilities(); err != nil {
 				t.Fatal(err)
 			}
-			if e.Capabilities().UnknownFormats != legacy {
-				t.Fatalf("extractor discovery = %+v", e.Capabilities())
+			if e.ExtractCapabilities().UnknownFormats != legacy {
+				t.Fatalf("extractor discovery = %+v", e.ExtractCapabilities())
 			}
 			if document, err := e.Extract(ctx, extractor.File{Name: "report.pdf", Content: []byte("PDF text")}, nil); err != nil || document.Text != "PDF text" {
 				t.Fatalf("extractor operation = %+v, error %v", document, err)

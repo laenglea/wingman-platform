@@ -29,7 +29,7 @@ func TestFullTextCapabilityAndProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !c.Capabilities().Content || len(results) != 2 || results[0].Excerpt != "Excerpt" || results[0].Text == nil || *results[0].Text != page || results[1].Text == nil || *results[1].Text != "" {
+	if !c.SearchCapabilities().Content || len(results) != 2 || results[0].Excerpt != "Excerpt" || results[0].Text == nil || *results[0].Text != page || results[1].Text == nil || *results[1].Text != "" {
 		t.Fatal("full text and retrieval status were not preserved")
 	}
 	legacy := &Client{client: searchClientFunc(func(context.Context, *SearchRequest) (*SearchResponse, error) {

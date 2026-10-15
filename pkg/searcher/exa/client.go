@@ -195,7 +195,7 @@ const (
 	CategoryFinancialReport = "financial report"
 )
 
-func (c *Client) Capabilities() searcher.Capabilities {
+func (c *Client) SearchCapabilities() searcher.Capabilities {
 	return searcher.Capabilities{
 		DateFilters: true,
 		Content:     true,

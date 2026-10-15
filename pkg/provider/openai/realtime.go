@@ -87,7 +87,7 @@ func (r *Realtime) Defaults() provider.RealtimeOptions {
 	}
 }
 
-func (r *Realtime) Capabilities() provider.RealtimeCapabilities {
+func (r *Realtime) RealtimeCapabilities() provider.RealtimeCapabilities {
 	return provider.RealtimeCapabilities{
 		SessionUpdates:      true,
 		AudioBufferClearing: true,

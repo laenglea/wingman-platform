@@ -35,7 +35,7 @@ func TestTranslateInputModesReturnText(t *testing.T) {
 		if content.Text != input.Text || content.File != input.File {
 			t.Fatalf("input changed: %+v", content)
 		}
-		caps := p.Capabilities()
+		caps := p.TranslateCapabilities()
 		if caps.TextToText != translator.Supported || caps.FileToText != translator.Supported || caps.FileToDocument.MaySupport() {
 			t.Fatalf("capabilities do not describe the observed behavior: %+v", caps)
 		}

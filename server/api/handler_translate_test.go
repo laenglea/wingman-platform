@@ -33,7 +33,7 @@ type recordingTranslator struct {
 	err      error
 }
 
-func (p *recordingTranslator) Capabilities() translator.Capabilities { return p.caps }
+func (p *recordingTranslator) TranslateCapabilities() translator.Capabilities { return p.caps }
 
 func (p *recordingTranslator) Translate(_ context.Context, input translator.Input, options *translator.TranslateOptions) (*translator.File, error) {
 	p.calls++
@@ -46,7 +46,7 @@ type recordingTranslateExtractor struct {
 	err   error
 }
 
-func (*recordingTranslateExtractor) Capabilities() extractor.Capabilities {
+func (*recordingTranslateExtractor) ExtractCapabilities() extractor.Capabilities {
 	return extractor.Capabilities{UnknownFormats: true}
 }
 

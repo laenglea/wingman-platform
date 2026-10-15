@@ -154,7 +154,7 @@ func convertResult(response *Response) *extractor.Document {
 	return result
 }
 
-func (c *Client) Capabilities() extractor.Capabilities {
+func (c *Client) ExtractCapabilities() extractor.Capabilities {
 	return extractor.Capabilities{
 		MediaTypes: slices.Clone(SupportedMimeTypes),
 		Extensions: slices.Clone(SupportedExtensions),

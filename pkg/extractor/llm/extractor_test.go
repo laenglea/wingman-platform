@@ -34,7 +34,7 @@ func TestExtractNormalizesSupportedFileMetadata(t *testing.T) {
 			original := input
 			completer := &recordingCompleter{}
 			e := New(completer)
-			if !e.Capabilities().MaySupport(input) {
+			if !e.ExtractCapabilities().MaySupport(input) {
 				t.Fatal("supported metadata was excluded from routing")
 			}
 			result, err := e.Extract(t.Context(), input, nil)
@@ -59,7 +59,7 @@ func TestExtractRejectsUnsupportedFileBeforeModelCall(t *testing.T) {
 	completer := &recordingCompleter{}
 	e := New(completer)
 	input := extractor.File{Name: "data.csv", ContentType: "text/csv"}
-	if e.Capabilities().MaySupport(input) {
+	if e.ExtractCapabilities().MaySupport(input) {
 		t.Fatal("unsupported file was eligible for routing")
 	}
 	if _, err := e.Extract(t.Context(), input, nil); !errors.Is(err, extractor.ErrUnsupported) || completer.messages != nil {

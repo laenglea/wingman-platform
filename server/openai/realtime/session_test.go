@@ -706,7 +706,7 @@ func (f *fakeRealtime) Defaults() provider.RealtimeOptions {
 	}
 }
 
-func (f *fakeRealtime) Capabilities() provider.RealtimeCapabilities {
+func (f *fakeRealtime) RealtimeCapabilities() provider.RealtimeCapabilities {
 	return f.capabilities
 }
 

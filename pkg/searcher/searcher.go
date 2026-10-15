@@ -7,7 +7,7 @@ import (
 
 type Provider interface {
 	Search(ctx context.Context, query string, options *SearchOptions) ([]Result, error)
-	Capabilities() Capabilities
+	SearchCapabilities() Capabilities
 }
 
 // Capabilities describes integrated retrieval, filters and category metadata. Providers

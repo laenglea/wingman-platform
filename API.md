@@ -460,7 +460,7 @@ await exa.getContents(['https://go.dev/doc/'], { text: { maxCharacters: 1000 } }
 | URL extraction | `urls`: string or array, 1–20 URLs | `urls` or legacy `ids`: string or array, 1–20 URL identifiers |
 | Extraction timeout | `timeout`: 1–60 seconds per URL; default 10 | 30 seconds per URL |
 | Search excerpts | Always in `content` | `contents.highlights`: true or `{ "maxCharacters": N }` |
-| Page text in search | `include_raw_content`: true or `"markdown"` | `contents.text`: true or `{ "maxCharacters": N }` |
+| Page text in search | `include_raw_content`: true, `"markdown"`, or `"text"` | `contents.text`: true or `{ "maxCharacters": N }` |
 | Extracted text limit | Unavailable | `text`: true or `{ "maxCharacters": N }` |
 
 Domain filters allow up to 300 included and 150 excluded hostnames. Date and
@@ -469,15 +469,31 @@ category filters require support from the selected backend; `finance` and
 1, 7, 30, or 365 days and intersect with explicit publication bounds.
 
 Search and extraction use the backend's configured retrieval strategy.
-Tavily's default `search_depth: basic`, `extract_depth: basic`, and
-`format: markdown`, and Exa's `type: auto`, are accepted as baseline SDK hints;
-they do not override backend configuration. Extracted content is the backend's
-normalized text, which may contain Markdown. Backend-specific depth modes,
-format conversion, images, summaries, custom excerpt-selection queries, cached snapshot
-controls, generated answers, and billing/usage fields are not emulated.
-Unsupported active options and unknown fields return HTTP 400, rather than
-silently losing the requested behavior. Disabled SDK options may be omitted,
-null, or their documented defaults. Other endpoints return HTTP 404.
+The compatibility request schemas contain only implemented fields. All other
+fields are ignored, including unknown nested content options, so new vendor
+parameters do not break existing clients. For example, `livecrawlTimeout`,
+`search_depth`, `extract_depth`, and future SDK fields do not cause HTTP 400.
+Ignored fields are not forwarded to the backend.
+
+The current [Exa Search](https://exa.ai/docs/reference/search),
+[Exa Contents](https://exa.ai/docs/reference/get-contents),
+[Tavily Search](https://docs.tavily.com/documentation/api-reference/endpoint/search),
+and [Tavily Extract](https://docs.tavily.com/documentation/api-reference/endpoint/extract)
+references distinguish several kinds of options:
+
+| Field role | Examples | Compatibility behavior |
+| --- | --- | --- |
+| Implemented inputs and retrieval controls | Query/URLs, result count, domains, category, location, publication bounds, text/highlights selectors, `maxCharacters`; Tavily extraction `timeout` | Applied and validated. |
+| Retrieval tuning | Exa `livecrawlTimeout`, retrieval-only `type` modes, `useAutoprompt`, verbosity/highlight sizing; Tavily depth/chunk settings and language preference | Ignored; backend configuration applies. |
+| Additional behavior or output | Exa deep search, answers/summaries, images, streaming, structured output, freshness/snapshots, subpages, strict language or moderation controls | Ignored; the response contains only Wingman's supported retrieval fields. |
+| Optional metadata or future fields | User attribution, usage, favicons, newly introduced parameters | Ignored. |
+
+This is best-effort compatibility: accepting an unsupported field does not
+implement its behavior. Extracted content is the backend's normalized text,
+which may contain Markdown. Tavily `include_raw_content: true`, `"markdown"`,
+and `"text"` all request that same text; format hints do not trigger conversion.
+Malformed JSON and invalid supported fields still return HTTP 400. Unknown
+endpoints return HTTP 404. The native `/v1/search` schema remains strict.
 
 Tavily returns `query`, `answer: null`, `images: []`, `results`, `response_time`,
 and `request_id`; each result includes `url`, `title`, `content`, and
@@ -568,8 +584,9 @@ interfaces do not expose, so they are outside this retrieval subset.
 
 The dedicated `server/tavily` and `server/exa` tests cover authentication,
 access policies, filter translation, partial failures, Unicode limits, and
-rejection of unsupported options. Live tests load the nearest `.env` and require
-both `TAVILY_API_KEY` and `EXA_API_KEY`. They compare portable response fields
+ignored vendor/future fields alongside validation of supported inputs. Live
+tests load the nearest `.env` and require both `TAVILY_API_KEY` and `EXA_API_KEY`.
+They compare portable response fields
 against the native APIs and exercise both API dialects over both hosted backends,
 plus extraction through the built-in HTTP fetcher.
 

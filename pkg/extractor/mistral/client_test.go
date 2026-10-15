@@ -61,7 +61,7 @@ func TestExtractDocumentAndImageRequests(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !client.Capabilities().MaySupport(file) {
+			if !client.ExtractCapabilities().MaySupport(file) {
 				t.Fatal("advertised capabilities exclude a supported request")
 			}
 			result, err := client.Extract(context.Background(), file, nil)
