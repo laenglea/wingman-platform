@@ -41,6 +41,8 @@ type searcherConfig struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token"`
 
+	Guard string `yaml:"guard"`
+
 	Vars  map[string]string `yaml:"vars"`
 	Proxy *proxyConfig      `yaml:"proxy"`
 }
@@ -76,17 +78,27 @@ func (cfg *Config) registerSearchers(f *configFile) error {
 			context.Client = client
 		}
 
-		index, err := createSearcher(config, context)
+		p, err := createSearcher(config, context)
 
 		if err != nil {
 			return err
 		}
 
-		if _, ok := index.(otel.Searcher); !ok {
-			index = otel.NewSearcher(config.Type, id, index)
+		if config.Guard != "" {
+			g, err := cfg.Guard(config.Guard)
+
+			if err != nil {
+				return err
+			}
+
+			p = searcher.WithGuard(g, p)
 		}
 
-		cfg.RegisterSearcher(id, index)
+		if !otel.Instrumented(p) {
+			p = otel.NewSearcher(config.Type, id, p)
+		}
+
+		cfg.RegisterSearcher(id, p)
 	}
 
 	return nil

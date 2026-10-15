@@ -48,6 +48,8 @@ type researcherConfig struct {
 
 	Model string `yaml:"model"`
 
+	Guard string `yaml:"guard"`
+
 	Vars  map[string]string `yaml:"vars"`
 	Proxy *proxyConfig      `yaml:"proxy"`
 
@@ -120,17 +122,27 @@ func (cfg *Config) registerResearchers(f *configFile) error {
 			context.Client = client
 		}
 
-		index, err := createResearcher(config, context)
+		p, err := createResearcher(config, context)
 
 		if err != nil {
 			return err
 		}
 
-		if _, ok := index.(otel.Researcher); !ok {
-			index = otel.NewResearcher(config.Type, id, index)
+		if config.Guard != "" {
+			g, err := cfg.Guard(config.Guard)
+
+			if err != nil {
+				return err
+			}
+
+			p = researcher.WithGuard(g, p)
 		}
 
-		cfg.RegisterResearcher(id, index)
+		if !otel.Instrumented(p) {
+			p = otel.NewResearcher(config.Type, id, p)
+		}
+
+		cfg.RegisterResearcher(id, p)
 	}
 
 	return nil
