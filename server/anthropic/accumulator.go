@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 
@@ -77,6 +78,7 @@ type StreamingAccumulator struct {
 	compactionIndex int
 
 	toolIndexByID  map[string]int
+	toolCallsByID  map[string]*provider.ToolCall
 	lastToolCallID string
 
 	// Usage tracking
@@ -97,6 +99,7 @@ func NewStreamingAccumulator(messageID, model string, handler StreamEventHandler
 		compactionIndex: -1,
 
 		toolIndexByID: make(map[string]int),
+		toolCallsByID: make(map[string]*provider.ToolCall),
 
 		stopReason: StopReasonEndTurn,
 	}
@@ -171,6 +174,28 @@ func (s *StreamingAccumulator) stopBlock(index int) error {
 
 	if s.compactionIndex == index {
 		s.compactionIndex = -1
+	}
+
+	for id, toolIndex := range s.toolIndexByID {
+		if toolIndex == index {
+			if call := s.toolCallsByID[id]; call != nil && call.Arguments != "" {
+				if _, translatedInput, translated := translateToolCall(*call); translated {
+					if data, err := json.Marshal(translatedInput); err == nil {
+						if err := s.emitEvent(StreamEvent{
+							Type:  StreamEventContentBlockDelta,
+							Index: index,
+							Delta: &Delta{
+								Type:        "input_json_delta",
+								PartialJSON: string(data),
+							},
+						}); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			break
+		}
 	}
 
 	return s.emitEvent(StreamEvent{
@@ -443,13 +468,30 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			}
 
 			index, found := s.toolIndexByID[id]
+			state := s.toolCallsByID[id]
+			if state == nil {
+				state = &provider.ToolCall{ID: id}
+				s.toolCallsByID[id] = state
+			}
+			if content.ToolCall.Kind != "" {
+				state.Kind = content.ToolCall.Kind
+			}
+			if content.ToolCall.Name != "" {
+				state.Name = content.ToolCall.Name
+			}
+			if content.ToolCall.Execution != "" {
+				state.Execution = content.ToolCall.Execution
+			}
+			state.Arguments += content.ToolCall.Arguments
+
+			name, _, translated := translateToolCall(*state)
 
 			if !found {
 				var err error
 				block := &ContentBlock{
 					Type:   "tool_use",
 					ID:     id,
-					Name:   content.ToolCall.Name,
+					Name:   name,
 					Input:  map[string]any{},
 					Caller: &BlockCaller{Type: "direct"},
 				}
@@ -470,7 +512,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 
 			s.lastToolCallID = id
 
-			if content.ToolCall.Arguments != "" {
+			if !translated && content.ToolCall.Arguments != "" {
 				if err := s.emitEvent(StreamEvent{
 					Type:  StreamEventContentBlockDelta,
 					Index: index,
@@ -508,6 +550,12 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 
 // Complete signals that streaming is done and emits final events
 func (s *StreamingAccumulator) Complete() error {
+	if !s.started {
+		if err := s.Add(provider.Completion{}); err != nil {
+			return err
+		}
+	}
+
 	result := s.accumulator.Result()
 
 	// Close all open content blocks
@@ -518,9 +566,7 @@ func (s *StreamingAccumulator) Complete() error {
 	}
 
 	// Determine final stop reason from accumulated result
-	if result.Message != nil {
-		s.stopReason = toStopReason(result)
-	}
+	s.stopReason = toStopReason(result)
 
 	// Get final usage from accumulated result (prefer accumulated result over tracked values)
 	inputTokens := s.inputTokens
@@ -528,12 +574,10 @@ func (s *StreamingAccumulator) Complete() error {
 	var cacheReadInputTokens, cacheCreationInputTokens int
 	var outputTokensDetails *OutputTokensDetails
 	if result.Usage != nil {
-		if resultInputTokens := anthropicInputTokens(result.Usage); resultInputTokens > inputTokens {
-			inputTokens = resultInputTokens
-		}
-		if result.Usage.OutputTokens > outputTokens {
-			outputTokens = result.Usage.OutputTokens
-		}
+		// Derive uncached input after all usage fields have been merged. A
+		// later cache-only update can reduce this count, including to zero.
+		inputTokens = anthropicInputTokens(result.Usage)
+		outputTokens = result.Usage.OutputTokens
 		cacheReadInputTokens = result.Usage.CacheReadInputTokens
 		cacheCreationInputTokens = result.Usage.CacheCreationInputTokens
 

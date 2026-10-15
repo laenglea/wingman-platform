@@ -2,6 +2,7 @@ package tavily
 
 import (
 	"encoding/json"
+
 	"github.com/adrianliechti/wingman/server/web"
 )
 

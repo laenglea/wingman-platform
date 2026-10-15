@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
@@ -52,12 +53,12 @@ type Call struct {
 func ParseCall(args string) Call {
 	var call Call
 
-	if err := json.Unmarshal([]byte(args), &call); err == nil && len(call.Actions) > 0 {
+	if err := jsonutil.Unmarshal([]byte(args), &call); err == nil && len(call.Actions) > 0 {
 		return call
 	}
 
 	var input map[string]any
-	json.Unmarshal([]byte(args), &input)
+	jsonutil.Unmarshal([]byte(args), &input)
 
 	if action, ok := FromAnthropicInput(input); ok {
 		call.Actions = []map[string]any{action}
@@ -76,7 +77,7 @@ func (c Call) Args() string {
 // degrade to the first convertible action (one action per tool_use).
 func AnthropicInput(args string) map[string]any {
 	var input map[string]any
-	json.Unmarshal([]byte(args), &input)
+	jsonutil.Unmarshal([]byte(args), &input)
 
 	if input == nil {
 		return map[string]any{}
@@ -284,6 +285,9 @@ func number(v any) int {
 	case int:
 		return n
 	case json.Number:
+		if i, ok := jsonutil.Int64(n); ok {
+			return int(i)
+		}
 		f, _ := n.Float64()
 		return int(f)
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
 func (h *Handler) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
@@ -20,15 +21,15 @@ func (h *Handler) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	embedder, err := h.Embedder(req.Model)
-
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(req.Model))
 		return
 	}
 
-	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
-		writeError(w, http.StatusNotFound, err)
+	embedder, err := h.Embedder(req.Model)
+
+	if err != nil {
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(req.Model))
 		return
 	}
 
@@ -40,6 +41,16 @@ func (h *Handler) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 
 	case []string:
 		inputs = v
+
+	case []any:
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				writeError(w, http.StatusBadRequest, errors.New("invalid input"))
+				return
+			}
+			inputs = append(inputs, s)
+		}
 	}
 
 	if len(inputs) == 0 {
@@ -58,7 +69,7 @@ func (h *Handler) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	embedding, err := embedder.Embed(r.Context(), inputs, options)
 
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, provider.CodeFromError(err, http.StatusBadRequest), err)
 		return
 	}
 
@@ -66,6 +77,8 @@ func (h *Handler) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		Object: "list",
 
 		Model: embedding.Model,
+		Data:  []Embedding{},
+		Usage: &Usage{},
 	}
 
 	if result.Model == "" {

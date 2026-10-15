@@ -1,7 +1,9 @@
 package gemini
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 )
@@ -14,7 +16,7 @@ import (
 func decodeRequest(r io.Reader, v any) error {
 	var raw any
 
-	if err := json.NewDecoder(r).Decode(&raw); err != nil {
+	if err := decodeJSON(r, &raw); err != nil {
 		return err
 	}
 
@@ -23,7 +25,7 @@ func decodeRequest(r io.Reader, v any) error {
 		return err
 	}
 
-	return json.Unmarshal(data, v)
+	return decodeJSON(bytes.NewReader(data), v)
 }
 
 // repeatedFields are wrapped into an array when given as a single value.
@@ -117,4 +119,18 @@ func camelCase(name string) string {
 	}
 
 	return b.String()
+}
+
+// Keep opaque arguments, results and schema numbers out of float64. This is
+// separate from request normalization, which must not rewrite caller data.
+func decodeJSON(r io.Reader, target any) error {
+	decoder := json.NewDecoder(r)
+	decoder.UseNumber()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if decoder.Decode(new(any)) != io.EOF {
+		return fmt.Errorf("expected a single JSON value")
+	}
+	return nil
 }

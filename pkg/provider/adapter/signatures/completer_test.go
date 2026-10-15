@@ -15,6 +15,37 @@ type captureCompleter struct {
 	reply *provider.Completion
 }
 
+func TestScopedAliasSignatureReplay(t *testing.T) {
+	for _, alias := range []string{"my-model", "my model", "modèle", "模型"} {
+		t.Run(alias, func(t *testing.T) {
+			messages := []provider.Message{{Role: provider.MessageRoleAssistant, Content: []provider.Content{
+				provider.ReasoningContent(provider.Reasoning{Text: "thought", Signature: provider.TagSignature(alias, "SIG")}),
+				provider.CompactionContent(provider.Compaction{Content: "summary", Signature: provider.TagSignature(alias, "BLOB")}),
+			}}}
+
+			for _, target := range []string{alias, "other-model"} {
+				inner := &captureCompleter{}
+				for _, err := range ScopedTo(target, inner).Complete(t.Context(), messages, nil) {
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				wantReasoning, wantCompaction := "", ""
+				if target == alias {
+					wantReasoning, wantCompaction = "SIG", "BLOB"
+				}
+				content := inner.messages[0].Content
+				if got := content[0].Reasoning.Signature; got != wantReasoning {
+					t.Errorf("replay to %q: reasoning signature = %q, want %q", target, got, wantReasoning)
+				}
+				if got := content[1].Compaction.Signature; got != wantCompaction {
+					t.Errorf("replay to %q: compaction signature = %q, want %q", target, got, wantCompaction)
+				}
+			}
+		})
+	}
+}
+
 func (c *captureCompleter) Complete(_ context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	return func(yield func(*provider.Completion, error) bool) {
 		c.messages = messages

@@ -150,7 +150,7 @@ func writeTranscriptionStream(w http.ResponseWriter, seq iter.Seq2[*provider.Tra
 	for delta, err := range seq {
 		if err != nil {
 			if !headersSent {
-				writeError(w, http.StatusBadGateway, err)
+				writeError(w, provider.CodeFromError(err, http.StatusBadGateway), err)
 				return
 			}
 

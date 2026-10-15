@@ -2,10 +2,10 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"maps"
 
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
@@ -73,7 +73,7 @@ func NormalizeSchema(schema map[string]any) map[string]any {
 func ParseNormalizedSchema(data []byte) map[string]any {
 	var schema map[string]any
 
-	if len(data) == 0 || json.Unmarshal(data, &schema) != nil {
+	if len(data) == 0 || jsonutil.Unmarshal(data, &schema) != nil {
 		schema = map[string]any{}
 	}
 

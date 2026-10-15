@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	provideropenai "github.com/adrianliechti/wingman/pkg/provider/openai"
+	"github.com/adrianliechti/wingman/pkg/provider/openai"
 	"github.com/adrianliechti/wingman/test/harness"
 	comparison "github.com/adrianliechti/wingman/test/openai"
 )
@@ -58,13 +58,13 @@ func TestOpenAIRefusalLive(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				capture := &refusalCaptureTransport{}
-				options := []provideropenai.Option{provideropenai.WithToken(h.OpenAI.APIKey), provideropenai.WithClient(&http.Client{Transport: capture}), provideropenai.WithMaxRetries(0)}
+				options := []openai.Option{openai.WithToken(h.OpenAI.APIKey), openai.WithClient(&http.Client{Transport: capture}), openai.WithMaxRetries(0)}
 				var completer provider.Completer
 				var err error
 				if backend == "chat" {
-					completer, err = provideropenai.NewCompleter(h.OpenAI.BaseURL, model, options...)
+					completer, err = openai.NewCompleter(h.OpenAI.BaseURL, model, options...)
 				} else {
-					completer, err = provideropenai.NewResponder(h.OpenAI.BaseURL, model, options...)
+					completer, err = openai.NewResponder(h.OpenAI.BaseURL, model, options...)
 				}
 				if err != nil {
 					t.Fatal(err)

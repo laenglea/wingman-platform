@@ -8,7 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 	"github.com/adrianliechti/wingman/pkg/tool"
+
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -107,6 +109,9 @@ func (s *Server) refreshTools() error {
 			schema := new(jsonschema.Schema)
 
 			if err := schema.UnmarshalJSON(data); err != nil {
+				if prev, ok := s.registered[i][t.Name]; ok {
+					current[t.Name] = prev
+				}
 				resultErr = errors.Join(resultErr, err)
 				continue
 			}
@@ -124,7 +129,7 @@ func (s *Server) refreshTools() error {
 				var args map[string]any
 
 				if len(req.Params.Arguments) > 0 {
-					if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+					if err := jsonutil.Unmarshal(req.Params.Arguments, &args); err != nil {
 						return nil, err
 					}
 				}

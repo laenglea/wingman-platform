@@ -216,6 +216,9 @@ func websocketDialer(client *http.Client) *websocket.Dialer {
 	} else {
 		dialer.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	}
+	// Gorilla upgrades over HTTP/1.1. The HTTP client's TLS config may have
+	// acquired h2 during earlier requests; never offer it for a WebSocket.
+	dialer.TLSClientConfig.NextProtos = []string{"http/1.1"}
 	return &dialer
 }
 

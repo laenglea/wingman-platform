@@ -55,11 +55,21 @@ func (h *Handler) handleRerank(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := RerankResponse{
-		Model: req.Model,
+		Model:   req.Model,
+		Results: []Result{},
 	}
 
+	used := make([]bool, len(req.Texts))
+
 	for _, r := range rankings {
-		index := slices.Index(req.Texts, r.Text)
+		index := -1
+		for i, text := range req.Texts {
+			if !used[i] && text == r.Text {
+				index = i
+				used[i] = true
+				break
+			}
+		}
 
 		if index < 0 {
 			continue

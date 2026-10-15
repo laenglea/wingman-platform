@@ -73,7 +73,7 @@ func ResolveResults(messages []provider.Message, catalog []provider.Tool) ([]pro
 			if output := part.ToolResult; output != nil && output.Kind == provider.ToolKindToolSearch && !output.IsError {
 				copy := *output
 				var items []map[string]any
-				if err := json.Unmarshal(output.Payload, &items); err != nil {
+				if err := decodeJSON(output.Payload, &items); err != nil {
 					return nil, err
 				}
 				// Expand references and restore namespaces flattened by other

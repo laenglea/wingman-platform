@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -474,5 +475,124 @@ func TestStreamingAccumulatorSplitsTextBlocksPerMessageItem(t *testing.T) {
 	content := toContentBlocks(acc.Result().Message.Content)
 	if len(content) != 2 || *content[0].Text != "Looking it up." || *content[1].Text != "42" {
 		t.Fatalf("non-streaming blocks = %+v, want the same two text blocks", content)
+	}
+}
+
+// Cache counts may arrive after the cache-inclusive input total. A stale
+// cache-exclusive count must not cause those cached tokens to be billed twice.
+func TestStreamingAccumulatorLateCacheUsage(t *testing.T) {
+	var usage *DeltaUsage
+	acc := NewStreamingAccumulator("msg_test", "model", func(event StreamEvent) error {
+		if event.Type == StreamEventMessageDelta {
+			usage = event.DeltaUsage
+		}
+		return nil
+	})
+	for _, delta := range []provider.Usage{
+		{InputTokens: 100, OutputTokens: 1},
+		{CacheReadInputTokens: 60, CacheCreationInputTokens: 40},
+		{OutputTokens: 10},
+	} {
+		if err := acc.Add(provider.Completion{Usage: &delta}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := acc.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if usage == nil || usage.InputTokens != 0 || usage.CacheReadInputTokens != 60 || usage.CacheCreationInputTokens != 40 || usage.OutputTokens != 10 {
+		t.Fatalf("usage lost or double-counted: %+v", usage)
+	}
+}
+
+func TestStreamingAccumulatorEmptyStreamStartsMessage(t *testing.T) {
+	var types []StreamEventType
+	acc := NewStreamingAccumulator("msg_empty", "model", func(event StreamEvent) error {
+		types = append(types, event.Type)
+		return nil
+	})
+	if err := acc.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if len(types) != 3 || types[0] != StreamEventMessageStart || types[1] != StreamEventMessageDelta || types[2] != StreamEventMessageStop {
+		t.Fatalf("events = %v, want [message_start message_delta message_stop]", types)
+	}
+}
+
+func TestStreamingAccumulatorTranslatesCrossDialectToolCalls(t *testing.T) {
+	var startedName string
+	var deltaJSON string
+	acc := NewStreamingAccumulator("msg_patch", "model", func(event StreamEvent) error {
+		switch event.Type {
+		case StreamEventContentBlockStart:
+			startedName = event.ContentBlock.Name
+		case StreamEventContentBlockDelta:
+			deltaJSON += event.Delta.PartialJSON
+		}
+		return nil
+	})
+	for _, chunk := range []provider.ToolCall{
+		{
+			ID:        "call_patch",
+			Kind:      provider.ToolKindTextEditor,
+			Name:      "apply_patch",
+			Arguments: `{"type":"create_file",`,
+		},
+		{
+			ID:        "call_patch",
+			Arguments: `"path":"hello.txt","diff":"+hello"}`,
+		},
+	} {
+		if err := acc.Add(provider.Completion{
+			Message: &provider.Message{
+				Role:    provider.MessageRoleAssistant,
+				Content: []provider.Content{provider.ToolCallContent(chunk)},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := acc.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if startedName != "str_replace_based_edit_tool" {
+		t.Fatalf("startedName = %q, want str_replace_based_edit_tool", startedName)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(deltaJSON), &parsed); err != nil || parsed["command"] != "create" || parsed["path"] != "hello.txt" {
+		t.Fatalf("deltaJSON = %q (err=%v, parsed=%+v)", deltaJSON, err, parsed)
+	}
+
+	// Ordinary function tools named apply_patch (without ToolKindTextEditor)
+	// must stream raw argument fragments untranslated.
+	startedName = ""
+	deltaJSON = ""
+	fnAcc := NewStreamingAccumulator("msg_fn", "model", func(event StreamEvent) error {
+		switch event.Type {
+		case StreamEventContentBlockStart:
+			startedName = event.ContentBlock.Name
+		case StreamEventContentBlockDelta:
+			deltaJSON += event.Delta.PartialJSON
+		}
+		return nil
+	})
+	for _, chunk := range []provider.ToolCall{
+		{ID: "call_fn", Name: "apply_patch", Arguments: `{"patch":`},
+		{ID: "call_fn", Arguments: `"custom"}`},
+	} {
+		if err := fnAcc.Add(provider.Completion{
+			Message: &provider.Message{
+				Role:    provider.MessageRoleAssistant,
+				Content: []provider.Content{provider.ToolCallContent(chunk)},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fnAcc.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if startedName != "apply_patch" || deltaJSON != `{"patch":"custom"}` {
+		t.Fatalf("ordinary function tool: startedName=%q deltaJSON=%q", startedName, deltaJSON)
 	}
 }

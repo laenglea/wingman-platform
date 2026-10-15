@@ -217,13 +217,21 @@ func TestToolChoice(t *testing.T) {
 			h.SkipUnlessConfigured(t, model.Name)
 
 			for _, tg := range targets(h, model) {
-				forced := post(t, h, tg, map[string]any{
+				forcedBody := map[string]any{
 					"tools":      []any{gemini.WeatherTool},
 					"toolConfig": map[string]any{"functionCallingConfig": map[string]any{"mode": "ANY"}},
 					"contents":   user("Say hello."),
-				})
-				if len(functionCalls(forced)) == 0 {
-					t.Errorf("[%s] mode ANY produced no functionCall: %q", tg.label, messageText(forced))
+				}
+				if tg.label == "wingman" && model.Capabilities.NoForcedToolChoice {
+					resp := gemini.PostGemini(t, h, tg.ep, tg.model, forcedBody)
+					if resp.StatusCode != 400 || !strings.Contains(string(resp.RawBody), "forced tool_choice") {
+						t.Errorf("unsupported forced choice: status %d, body %s", resp.StatusCode, resp.RawBody)
+					}
+				} else {
+					forced := post(t, h, tg, forcedBody)
+					if len(functionCalls(forced)) == 0 {
+						t.Errorf("[%s] mode ANY produced no functionCall: %q", tg.label, messageText(forced))
+					}
 				}
 
 				none := post(t, h, tg, map[string]any{

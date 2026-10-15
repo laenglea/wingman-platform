@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 )
 
 // StringParameter preserves the original text; callers decide whether to trim it.
@@ -69,11 +71,14 @@ func IntegerParameter(params map[string]any, key string, fallback, minimum, maxi
 	case float64:
 		n = value
 	case json.Number:
-		var err error
-		n, err = value.Float64()
-		if err != nil {
+		exact, ok := jsonutil.Int64(value)
+		if !ok {
 			return 0, fmt.Errorf("%s must be an integer", key)
 		}
+		if exact < int64(minimum) || exact > int64(int(^uint(0)>>1)) {
+			return 0, fmt.Errorf("%s must be an integer of at least %d", key, minimum)
+		}
+		return min(int(exact), maximum), nil
 	default:
 		return 0, fmt.Errorf("%s must be an integer", key)
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
 func (h *Handler) handleAudioSpeech(w http.ResponseWriter, r *http.Request) {
@@ -21,15 +22,15 @@ func (h *Handler) handleAudioSpeech(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	synthesizer, err := h.Synthesizer(req.Model)
-
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(req.Model))
 		return
 	}
 
-	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
-		writeError(w, http.StatusNotFound, err)
+	synthesizer, err := h.Synthesizer(req.Model)
+
+	if err != nil {
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(req.Model))
 		return
 	}
 
@@ -65,7 +66,7 @@ func writeAudioStream(w http.ResponseWriter, seq iter.Seq2[*provider.Synthesis, 
 	for chunk, err := range seq {
 		if err != nil {
 			if !headersSent {
-				writeError(w, http.StatusBadGateway, err)
+				writeError(w, provider.CodeFromError(err, http.StatusBadGateway), err)
 			}
 
 			return
@@ -114,7 +115,7 @@ func writeSpeechStream(w http.ResponseWriter, seq iter.Seq2[*provider.Synthesis,
 	for chunk, err := range seq {
 		if err != nil {
 			if !headersSent {
-				writeError(w, http.StatusBadGateway, err)
+				writeError(w, provider.CodeFromError(err, http.StatusBadGateway), err)
 				return
 			}
 

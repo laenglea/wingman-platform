@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"mime"
@@ -9,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
+	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
@@ -128,7 +129,7 @@ func valueSchema(r *http.Request) (*provider.Schema, error) {
 
 	var properties map[string]any
 
-	if err := json.Unmarshal([]byte(val), &properties); err != nil {
+	if err := jsonutil.Unmarshal([]byte(val), &properties); err != nil {
 		return nil, err
 	}
 
@@ -146,6 +147,10 @@ func (h *Handler) readText(r *http.Request) (string, error) {
 	}
 
 	if url := valueURL(r); url != "" {
+		if err := h.Policy.Verify(r.Context(), policy.ResourceModel, "", policy.ActionAccess); err != nil {
+			return "", err
+		}
+
 		p, err := h.Scraper("")
 
 		if err != nil {
@@ -171,6 +176,10 @@ func (h *Handler) readText(r *http.Request) (string, error) {
 }
 
 func (h *Handler) extractText(r *http.Request, file *provider.File) (string, error) {
+	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, "", policy.ActionAccess); err != nil {
+		return "", err
+	}
+
 	p, err := h.Extractor("")
 
 	if err != nil {
@@ -236,6 +245,10 @@ func readFile(r *http.Request) (*provider.File, error) {
 		return nil, err
 	}
 
+	if len(data) == 0 && filename == "" {
+		return nil, errors.New("no file provided")
+	}
+
 	return &provider.File{
 		Name: filename,
 
@@ -261,9 +274,8 @@ func readFiles(r *http.Request) ([]provider.File, error) {
 					return nil, err
 				}
 
-				defer file.Close()
-
 				data, err := io.ReadAll(file)
+				file.Close()
 
 				if err != nil {
 					return nil, err

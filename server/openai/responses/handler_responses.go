@@ -19,7 +19,9 @@ import (
 func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 	var req ResponsesRequest
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -453,6 +455,13 @@ func (o responseOutputOptions) kindOf(name string) provider.ToolKind {
 	return outputKind(name, o.Tools)
 }
 
+func (o responseOutputOptions) kind(callKind provider.ToolKind, name string) provider.ToolKind {
+	if k := o.kindOf(name); k != provider.ToolKindFunction || callKind == "" {
+		return k
+	}
+	return callKind
+}
+
 func functionCallItem(call provider.ToolCall, status string) *FunctionCallOutputItem {
 	return &FunctionCallOutputItem{
 		ID:        "fc_" + call.ID,
@@ -500,7 +509,7 @@ func responseOutputs(message *provider.Message, ids *messageIDs, status string, 
 
 		var messageID string
 		for _, content := range part.Content {
-			if content.Text != "" || content.Refusal != "" {
+			if content.Text != "" || content.TextPresent || content.Refusal != "" {
 				messageID = ids.get(i, content.MessageID)
 				break
 			}
@@ -564,7 +573,7 @@ func messageOutputs(message *provider.Message, messageID, status string, opts re
 			}
 		}
 
-		if messageItem == nil && (content.Text != "" || content.Refusal != "") {
+		if messageItem == nil && (content.Text != "" || content.TextPresent || content.Refusal != "") {
 			messageItem = &OutputMessage{ID: messageID, Role: MessageRoleAssistant, Status: status, Phase: phase, Contents: []OutputContent{}}
 			output = append(output, ResponseOutput{
 				Type:          ResponseOutputTypeMessage,
@@ -575,7 +584,7 @@ func messageOutputs(message *provider.Message, messageID, status string, opts re
 			refusalEmitted = true
 			messageItem.Contents = append(messageItem.Contents, OutputContent{Type: "refusal", Text: refusal})
 		}
-		if content.Text != "" && !textEmitted {
+		if (content.Text != "" || content.TextPresent) && !textEmitted {
 			textEmitted = true
 			messageItem.Contents = append(messageItem.Contents, OutputContent{
 				Type: "output_text", Text: text, Annotations: []any{}, Logprobs: []any{},
@@ -585,7 +594,7 @@ func messageOutputs(message *provider.Message, messageID, status string, opts re
 		if content.ToolCall != nil {
 			call := *content.ToolCall
 
-			switch opts.kindOf(call.Name) {
+			switch opts.kind(call.Kind, call.Name) {
 			case provider.ToolKindCustom:
 				output = append(output, ResponseOutput{
 					Type:               ResponseOutputTypeCustomToolCall,
@@ -871,7 +880,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			})
 
 		case StreamEventFunctionCallAdded:
-			switch outputOpts.kindOf(event.ToolCallName) {
+			switch outputOpts.kind(event.ToolCallKind, event.ToolCallName) {
 			case provider.ToolKindCustom:
 				return writeEvent(w, "response.output_item.added", CustomToolCallOutputItemAddedEvent{
 					Type:           "response.output_item.added",
@@ -976,7 +985,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			}
 
 		case StreamEventFunctionCallArgumentsDelta:
-			switch outputOpts.kindOf(event.ToolCallName) {
+			switch outputOpts.kind(event.ToolCallKind, event.ToolCallName) {
 			case provider.ToolKindCustom:
 				if isApplyPatchToolCall(provider.ToolCall{Name: event.ToolCallName, Namespace: event.ToolCallNamespace}) {
 					return nil
@@ -1004,7 +1013,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			}
 
 		case StreamEventFunctionCallArgumentsDone:
-			switch outputOpts.kindOf(event.ToolCallName) {
+			switch outputOpts.kind(event.ToolCallKind, event.ToolCallName) {
 			case provider.ToolKindCustom:
 				call := provider.ToolCall{
 					ID:        event.ToolCallID,
@@ -1039,6 +1048,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 		case StreamEventFunctionCallDone:
 			call := provider.ToolCall{
 				ID:        event.ToolCallID,
+				Kind:      event.ToolCallKind,
 				Async:     event.ToolCallAsync,
 				Name:      event.ToolCallName,
 				Namespace: event.ToolCallNamespace,
@@ -1048,7 +1058,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 
 			status := itemStatus(event.Incomplete)
 
-			switch outputOpts.kindOf(event.ToolCallName) {
+			switch outputOpts.kind(event.ToolCallKind, event.ToolCallName) {
 			case provider.ToolKindCustom:
 				return writeEvent(w, "response.output_item.done", CustomToolCallOutputItemDoneEvent{
 					Type:           "response.output_item.done",
@@ -1306,7 +1316,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 
 		case StreamEventOutputItemDone:
 			content := []OutputContent{}
-			if event.Text != "" {
+			if event.Text != "" || event.TextPresent {
 				content = append(content, OutputContent{
 					Type:        "output_text",
 					Text:        event.Text,

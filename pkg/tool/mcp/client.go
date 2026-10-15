@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/adrianliechti/wingman/pkg/auth"
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/tool"
 
@@ -242,7 +243,7 @@ func (c *Client) Result(name string, value any) provider.ToolResult {
 func containsStructuredContent(parts []provider.Part, data []byte) bool {
 	for _, part := range parts {
 		var value any
-		if json.Unmarshal([]byte(part.Text), &value) == nil {
+		if jsonutil.Unmarshal([]byte(part.Text), &value) == nil {
 			encoded, _ := json.Marshal(value)
 			if bytes.Equal(encoded, data) {
 				return true

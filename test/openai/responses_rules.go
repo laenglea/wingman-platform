@@ -5,6 +5,10 @@ import "github.com/adrianliechti/wingman/test/harness"
 // DefaultResponsesResponseRules returns comparison rules suitable for /v1/responses.
 func DefaultResponsesResponseRules() map[string]harness.FieldRule {
 	return map[string]harness.FieldRule{
+		// Wingman deliberately omits the removed sampling controls.
+		"temperature":                harness.FieldIgnore,
+		"top_p":                      harness.FieldIgnore,
+		"top_k":                      harness.FieldIgnore,
 		"id":                         harness.FieldPresence,
 		"created_at":                 harness.FieldPresence,
 		"completed_at":               harness.FieldPresence,
@@ -22,10 +26,12 @@ func DefaultResponsesResponseRules() map[string]harness.FieldRule {
 		"usage.input_tokens":  harness.FieldNonEmpty,
 		"usage.output_tokens": harness.FieldNonEmpty,
 		// Some backends do not report a reasoning-token breakdown.
-		"usage.output_tokens_details":                  harness.FieldOptional,
-		"usage.total_tokens":                           harness.FieldNonEmpty,
-		"usage.input_tokens_details.cached_tokens":     harness.FieldPresence,
-		"usage.output_tokens_details.reasoning_tokens": harness.FieldPresence,
+		"usage.output_tokens_details":              harness.FieldOptional,
+		"usage.total_tokens":                       harness.FieldNonEmpty,
+		"usage.input_tokens_details.cached_tokens": harness.FieldPresence,
+		// Cache creation varies by backing provider and request history.
+		"usage.input_tokens_details.cache_write_tokens": harness.FieldIgnore,
+		"usage.output_tokens_details.reasoning_tokens":  harness.FieldPresence,
 		"error":                   harness.FieldExact,
 		"text.format.description": harness.FieldIgnore,
 		"prompt_cache_retention":  harness.FieldIgnore,
@@ -41,6 +47,10 @@ func DefaultResponsesResponseRules() map[string]harness.FieldRule {
 // DefaultResponsesSSERules returns comparison rules for SSE event structures.
 func DefaultResponsesSSERules() map[string]harness.FieldRule {
 	return map[string]harness.FieldRule{
+		"response.temperature": harness.FieldIgnore,
+		"response.top_p":       harness.FieldIgnore,
+		"response.top_k":       harness.FieldIgnore,
+		"response.usage.input_tokens_details.cache_write_tokens": harness.FieldIgnore,
 		"response.id":                                           harness.FieldPresence,
 		"response.created_at":                                   harness.FieldPresence,
 		"response.completed_at":                                 harness.FieldPresence,

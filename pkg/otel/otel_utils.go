@@ -9,14 +9,16 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/auth"
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 	"github.com/adrianliechti/wingman/pkg/provider"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+
 	// Core semconv v1.42 removed GenAI conventions; v1.41 is the last Go package
 	// providing these attributes and metric helpers. Keep it separate from core semconv.
-	"go.opentelemetry.io/otel/semconv/v1.41.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 	"go.opentelemetry.io/otel/semconv/v1.41.0/genaiconv"
 	coresemconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
@@ -414,7 +416,7 @@ func toChatMessage(m provider.Message) chatMessage {
 			var args any = c.ToolCall.Arguments
 			if c.ToolCall.Arguments != "" {
 				var parsed any
-				if err := json.Unmarshal([]byte(c.ToolCall.Arguments), &parsed); err == nil {
+				if err := jsonutil.Unmarshal([]byte(c.ToolCall.Arguments), &parsed); err == nil {
 					args = parsed
 				}
 			}
@@ -434,7 +436,7 @@ func toChatMessage(m provider.Message) chatMessage {
 			var response any = text.String()
 			if s := text.String(); s != "" {
 				var parsed any
-				if err := json.Unmarshal([]byte(s), &parsed); err == nil {
+				if err := jsonutil.Unmarshal([]byte(s), &parsed); err == nil {
 					response = parsed
 				}
 			}

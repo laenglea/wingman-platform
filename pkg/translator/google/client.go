@@ -13,7 +13,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/translator"
 
 	"cloud.google.com/go/auth"
-	cloudtranslate "cloud.google.com/go/translate/apiv3"
+	translate "cloud.google.com/go/translate/apiv3"
 	"cloud.google.com/go/translate/apiv3/translatepb"
 )
 
@@ -32,7 +32,7 @@ type Client struct {
 	credentials   func() (*auth.Credentials, error)
 
 	mutex  sync.Mutex
-	sdk    *cloudtranslate.TranslationClient
+	sdk    *translate.TranslationClient
 	parent string
 	closed bool
 }

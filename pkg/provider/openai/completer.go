@@ -87,6 +87,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		}
 
 		stream := c.completions.NewStreaming(ctx, *req)
+		defer stream.Close()
 
 		toolAliases := provider.ToolAliases(options.Tools)
 		toolCallIDs := map[int64]string{}
@@ -276,6 +277,10 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 				properties = ensureStrictSchema(properties)
 			}
 
+			properties, err := schemaFields(properties)
+			if err != nil {
+				return nil, err
+			}
 			schema := openai.ResponseFormatJSONSchemaJSONSchemaParam{
 				Name:   options.Schema.Name,
 				Schema: properties,
@@ -532,6 +537,10 @@ func convertTools(tools []provider.Tool) ([]openai.ChatCompletionToolUnionParam,
 			parameters = ensureStrictSchema(parameters)
 		}
 
+		parameters, err := schemaFields(parameters)
+		if err != nil {
+			return nil, err
+		}
 		function := openai.FunctionDefinitionParam{
 			Name: t.Name,
 

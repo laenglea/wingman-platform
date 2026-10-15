@@ -2,12 +2,14 @@ package image
 
 import (
 	"encoding/base64"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
 
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
 func (h *Handler) handleImageEdit(w http.ResponseWriter, r *http.Request) {
@@ -19,49 +21,58 @@ func (h *Handler) handleImageEdit(w http.ResponseWriter, r *http.Request) {
 	model := r.FormValue("model")
 	prompt := r.FormValue("prompt")
 
-	file, header, err := r.FormFile("image")
-
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	defer file.Close()
-
-	data, err := io.ReadAll(file)
-
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, model, policy.ActionAccess); err != nil {
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(model))
 		return
 	}
 
 	renderer, err := h.Renderer(model)
 
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(model))
 		return
 	}
 
-	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, model, policy.ActionAccess); err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
+	var images []provider.File
+
+	if r.MultipartForm != nil && r.MultipartForm.File != nil {
+		for _, field := range []string{"image", "image[]"} {
+			for _, header := range r.MultipartForm.File[field] {
+				file, err := header.Open()
+				if err != nil {
+					writeError(w, http.StatusBadRequest, err)
+					return
+				}
+
+				data, err := io.ReadAll(file)
+				file.Close()
+
+				if err != nil {
+					writeError(w, http.StatusBadRequest, err)
+					return
+				}
+
+				contentType := header.Header.Get("Content-Type")
+				if mediatype, _, err := mime.ParseMediaType(contentType); err == nil {
+					contentType = mediatype
+				}
+
+				images = append(images, provider.File{
+					Name:        header.Filename,
+					Content:     data,
+					ContentType: contentType,
+				})
+			}
+		}
 	}
 
-	contentType := header.Header.Get("Content-Type")
-
-	if mediatype, _, err := mime.ParseMediaType(contentType); err == nil {
-		contentType = mediatype
+	if len(images) == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("no image provided"))
+		return
 	}
 
 	options := &provider.RenderOptions{
-		Images: []provider.File{
-			{
-				Name: header.Filename,
-
-				Content:     data,
-				ContentType: contentType,
-			},
-		},
+		Images: images,
 
 		Aspect:     parseAspect(r.FormValue("size"), r.FormValue("aspect_ratio")),
 		Quality:    parseQuality(r.FormValue("quality")),
@@ -74,7 +85,7 @@ func (h *Handler) handleImageEdit(w http.ResponseWriter, r *http.Request) {
 	image, err := renderer.Render(r.Context(), prompt, options)
 
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, provider.CodeFromError(err, http.StatusBadRequest), err)
 		return
 	}
 

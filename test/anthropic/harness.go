@@ -50,6 +50,9 @@ type Model struct {
 func ModelCapabilities(name string) harness.Capabilities {
 	caps := modelCapabilities(name)
 	caps.NoForcedToolChoice = harness.RejectsForcedToolChoice(name)
+	if strings.Contains(name, "sonnet-5-5") || strings.Contains(name, "opus-5-5") {
+		caps.ComputerUse = false
+	}
 
 	return caps
 }

@@ -59,9 +59,7 @@ func (h *Handler) handleExtract(w http.ResponseWriter, r *http.Request) {
 			content = string(data)
 			contentType = "application/json"
 		}
-	}
-
-	if file, err := readFile(r); err == nil {
+	} else if file, err := readFile(r); err == nil {
 		p, err := h.Extractor(model)
 
 		if err != nil {
@@ -133,6 +131,11 @@ func (h *Handler) handleExtract(w http.ResponseWriter, r *http.Request) {
 
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+
+		if err := h.Policy.Verify(r.Context(), policy.ResourceModel, "", policy.ActionAccess); err != nil {
+			writeError(w, http.StatusNotFound, err)
 			return
 		}
 

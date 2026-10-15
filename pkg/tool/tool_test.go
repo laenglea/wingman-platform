@@ -1,9 +1,18 @@
 package tool
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 )
+
+func TestParseNormalizedSchemaPreservesNumbers(t *testing.T) {
+	const schema = `{"properties":{"id":{"enum":[9007199254740993,1.234567890123456789,1e400]}},"type":"object"}`
+	data, err := json.Marshal(ParseNormalizedSchema([]byte(schema)))
+	if err != nil || string(data) != schema {
+		t.Fatalf("schema changed: %s (%v)", data, err)
+	}
+}
 
 func TestNormalizeSchema_PreservesConstraintsAndOriginal(t *testing.T) {
 	original := map[string]any{

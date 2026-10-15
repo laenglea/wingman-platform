@@ -32,6 +32,7 @@ type accumulatedMessage struct {
 	id      string
 	phase   MessagePhase
 	text    strings.Builder
+	hasText bool
 	refusal strings.Builder
 }
 
@@ -100,11 +101,12 @@ func (a *CompletionAccumulator) Add(c Completion) {
 				a.beginMessage(c.MessageID, c.Phase)
 			}
 
-			if c.Text != "" {
+			if c.Text != "" || c.TextPresent {
 				message := a.currentMessage()
 
-				if message.text.Len() == 0 {
+				if !message.hasText {
 					a.contentOrder = append(a.contentOrder, accumulatedContentRef{kind: accumulatedContentText, index: len(a.messages) - 1})
+					message.hasText = true
 				}
 
 				message.text.WriteString(c.Text)
@@ -175,7 +177,7 @@ func (a *CompletionAccumulator) beginMessage(id string, phase MessagePhase) {
 		return
 	}
 
-	if n == 0 || a.messages[n-1].text.Len() > 0 || a.messages[n-1].refusal.Len() > 0 {
+	if n == 0 || a.messages[n-1].hasText || a.messages[n-1].refusal.Len() > 0 {
 		a.messages = append(a.messages, &accumulatedMessage{})
 	}
 
@@ -211,8 +213,8 @@ func (a *CompletionAccumulator) addReasoning(r *Reasoning) {
 				break
 			}
 		}
-	} else if len(a.reasonings) > 0 {
-		// A signed or redacted entry is complete; ID-less deltas start a new one
+	} else if len(a.reasonings) > 0 && len(a.contentOrder) > 0 && a.contentOrder[len(a.contentOrder)-1].kind == accumulatedContentReasoning {
+		// A signed, redacted, or interrupted entry is complete; ID-less deltas start a new one
 		if last := &a.reasonings[len(a.reasonings)-1]; !last.Redacted && last.Signature == "" {
 			target = last
 		}
@@ -334,7 +336,7 @@ func (a *CompletionAccumulator) Result() *Completion {
 
 		case accumulatedContentText:
 			m := a.messages[ref.index]
-			content = append(content, Content{MessageID: m.id, Phase: m.phase, Text: m.text.String()})
+			content = append(content, Content{MessageID: m.id, Phase: m.phase, Text: m.text.String(), TextPresent: m.text.Len() == 0})
 
 		case accumulatedContentRefusal:
 			m := a.messages[ref.index]

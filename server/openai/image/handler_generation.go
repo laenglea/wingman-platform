@@ -7,6 +7,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
 func (h *Handler) handleImageGeneration(w http.ResponseWriter, r *http.Request) {
@@ -17,15 +18,15 @@ func (h *Handler) handleImageGeneration(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	renderer, err := h.Renderer(req.Model)
-
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(req.Model))
 		return
 	}
 
-	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
-		writeError(w, http.StatusNotFound, err)
+	renderer, err := h.Renderer(req.Model)
+
+	if err != nil {
+		writeError(w, http.StatusNotFound, shared.ModelNotFound(req.Model))
 		return
 	}
 
@@ -41,7 +42,7 @@ func (h *Handler) handleImageGeneration(w http.ResponseWriter, r *http.Request) 
 	image, err := renderer.Render(r.Context(), req.Prompt, options)
 
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, provider.CodeFromError(err, http.StatusBadRequest), err)
 		return
 	}
 

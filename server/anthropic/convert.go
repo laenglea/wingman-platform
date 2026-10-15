@@ -139,7 +139,9 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 					return nil, fmt.Errorf("%s.source: %w", path, err)
 				}
 
-				content = append(content, provider.FileContent(file))
+				c := provider.FileContent(file)
+				c.CacheControl = blockCacheControl(block.CacheControl)
+				content = append(content, c)
 			}
 
 		case "document":
@@ -151,7 +153,9 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 			// that don't have a dedicated document block (OpenAI, Bedrock, …).
 			if block.Source.Type == "text" {
 				if block.Source.Data != "" {
-					content = append(content, provider.TextContent(block.Source.Data))
+					c := provider.TextContent(block.Source.Data)
+					c.CacheControl = blockCacheControl(block.CacheControl)
+					content = append(content, c)
 				}
 				continue
 			}
@@ -161,7 +165,9 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 				return nil, fmt.Errorf("%s.source: %w", path, err)
 			}
 
-			content = append(content, provider.FileContent(file))
+			c := provider.FileContent(file)
+			c.CacheControl = blockCacheControl(block.CacheControl)
+			content = append(content, c)
 
 		case "thinking":
 			// Round-trip reasoning across turns: signature is the verifiable
@@ -555,7 +561,9 @@ func toContentBlocks(content []provider.Content) []ContentBlock {
 				// server-executed search — informational, no client response expected
 				var input any
 				if c.ToolCall.Arguments != "" {
-					json.Unmarshal([]byte(c.ToolCall.Arguments), &input)
+					if err := decodeRequest(strings.NewReader(c.ToolCall.Arguments), &input); err != nil {
+						input = nil
+					}
 				}
 				if input == nil {
 					input = map[string]any{}
@@ -574,26 +582,10 @@ func toContentBlocks(content []provider.Content) []ContentBlock {
 				continue
 			}
 
-			name := c.ToolCall.Name
-			var input any
-
-			if name == texteditor.NameApplyPatch {
-				// Cross-dialect fallback (e.g. mixed histories): convert
-				// apply_patch args to text_editor input
-				input = texteditor.ParseOperation(c.ToolCall.Arguments).Input().Map()
-				name = texteditor.NameTextEditor
-			} else if name == computeruse.Name && c.ToolCall.Kind == provider.ToolKindComputer {
-				// Cross-dialect fallback: degrade OpenAI batched actions to a
-				// single Anthropic action
-				input = computeruse.AnthropicInput(c.ToolCall.Arguments)
-			} else if (name == shell.NameShell || name == shell.NameLocalShell) && c.ToolCall.Kind == provider.ToolKindShell {
-				// Cross-dialect fallback: render OpenAI shell actions as a
-				// bash command
-				input = shell.BashInput(c.ToolCall.Arguments)
-				name = shell.NameBash
-			} else {
-				if c.ToolCall.Arguments != "" {
-					json.Unmarshal([]byte(c.ToolCall.Arguments), &input)
+			name, input, ok := translateToolCall(*c.ToolCall)
+			if !ok && c.ToolCall.Arguments != "" {
+				if err := decodeRequest(strings.NewReader(c.ToolCall.Arguments), &input); err != nil {
+					input = nil
 				}
 			}
 
@@ -617,6 +609,25 @@ func toContentBlocks(content []provider.Content) []ContentBlock {
 	}
 
 	return result
+}
+
+func translateToolCall(call provider.ToolCall) (string, any, bool) {
+	switch {
+	case call.Name == texteditor.NameApplyPatch && call.Kind == provider.ToolKindTextEditor:
+		// Cross-dialect fallback (e.g. mixed histories): convert
+		// apply_patch args to text_editor input
+		return texteditor.NameTextEditor, texteditor.ParseOperation(call.Arguments).Input().Map(), true
+	case call.Name == computeruse.Name && call.Kind == provider.ToolKindComputer:
+		// Cross-dialect fallback: degrade OpenAI batched actions to a
+		// single Anthropic action
+		return computeruse.Name, computeruse.AnthropicInput(call.Arguments), true
+	case (call.Name == shell.NameShell || call.Name == shell.NameLocalShell) && call.Kind == provider.ToolKindShell:
+		// Cross-dialect fallback: render OpenAI shell actions as a
+		// bash command
+		return shell.NameBash, shell.BashInput(call.Arguments), true
+	default:
+		return call.Name, nil, false
+	}
 }
 
 func toStopReason(completion *provider.Completion) StopReason {
@@ -648,7 +659,7 @@ func toStopReason(completion *provider.Completion) StopReason {
 
 	if completion.Message != nil {
 		for _, c := range completion.Message.Content {
-			if c.ToolCall != nil {
+			if c.ToolCall != nil && !(c.ToolCall.Kind == provider.ToolKindToolSearch && c.ToolCall.Execution != "client") {
 				return StopReasonToolUse
 			}
 		}

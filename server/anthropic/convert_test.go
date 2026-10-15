@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -452,5 +453,51 @@ func TestToToolsRejectsToolsets(t *testing.T) {
 	tools, err := toTools([]ToolParam{{Type: "computer_20251124", DisplayWidthPx: 800, DisplayHeightPx: 600}})
 	if err != nil || len(tools) != 1 || tools[0].Kind != provider.ToolKindComputer {
 		t.Fatalf("legacy computer tool: %+v %v", tools, err)
+	}
+}
+
+func TestToolInputNumbersRoundTrip(t *testing.T) {
+	const input = `{"id":9007199254740993,"nested":{"precise":1.234567890123456789,"huge":1e400}}`
+	var req MessageRequest
+	if err := decodeRequest(strings.NewReader(`{"model":"test","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call_1","name":"run","input":`+input+`}]}]}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	message, err := toMessage(0, req.Messages[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []provider.ToolKind{"", provider.ToolKindToolSearch} {
+		call := message.ToolCalls()[0]
+		call.Kind = kind
+		blocks := toContentBlocks([]provider.Content{provider.ToolCallContent(call)})
+		data, err := json.Marshal(blocks[0].Input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got, want any
+		if err := decodeRequest(strings.NewReader(string(data)), &got); err != nil {
+			t.Fatal(err)
+		}
+		if err := decodeRequest(strings.NewReader(input), &want); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s input: got %s, want %s", kind, data, input)
+		}
+	}
+}
+
+func TestMalformedToolInputDoesNotKeepFirstObject(t *testing.T) {
+	for _, kind := range []provider.ToolKind{"", provider.ToolKindToolSearch} {
+		blocks := toContentBlocks([]provider.Content{provider.ToolCallContent(provider.ToolCall{
+			ID: "call_1", Name: "lookup", Kind: kind, Arguments: `{"a":1}{"b":2}`,
+		})})
+		data, err := json.Marshal(blocks[0].Input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != "{}" {
+			t.Errorf("%s: kept partial input %s", kind, data)
+		}
 	}
 }

@@ -27,11 +27,11 @@ func TestReasoningRoundTripHTTP(t *testing.T) {
 		t.Run(model.Name, func(t *testing.T) {
 			h.SkipUnlessConfigured(t, model.Name)
 			turn1 := map[string]any{
-				"input":   "Count the letter 'e' in 'nevertheless'.",
+				"input":   harness.ReasoningPrompt,
 				"store":   false,
 				"include": []string{"reasoning.encrypted_content"},
 				"reasoning": map[string]any{
-					"effort":  "low",
+					"effort":  "high",
 					"summary": "auto",
 				},
 			}
@@ -61,7 +61,7 @@ func TestReasoningRoundTripHTTP(t *testing.T) {
 						"type": "message",
 						"role": "user",
 						"content": []map[string]any{
-							{"type": "input_text", "text": "Count the letter 'e' in 'nevertheless'."},
+							{"type": "input_text", "text": harness.ReasoningPrompt},
 						},
 					},
 				}
@@ -70,7 +70,7 @@ func TestReasoningRoundTripHTTP(t *testing.T) {
 					"type": "message",
 					"role": "user",
 					"content": []map[string]any{
-						{"type": "input_text", "text": "Are you sure? Recount very carefully and tell me the final number."},
+						{"type": "input_text", "text": "Are you sure? Verify each remainder and the smallest positive solution with a different method."},
 					},
 				})
 
@@ -79,7 +79,7 @@ func TestReasoningRoundTripHTTP(t *testing.T) {
 					"store":   false,
 					"include": []string{"reasoning.encrypted_content"},
 					"reasoning": map[string]any{
-						"effort":  "low",
+						"effort":  "high",
 						"summary": "auto",
 					},
 				}

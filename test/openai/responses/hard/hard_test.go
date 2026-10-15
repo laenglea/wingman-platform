@@ -13,8 +13,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/adrianliechti/wingman/test/harness"
 	"github.com/adrianliechti/wingman/test/hardtest"
+	"github.com/adrianliechti/wingman/test/harness"
 	"github.com/adrianliechti/wingman/test/openai"
 	"github.com/adrianliechti/wingman/test/openai/responses"
 )

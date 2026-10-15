@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	scrapeexa "github.com/adrianliechti/wingman/pkg/scraper/exa"
+	"github.com/adrianliechti/wingman/pkg/scraper/exa"
 	"github.com/adrianliechti/wingman/pkg/tool/scrape"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -19,7 +19,7 @@ func (f fetchRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error)
 
 func TestFetchFullExaContentOverMCP(t *testing.T) {
 	page := strings.Repeat("Earlier section. ", 1000) + "\nLaunch budget: 83 million credits."
-	upstream, err := scrapeexa.New("key", scrapeexa.WithClient(&http.Client{Transport: fetchRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+	upstream, err := exa.New("key", exa.WithClient(&http.Client{Transport: fetchRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		var body struct {
 			Text        bool `json:"text"`
 			MaxAgeHours int  `json:"maxAgeHours"`

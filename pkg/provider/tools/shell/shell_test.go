@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -34,7 +35,7 @@ func TestShellAction(t *testing.T) {
 	}
 
 	passthrough := ShellAction(`{"commands":["a","b"],"timeout_ms":500}`)
-	if passthrough["timeout_ms"] != float64(500) {
+	if passthrough["timeout_ms"] != json.Number("500") {
 		t.Fatalf("timeout: %+v", passthrough)
 	}
 }

@@ -80,6 +80,23 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 
 		toolArgsSeen := map[int64]bool{}
 
+		// Signatures arrive as fragments, while provider.Reasoning carries a
+		// complete opaque value. Emit each signature once its block closes.
+		pendingSignatures := map[int64]bool{}
+		flushSignature := func(index int64) bool {
+			if !pendingSignatures[index] {
+				return true
+			}
+			delete(pendingSignatures, index)
+			return yield(&provider.Completion{
+				ID: message.ID, Model: c.model,
+				Message: &provider.Message{
+					Role:    provider.MessageRoleAssistant,
+					Content: []provider.Content{provider.ReasoningContent(provider.Reasoning{Signature: message.Content[index].Signature})},
+				},
+			}, nil)
+		}
+
 		// Text blocks form message items the way OpenAI's output does: adjacent
 		// blocks (such as cited fragments) share one item, and a block that
 		// follows a server tool or thinking block starts the next item.
@@ -94,50 +111,6 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 	messageStream:
 		for stream.Next() {
 			event := stream.Current()
-
-			// HACK: tool use blocks without input_json_delta would otherwise
-			// accumulate empty arguments downstream — normalize to "{}"
-			switch event := event.AsAny().(type) {
-			case anthropic.BetaRawContentBlockStopEvent:
-				if int(event.Index) >= len(message.Content) {
-					break
-				}
-
-				block := &message.Content[event.Index]
-				if block.Type == "server_tool_use" && strings.HasPrefix(block.Name, "tool_search_tool_") {
-					if !yield(&provider.Completion{ID: message.ID, Model: c.model, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{
-						provider.ToolCallContent(provider.ToolCall{ID: block.ID, Name: block.Name, Kind: provider.ToolKindToolSearch, Execution: "server", Arguments: string(block.Input)}),
-					}}}, nil) {
-						return
-					}
-				}
-
-				if block.Type == "tool_use" && !toolArgsSeen[event.Index] {
-					if len(block.Input) == 0 {
-						block.Input = json.RawMessage([]byte("{}"))
-					}
-
-					delta := &provider.Completion{
-						ID:    message.ID,
-						Model: c.model,
-
-						Message: &provider.Message{
-							Role: provider.MessageRoleAssistant,
-
-							Content: []provider.Content{
-								provider.ToolCallContent(provider.ToolCall{
-									ID:        block.ID,
-									Arguments: "{}",
-								}),
-							},
-						},
-					}
-
-					if !yield(delta, nil) {
-						return
-					}
-				}
-			}
 
 			if err := message.Accumulate(event); err != nil {
 				yield(nil, err)
@@ -167,10 +140,11 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 						yield(nil, err)
 						return
 					}
-					if !yield(&provider.Completion{ID: message.ID, Model: c.model, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ToolResultContent(result)}}}, nil) {
+					if !yield(&provider.Completion{ID: message.ID, Model: c.model, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.ToolResultContent(result)}}, Usage: toUsage(message.Usage)}, nil) {
 						return
 					}
 				case anthropic.BetaThinkingBlock:
+					pendingSignatures[startIndex] = event.Signature != ""
 					delta := &provider.Completion{
 						ID:    message.ID,
 						Model: c.model,
@@ -179,7 +153,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 							Role: provider.MessageRoleAssistant,
 
 							Content: []provider.Content{
-								provider.ReasoningContent(thinkingReasoning(event.Thinking, event.Signature, notes)),
+								provider.ReasoningContent(thinkingReasoning(event.Thinking, "", notes)),
 							},
 						},
 
@@ -246,6 +220,8 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 								provider.CompactionContent(compactionFromBlock(message.ID, startIndex, event.Content, event.EncryptedContent, event.RawJSON())),
 							},
 						},
+
+						Usage: toUsage(message.Usage),
 					}
 
 					if !yield(delta, nil) {
@@ -306,23 +282,8 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 					}
 
 				case anthropic.BetaSignatureDelta:
-					delta := &provider.Completion{
-						ID:    message.ID,
-						Model: c.model,
-
-						Message: &provider.Message{
-							Role: provider.MessageRoleAssistant,
-
-							Content: []provider.Content{
-								provider.ReasoningContent(provider.Reasoning{
-									Signature: event.Signature,
-								}),
-							},
-						},
-					}
-
-					if !yield(delta, nil) {
-						return
+					if event.Signature != "" {
+						pendingSignatures[blockIndex] = true
 					}
 
 				case anthropic.BetaCompactionContentBlockDelta:
@@ -362,10 +323,6 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 					}
 
 				case anthropic.BetaInputJSONDelta:
-					if int(blockIndex) >= len(message.Content) {
-						break
-					}
-
 					if event.PartialJSON != "" {
 						toolArgsSeen[blockIndex] = true
 					}
@@ -405,6 +362,56 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 				}
 
 			case anthropic.BetaRawContentBlockStopEvent:
+				if !flushSignature(event.Index) {
+					return
+				}
+
+				block := &message.Content[event.Index]
+				if block.Type == "tool_use" && !toolArgsSeen[event.Index] {
+					// Keep input supplied in content_block_start. Only a function
+					// with no input becomes {}; an empty custom input stays empty.
+					arguments := string(block.Input)
+					if buffer, custom := customArgs[event.Index]; custom {
+						if arguments != "{}" {
+							buffer.WriteString(arguments)
+						}
+					} else {
+						if arguments == "" {
+							arguments = "{}"
+						}
+						if !yield(&provider.Completion{
+							ID: message.ID, Model: c.model,
+							Message: &provider.Message{
+								Role:    provider.MessageRoleAssistant,
+								Content: []provider.Content{provider.ToolCallContent(provider.ToolCall{ID: block.ID, Arguments: arguments})},
+							},
+						}, nil) {
+							return
+						}
+					}
+				}
+				if block.Type == "server_tool_use" && strings.HasPrefix(block.Name, "tool_search_tool_") {
+					if !yield(&provider.Completion{
+						ID:    message.ID,
+						Model: c.model,
+						Message: &provider.Message{
+							Role: provider.MessageRoleAssistant,
+							Content: []provider.Content{
+								provider.ToolCallContent(provider.ToolCall{
+									ID:        block.ID,
+									Name:      block.Name,
+									Kind:      provider.ToolKindToolSearch,
+									Execution: "server",
+									Arguments: string(block.Input),
+								}),
+							},
+						},
+						Usage: toUsage(message.Usage),
+					}, nil) {
+						return
+					}
+				}
+
 				buffer, ok := customArgs[event.Index]
 
 				if !ok {
@@ -412,10 +419,6 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 				}
 
 				delete(customArgs, event.Index)
-
-				if int(event.Index) >= len(message.Content) {
-					break
-				}
 
 				delta := &provider.Completion{
 					ID:    message.ID,
@@ -426,7 +429,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 
 						Content: []provider.Content{
 							provider.ToolCallContent(provider.ToolCall{
-								ID:        message.Content[event.Index].ID,
+								ID:        block.ID,
 								Kind:      provider.ToolKindCustom,
 								Arguments: custom.Unwrap(buffer.String()),
 							}),
@@ -439,6 +442,12 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 				}
 
 			case anthropic.BetaRawMessageStopEvent:
+				// A terminal message may arrive without every block_stop.
+				for _, index := range slices.Sorted(maps.Keys(pendingSignatures)) {
+					if !flushSignature(index) {
+						return
+					}
+				}
 				messageStopped = true
 				if message.StopReason == "" {
 					yield(nil, errors.New("anthropic: message_stop without a stop reason"))
@@ -909,10 +918,10 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 						arguments = custom.Wrap(arguments)
 					}
 
-					var input map[string]any
+					var input map[string]json.RawMessage
 
 					if err := json.Unmarshal([]byte(arguments), &input); err != nil || input == nil {
-						input = map[string]any{}
+						input = map[string]json.RawMessage{}
 					}
 
 					blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
@@ -1053,12 +1062,25 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			params = claude.SanitizeSchema(params)
 		}
 
-		var schema anthropic.BetaToolInputSchemaParam
+		// Keep opaque schema values raw: the SDK decoder uses float64 and
+		// its encoder can encode json.Number nested in Properties as strings.
+		type inputSchema anthropic.BetaToolInputSchemaParam
+		var decoded struct {
+			inputSchema
+			Properties json.RawMessage `json:"properties"`
+		}
 
-		schemaData, _ := json.Marshal(params)
-
-		if err := json.Unmarshal(schemaData, &schema); err != nil {
+		schemaData, err := json.Marshal(params)
+		if err != nil {
 			return nil, errors.New("invalid tool parameters schema")
+		}
+
+		if err := json.Unmarshal(schemaData, &decoded); err != nil {
+			return nil, errors.New("invalid tool parameters schema")
+		}
+		schema := anthropic.BetaToolInputSchemaParam(decoded.inputSchema)
+		if len(decoded.Properties) > 0 {
+			schema.Properties = decoded.Properties
 		}
 
 		// Unmarshal only fills properties/required/type — carry all other
@@ -1071,7 +1093,8 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				if schema.ExtraFields == nil {
 					schema.ExtraFields = map[string]any{}
 				}
-				schema.ExtraFields[key] = value
+				data, _ := json.Marshal(value) // params was validated above
+				schema.ExtraFields[key] = json.RawMessage(data)
 			}
 		}
 

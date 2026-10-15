@@ -139,7 +139,10 @@ func progressWire(t *testing.T, backend string) string {
 		for i, text := range []string{"", "Looking it up."} {
 			emit("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"thinking","thinking":"","signature":""}}`, i))
 			emit("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"thinking_delta","thinking":%q}}`, i, text))
-			emit("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"signature_delta","signature":"signed-%d"}}`, i, i))
+			// The adapter must join signature fragments before either frontend
+			// wraps the opaque value for replay on the next turn.
+			emit("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"signature_delta","signature":"signed-"}}`, i))
+			emit("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"signature_delta","signature":"%d"}}`, i, i))
 			emit("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, i))
 		}
 		emit("content_block_start", `{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"call_1","name":"lookup","input":{}}}`)
@@ -151,7 +154,8 @@ func progressWire(t *testing.T, backend string) string {
 		emit("messageStart", `{"role":"assistant"}`)
 		for i, text := range []string{"", "Looking it up."} {
 			emit("contentBlockDelta", fmt.Sprintf(`{"contentBlockIndex":%d,"delta":{"reasoningContent":{"text":%q}}}`, i, text))
-			emit("contentBlockDelta", fmt.Sprintf(`{"contentBlockIndex":%d,"delta":{"reasoningContent":{"signature":"signed-%d"}}}`, i, i))
+			emit("contentBlockDelta", fmt.Sprintf(`{"contentBlockIndex":%d,"delta":{"reasoningContent":{"signature":"signed-"}}}`, i))
+			emit("contentBlockDelta", fmt.Sprintf(`{"contentBlockIndex":%d,"delta":{"reasoningContent":{"signature":"%d"}}}`, i, i))
 			emit("contentBlockStop", fmt.Sprintf(`{"contentBlockIndex":%d}`, i))
 		}
 		emit("contentBlockStart", `{"contentBlockIndex":2,"start":{"toolUse":{"toolUseId":"call_1","name":"lookup"}}}`)

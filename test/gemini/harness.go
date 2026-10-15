@@ -38,14 +38,30 @@ func New(t *testing.T) *Harness {
 	}
 
 	return &Harness{
-		Wingman:        harness.Endpoint{Name: "wingman", BaseURL: env("WINGMAN_BASE_URL", DefaultWingmanURL), APIKey: env("WINGMAN_API_KEY", "test-key")},
+		Wingman:        harness.Endpoint{Name: "wingman", BaseURL: wingmanURL(), APIKey: env("WINGMAN_API_KEY", "test-key")},
 		Gemini:         harness.Endpoint{Name: "gemini", BaseURL: env("GEMINI_BASE_URL", DefaultGeminiURL), APIKey: key},
 		Client:         harness.NewClient(),
 		ReferenceModel: env("TEST_GEMINI_REFERENCE_MODEL", "gemini-3.8-flash"),
 	}
 }
 
+func wingmanURL() string {
+	base := strings.TrimRight(env("WINGMAN_BASE_URL", DefaultWingmanURL), "/")
+	// A shared E2E invocation uses /v1 for OpenAI and Anthropic. Gemini's
+	// native routes use /v1beta on the same server.
+	if strings.HasSuffix(base, "/v1") {
+		return strings.TrimSuffix(base, "/v1") + "/v1beta"
+	}
+	return base
+}
+
 func ModelCapabilities(name string) harness.Capabilities {
+	caps := modelCapabilities(name)
+	caps.NoForcedToolChoice = harness.RejectsForcedToolChoice(name)
+	return caps
+}
+
+func modelCapabilities(name string) harness.Capabilities {
 	n := strings.ToLower(name)
 
 	switch {

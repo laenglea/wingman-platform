@@ -511,8 +511,8 @@ func TestSplitterCROnlyParagraphBreaks(t *testing.T) {
 	splitter.Normalize = false
 
 	testCases := []struct {
-		name     string
-		text     string
+		name      string
+		text      string
 		minChunks int
 	}{
 		{

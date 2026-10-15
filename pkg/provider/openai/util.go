@@ -19,6 +19,23 @@ import (
 	"golang.org/x/net/http/httpguts"
 )
 
+// Generated SDK encoders can treat json.Number inside a schema as a Go
+// string. Encode each opaque schema value with encoding/json first.
+func schemaFields(schema map[string]any) (map[string]any, error) {
+	if schema == nil {
+		return nil, nil
+	}
+	result := make(map[string]any, len(schema))
+	for key, value := range schema {
+		data, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		result[key] = json.RawMessage(data)
+	}
+	return result, nil
+}
+
 // convertError maps upstream OpenAI / Azure OpenAI errors into a
 // *provider.ProviderError, normalising rate-limit responses to HTTP 429 and
 // extracting a Retry-After hint from headers or message text.

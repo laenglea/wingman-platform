@@ -88,6 +88,9 @@ func (h *Handler) handleContents(w http.ResponseWriter, r *http.Request) {
 		web.WriteError(w, r, 400, "contents requires text retrieval")
 		return
 	}
+	if limit == 0 {
+		limit = 10000
+	}
 	p, err := h.Scraper(r, model)
 	if err != nil {
 		web.WriteError(w, r, web.StatusOf(err), err.Error())

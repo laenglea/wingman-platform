@@ -118,6 +118,11 @@ func validateProjectWorkflow(steps []projectStep, dir string) error {
 			}
 		case "Bash":
 			if !isProjectTestCommand(step.command, dir) {
+				// The CLI can deny an attempted command. It did not execute and
+				// cannot establish either the failing or passing test evidence.
+				if step.isError {
+					continue
+				}
 				return fmt.Errorf("unexpected project command %q", step.command)
 			}
 			if step.isError && strings.Contains(step.result, "FAILED") {
@@ -176,6 +181,7 @@ func TestProjectWorkflow(t *testing.T) {
 		{"edit after passing tests", []projectStep{failure, pricing, invoice, success, pricing}, false},
 		{"tests still fail", []projectStep{failure, pricing, invoice, failure}, false},
 		{"other command", []projectStep{{name: "Bash", command: "echo OK"}}, false},
+		{"denied command then repair", []projectStep{failure, {name: "Bash", command: "git status", isError: true}, pricing, invoice, success}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := validateProjectWorkflow(tc.steps, dir); (err == nil) != tc.valid {

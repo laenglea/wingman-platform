@@ -184,3 +184,52 @@ func TestNativeTextSignatureStaysOnItsPart(t *testing.T) {
 		t.Fatalf("signature moved to another text part: %+v", reply)
 	}
 }
+
+func TestBinaryThoughtSignatureWithAtAndColonIsNotParsedAsRealm(t *testing.T) {
+	// Protobuf wire bytes starting with '@' (0x40 = field 8 varint) and containing
+	// ':' (0x3a = field 7 length-delimited) plus binary control/high bytes.
+	rawSig := []byte{0x40, 0x01, 0x3a, 0x80, 0xff, 0x00}
+	want := google.EncodeThoughtSignature(rawSig)
+
+	messages, err := toMessages(nil, []*Content{
+		{Role: "user", Parts: []*Part{{Text: "Hi"}}},
+		{Role: "model", Parts: []*Part{{FunctionCall: &FunctionCall{ID: "call_1", Name: "lookup", Args: map[string]any{}}, ThoughtSignature: rawSig}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := messages[1].Content
+	if len(got) != 2 || got[0].Reasoning == nil || got[0].Reasoning.Signature != want {
+		t.Fatalf("binary signature was corrupted as realm-tagged: got %+v, want %q", got, want)
+	}
+}
+
+func TestFinishReasonAndRefusalFromCompletion(t *testing.T) {
+	if got := toFinishReason(&provider.Completion{StopReason: provider.StopReasonMaxTokens}); got != FinishReasonMaxTokens {
+		t.Fatalf("StopReasonMaxTokens -> %q, want %q", got, FinishReasonMaxTokens)
+	}
+	if got := toFinishReason(&provider.Completion{StopReason: provider.StopReasonRefusal}); got != FinishReasonSafety {
+		t.Fatalf("StopReasonRefusal -> %q, want %q", got, FinishReasonSafety)
+	}
+
+	content := toContent([]provider.Content{provider.RefusalContent("cannot comply")})
+	if content == nil || len(content.Parts) != 1 || content.Parts[0].Text != "cannot comply" {
+		t.Fatalf("refusal content = %+v", content)
+	}
+}
+
+func TestToMessagesRejectsInvalidRoleAndSkipsNilElements(t *testing.T) {
+	if _, err := toMessages(nil, []*Content{{Role: "system", Parts: []*Part{{Text: "hi"}}}}); err == nil {
+		t.Fatal("expected error for invalid role 'system'")
+	}
+
+	msgs, err := toMessages(&Content{Parts: []*Part{nil, {Text: "sys"}}}, []*Content{nil, {Role: "user", Parts: []*Part{nil, {Text: "hello"}}}})
+	if err != nil || len(msgs) != 2 {
+		t.Fatalf("toMessages with nil elements: len=%d, err=%v", len(msgs), err)
+	}
+
+	tools := toTools([]*Tool{nil, {FunctionDeclarations: []*FunctionDeclaration{nil, {Name: "fn"}}}}, false)
+	if len(tools) != 1 || tools[0].Name != "fn" {
+		t.Fatalf("toTools with nil elements: %+v", tools)
+	}
+}

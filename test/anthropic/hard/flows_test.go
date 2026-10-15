@@ -479,7 +479,7 @@ func TestFlowSystemAfterToolResult(t *testing.T) {
 					request := anthropic.WithModel(body, h.ReferenceModel)
 					if stream {
 						request["stream"] = true
-						referenceEvents = anthropic.PostMessagesSSE(t, h, h.Anthropic, request)
+						referenceEvents = anthropic.PostMessagesSSEAllowRejection(t, h, h.Anthropic, request)
 						// A rejected request answers with a JSON error, not a stream.
 						if rejected, detail := rejectedStream(referenceEvents); rejected {
 							t.Logf("reference rejected a system message after the tool result: %s", detail)

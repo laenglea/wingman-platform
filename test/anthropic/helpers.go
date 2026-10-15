@@ -95,6 +95,19 @@ func PostMessages(t *testing.T, h *Harness, ep harness.Endpoint, body map[string
 // PostMessagesSSE sends a streaming request with Anthropic-style headers.
 func PostMessagesSSE(t *testing.T, h *Harness, ep harness.Endpoint, body map[string]any) []*harness.SSEEvent {
 	t.Helper()
+	return postMessagesSSE(t, h, ep, body, false)
+}
+
+// PostMessagesSSEAllowRejection is for compatibility probes whose reference
+// may reject a request before opening the stream. Other HTTP failures remain
+// test failures; a 400 is exposed as an error event for the caller to inspect.
+func PostMessagesSSEAllowRejection(t *testing.T, h *Harness, ep harness.Endpoint, body map[string]any) []*harness.SSEEvent {
+	t.Helper()
+	return postMessagesSSE(t, h, ep, body, true)
+}
+
+func postMessagesSSE(t *testing.T, h *Harness, ep harness.Endpoint, body map[string]any, allowRejection bool) []*harness.SSEEvent {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), h.Client.Timeout)
 	defer cancel()
 
@@ -125,6 +138,13 @@ func PostMessagesSSE(t *testing.T, h *Harness, ep harness.Endpoint, body map[str
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
+		if allowRejection && resp.StatusCode == http.StatusBadRequest {
+			var data map[string]any
+			if err := json.Unmarshal(raw, &data); err != nil {
+				t.Fatalf("invalid rejection response from %s: %v", ep.Name, err)
+			}
+			return []*harness.SSEEvent{{Event: "error", Data: data, Raw: string(raw)}}
+		}
 		t.Fatalf("%s returned status %d: %s", ep.Name, resp.StatusCode, raw)
 	}
 

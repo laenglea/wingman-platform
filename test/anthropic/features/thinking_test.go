@@ -23,7 +23,7 @@ func TestThinkingHTTP(t *testing.T) {
 					"budget_tokens": 5000,
 				},
 				"messages": []map[string]any{
-					{"role": "user", "content": "How many r's are in strawberry?"},
+					{"role": "user", "content": harness.ReasoningPrompt},
 				},
 			}
 
@@ -56,7 +56,7 @@ func TestThinkingSSE(t *testing.T) {
 					"budget_tokens": 5000,
 				},
 				"messages": []map[string]any{
-					{"role": "user", "content": "How many r's are in strawberry?"},
+					{"role": "user", "content": harness.ReasoningPrompt},
 				},
 			}
 
@@ -84,9 +84,9 @@ func TestThinkingMultiTurnHTTP(t *testing.T) {
 					"budget_tokens": 5000,
 				},
 				"messages": []map[string]any{
-					{"role": "user", "content": "Count the letter 'e' in 'nevertheless'."},
-					{"role": "assistant", "content": "There are 3 letter e's in 'nevertheless'."},
-					{"role": "user", "content": "Are you sure? Count again carefully, letter by letter."},
+					{"role": "user", "content": harness.ReasoningPrompt},
+					{"role": "assistant", "content": "I will verify the smallest positive solution."},
+					{"role": "user", "content": "Are you sure? Verify the smallest positive solution using two different methods."},
 				},
 			}
 

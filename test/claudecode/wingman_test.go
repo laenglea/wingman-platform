@@ -10,7 +10,7 @@ import (
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/pkg/policy/noop"
 	"github.com/adrianliechti/wingman/pkg/provider"
-	server "github.com/adrianliechti/wingman/server/anthropic"
+	"github.com/adrianliechti/wingman/server/anthropic"
 	"github.com/adrianliechti/wingman/test/harness"
 	"github.com/go-chi/chi/v5"
 )
@@ -44,7 +44,7 @@ func TestClaudeCodeOfflineTrailingSignature(t *testing.T) {
 	cfg := &config.Config{Policy: noop.New()}
 	cfg.RegisterCompleter("claude-sonnet-4-6", trailingSignatureCompleter{})
 	router := chi.NewRouter()
-	router.Route("/v1", server.New(cfg).Attach)
+	router.Route("/v1", anthropic.New(cfg).Attach)
 	upstream := httptest.NewServer(router)
 	t.Cleanup(upstream.Close)
 	answer, exchanges, _ := runClaude(t, binary, harness.Endpoint{Name: "offline", BaseURL: upstream.URL + "/v1", APIKey: "test"}, "claude-sonnet-4-6", "Reply with WINGMAN_E2E_OK.", "", "")

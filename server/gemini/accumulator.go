@@ -66,7 +66,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 					textContent = append(textContent, provider.ReasoningContent(reasoning))
 				}
 			}
-			if content.Text != "" {
+			if content.Text != "" || content.Refusal != "" {
 				if s.pendingSignature != "" {
 					textContent = append(textContent, provider.ReasoningContent(provider.Reasoning{Signature: s.pendingSignature}))
 					s.pendingSignature = ""
@@ -117,12 +117,7 @@ func (s *StreamingAccumulator) Complete() error {
 	response.UsageMetadata = toUsageMetadata(result.Usage)
 
 	// Determine finish reason
-	finishReason := FinishReasonStop
-	if result.Message != nil {
-		finishReason = toFinishReason(result.Status, result.Message.Content)
-	} else if result.Status == provider.CompletionStatusIncomplete {
-		finishReason = FinishReasonMaxTokens
-	}
+	finishReason := toFinishReason(result)
 
 	// Build final candidate
 	candidate := &Candidate{

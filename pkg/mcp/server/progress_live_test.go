@@ -23,7 +23,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/researcher/perplexity"
 	scrapeexa "github.com/adrianliechti/wingman/pkg/scraper/exa"
 	searchexa "github.com/adrianliechti/wingman/pkg/searcher/exa"
-	researchtool "github.com/adrianliechti/wingman/pkg/tool/research"
+	"github.com/adrianliechti/wingman/pkg/tool/research"
 	"github.com/joho/godotenv"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -65,7 +65,7 @@ func TestLiveResearchLongRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer session.Close()
-	params := &mcp.CallToolParams{Name: researchtool.ToolName, Arguments: map[string]any{"instructions": "long research"}}
+	params := &mcp.CallToolParams{Name: research.ToolName, Arguments: map[string]any{"instructions": "long research"}}
 	params.SetProgressToken("long-request")
 	result, err := session.CallTool(ctx, params)
 	if err != nil || result.IsError || result.Content[0].(*mcp.TextContent).Text != "Completed long research" {
@@ -133,7 +133,7 @@ func TestLiveResearchProgress(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			tool, err := researchtool.New(otel.NewResearcher(tt.name, tt.name, p))
+			tool, err := research.New(otel.NewResearcher(tt.name, tt.name, p))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -164,7 +164,7 @@ func TestLiveResearchProgress(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer session.Close()
-			params := &mcp.CallToolParams{Name: researchtool.ToolName, Arguments: map[string]any{"instructions": question}}
+			params := &mcp.CallToolParams{Name: research.ToolName, Arguments: map[string]any{"instructions": question}}
 			params.SetProgressToken(tt.name)
 			response, err := session.CallTool(ctx, params)
 			elapsed := time.Since(start).Milliseconds()

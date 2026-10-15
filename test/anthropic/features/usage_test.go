@@ -130,7 +130,7 @@ func TestUsageTokensThinking(t *testing.T) {
 			"budget_tokens": 5000,
 		},
 		"messages": []map[string]any{
-			{"role": "user", "content": "How many r's are in strawberry?"},
+			{"role": "user", "content": harness.ReasoningPrompt},
 		},
 	}
 

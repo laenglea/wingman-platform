@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -771,7 +772,9 @@ func parseTools(data json.RawMessage) ([]provider.Tool, error) {
 		Description string         `json:"description"`
 		Parameters  map[string]any `json:"parameters"`
 	}
-	if err := json.Unmarshal(data, &values); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&values); err != nil {
 		return nil, errors.New("session.tools must be an array")
 	}
 

@@ -1,6 +1,7 @@
 package google
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -340,7 +341,13 @@ func newGeminiWireCapture(t *testing.T) (*geminiRealtimeSession, <-chan map[stri
 		defer conn.Close()
 		for {
 			var message map[string]any
-			if err := conn.ReadJSON(&message); err != nil {
+			_, data, err := conn.ReadMessage()
+			if err == nil {
+				decoder := json.NewDecoder(bytes.NewReader(data))
+				decoder.UseNumber()
+				err = decoder.Decode(&message)
+			}
+			if err != nil {
 				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 					readErrors <- err
 				}
@@ -398,5 +405,44 @@ func assertGeminiRealtimeInputKeys(t *testing.T, messages <-chan map[string]any,
 		case <-time.After(time.Second):
 			t.Fatalf("timed out waiting for Gemini message[%d] key %q", i, key)
 		}
+	}
+}
+
+func TestGeminiLiveToolNumbers(t *testing.T) {
+	const args = `{"id":9007199254740993,"values":[1.234567890123456789,1e400,null,false]}`
+	session := newGeminiTranslationTestSession()
+	events := session.translate(decodeGeminiMessage(t, `{"toolCall":{"functionCalls":[{"id":"call-1","name":"lookup","args":`+args+`}]}}`))
+	found := false
+	for _, event := range events {
+		if event.ToolCall != nil {
+			found = true
+			if event.ToolCall.Arguments != args {
+				t.Fatalf("tool arguments changed: %s", event.ToolCall.Arguments)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing tool call")
+	}
+
+	wire, messages, closeCapture := newGeminiWireCapture(t)
+	defer closeCapture()
+	wire.toolNames["call-1"] = "lookup"
+	if err := wire.SendToolResult(t.Context(), "call-1", args); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case message := <-messages:
+		responses := message["toolResponse"].(map[string]any)["functionResponses"].([]any)
+		result := responses[0].(map[string]any)["response"].(map[string]any)["result"]
+		data, err := json.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != args {
+			t.Fatalf("tool result changed: %s", data)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("missing tool response")
 	}
 }

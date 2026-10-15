@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/adrianliechti/wingman/pkg/searcher"
-	searchtool "github.com/adrianliechti/wingman/pkg/tool/search"
+	"github.com/adrianliechti/wingman/pkg/tool/search"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -251,8 +251,8 @@ func TestSearchToolInclusiveUntilAndExactTimestamp(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"results":[]}`))}, nil
 			})}
 			p, _ := New("test", WithClient(httpClient))
-			tool, _ := searchtool.New(p)
-			if _, err := tool.Execute(context.Background(), searchtool.ToolName, map[string]any{"query": "release", "until": tc.input}); err != nil {
+			tool, _ := search.New(p)
+			if _, err := tool.Execute(context.Background(), search.ToolName, map[string]any{"query": "release", "until": tc.input}); err != nil {
 				t.Fatal(err)
 			}
 		})

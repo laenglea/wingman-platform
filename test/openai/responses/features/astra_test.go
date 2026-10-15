@@ -2,6 +2,7 @@ package features_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -98,6 +99,19 @@ func TestGPT6AstraE2E(t *testing.T) {
 
 	requireAstraAsyncCall(t, "OpenAI", openaiResp.Body)
 	requireAstraAsyncCall(t, "Wingman", wingmanResp.Body)
+	// Separate executions can choose whether to think before this trivial
+	// forced call. Compare the required call shape, retaining any unexpected
+	// non-reasoning output rather than requiring identical thinking counts.
+	for _, body := range []map[string]any{openaiResp.Body, wingmanResp.Body} {
+		output := []any{}
+		for _, raw := range body["output"].([]any) {
+			item, _ := raw.(map[string]any)
+			if item["type"] != "reasoning" {
+				output = append(output, raw)
+			}
+		}
+		body["output"] = output
+	}
 
 	rules := openai.DefaultResponsesResponseRules()
 	rules["model"] = harness.FieldExact
@@ -117,16 +131,39 @@ func requireAstraAsyncCall(t *testing.T, label string, body map[string]any) {
 	if !ok {
 		t.Fatalf("[%s] output is not an array: %#v", label, body["output"])
 	}
+	calls := 0
 	for _, item := range output {
 		call, ok := item.(map[string]any)
+		if ok && call["type"] == "reasoning" {
+			continue
+		}
+		if ok && call["type"] == "message" {
+			parts, valid := call["content"].([]any)
+			valid = valid && call["role"] == "assistant" && call["phase"] == "final_answer"
+			for _, raw := range parts {
+				part, ok := raw.(map[string]any)
+				valid = valid && ok && part["type"] == "output_text" && part["text"] == ""
+			}
+			if !valid {
+				t.Errorf("[%s] unexpected text after async call: %#v", label, item)
+			}
+			continue
+		}
 		if !ok || call["type"] != "function_call" || call["name"] != "record_probe" {
+			t.Errorf("[%s] unexpected probe output: %#v", label, item)
 			continue
 		}
 		if call["async"] != true {
 			t.Fatalf("[%s] expected function call async=true, got %#v", label, call["async"])
 		}
-		return
+		arguments, _ := call["arguments"].(string)
+		var input map[string]any
+		if err := json.Unmarshal([]byte(arguments), &input); err != nil || input["value"] != "ok" || len(input) != 1 {
+			t.Errorf("[%s] invalid record_probe arguments: %q", label, arguments)
+		}
+		calls++
 	}
-
-	t.Fatalf("[%s] no record_probe function call: %#v", label, output)
+	if calls != 1 {
+		t.Fatalf("[%s] expected exactly one record_probe call, got %d: %#v", label, calls, output)
+	}
 }
