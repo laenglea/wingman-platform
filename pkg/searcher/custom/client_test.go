@@ -136,12 +136,12 @@ func TestDiscoveredCategoriesAndDateFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 	rpc.response.Categories[0].Name = "mutated"
-	caps := c.Capabilities()
+	caps := c.SearchCapabilities()
 	if !caps.DateFilters || !reflect.DeepEqual(caps.Categories, []searcher.Category{{Name: "publication", Description: "Research publications."}}) {
 		t.Fatalf("reported capabilities = %+v", caps)
 	}
 	caps.Categories[0].Name = "mutated again"
-	if c.Capabilities().Categories[0].Name != "publication" {
+	if c.SearchCapabilities().Categories[0].Name != "publication" {
 		t.Fatal("caller mutated cached categories")
 	}
 	tool, err := search.New(c)
@@ -175,7 +175,7 @@ func TestLegacyDiscoveryDoesNotInventFilters(t *testing.T) {
 	if err := c.loadCapabilities(); err != nil {
 		t.Fatal(err)
 	}
-	if got := c.Capabilities(); got.DateFilters || len(got.Categories) != 0 {
+	if got := c.SearchCapabilities(); got.DateFilters || len(got.Categories) != 0 {
 		t.Fatalf("legacy capabilities = %+v", got)
 	}
 }

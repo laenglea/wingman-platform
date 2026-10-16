@@ -95,7 +95,7 @@ func support(value Support) (translator.Support, error) {
 	}
 }
 
-func (c *Client) Capabilities() translator.Capabilities {
+func (c *Client) TranslateCapabilities() translator.Capabilities {
 	if c.capabilities != nil {
 		return *c.capabilities
 	}
@@ -104,7 +104,7 @@ func (c *Client) Capabilities() translator.Capabilities {
 }
 
 func (c *Client) Translate(ctx context.Context, input translator.Input, options *translator.TranslateOptions) (*translator.File, error) {
-	capabilities := c.Capabilities()
+	capabilities := c.TranslateCapabilities()
 	if input.File != nil {
 		if !capabilities.FileToText.MaySupport() && !capabilities.FileToDocument.MaySupport() {
 			return nil, translator.ErrUnsupported

@@ -189,7 +189,7 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 	return results, nil
 }
 
-func (c *Client) Capabilities() searcher.Capabilities {
+func (c *Client) SearchCapabilities() searcher.Capabilities {
 	return searcher.Capabilities{
 		DateFilters: true,
 		Content:     true,

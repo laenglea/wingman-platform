@@ -10,51 +10,33 @@ import (
 	"github.com/google/uuid"
 )
 
-func (c ContentOptions) validate() (bool, int, error) {
-	for _, field := range []struct {
-		name  string
-		value json.RawMessage
-	}{{"highlights", c.Highlights}, {"summary", c.Summary}} {
-		if len(field.value) != 0 && string(field.value) != "false" && string(field.value) != "null" {
-			return false, 0, fmt.Errorf("%s is unsupported", field.name)
-		}
-	}
-	if len(c.Text) == 0 {
+// contentSelector reads only the supported output limit. Other vendor rendering
+// and excerpt options are deliberately ignored for forward compatibility.
+func contentSelector(value json.RawMessage) (bool, int, error) {
+	switch string(value) {
+	case "", "false", "null":
 		return false, 0, nil
-	}
-	if string(c.Text) == "false" || string(c.Text) == "null" {
-		return false, 0, nil
-	}
-	if string(c.Text) == "true" {
+	case "true":
 		return true, 0, nil
 	}
-	var limits struct {
+	var options struct {
 		MaxCharacters *int `json:"maxCharacters"`
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(c.Text, &fields); err != nil || fields == nil {
-		return false, 0, errors.New("text must be a boolean or an object with maxCharacters")
+	if err := json.Unmarshal(value, &options); err != nil {
+		return false, 0, fmt.Errorf("content selector must be a boolean or an options object with an integer maxCharacters: %w", err)
 	}
-	for name := range fields {
-		if name != "maxCharacters" {
-			return false, 0, fmt.Errorf("unsupported text option %q", name)
-		}
-	}
-	if err := json.Unmarshal(c.Text, &limits); err != nil {
-		return false, 0, errors.New("maxCharacters must be an integer")
-	}
-	if limits.MaxCharacters == nil {
+	if options.MaxCharacters == nil {
 		return true, 0, nil
 	}
-	if *limits.MaxCharacters < 1 || *limits.MaxCharacters > 1000000 {
+	if *options.MaxCharacters < 1 || *options.MaxCharacters > 1000000 {
 		return false, 0, errors.New("maxCharacters must be between 1 and 1000000")
 	}
-	return true, *limits.MaxCharacters, nil
+	return true, *options.MaxCharacters, nil
 }
 
 func (h *Handler) handleContents(w http.ResponseWriter, r *http.Request) {
 	var request ContentsRequest
-	if err := web.ReadRequest(w, r, &request, nil); err != nil {
+	if err := web.ReadCompatibleRequest(w, r, &request); err != nil {
 		web.WriteError(w, r, 400, err.Error())
 		return
 	}
@@ -79,7 +61,7 @@ func (h *Handler) handleContents(w http.ResponseWriter, r *http.Request) {
 	if len(request.Text) == 0 {
 		request.Text = json.RawMessage("true")
 	}
-	text, limit, err := request.ContentOptions.validate()
+	text, limit, err := contentSelector(request.Text)
 	if err != nil {
 		web.WriteError(w, r, 400, err.Error())
 		return

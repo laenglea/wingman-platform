@@ -12,7 +12,7 @@ import (
 func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	var request SearchRequest
-	if err := web.ReadRequest(w, r, &request, map[string]any{"type": "auto", "useAutoprompt": false, "stream": false}); err != nil {
+	if err := web.ReadCompatibleRequest(w, r, &request); err != nil {
 		web.WriteError(w, r, 400, err.Error())
 		return
 	}
@@ -47,15 +47,12 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	text, maxCharacters := false, 0
 	highlights, maxHighlightCharacters := false, 0
 	if request.Contents != nil {
-		// Both outputs use the common excerpt-plus-optional-text contract.
-		contentOptions := *request.Contents
-		contentOptions.Highlights = nil
-		text, maxCharacters, err = contentOptions.validate()
+		text, maxCharacters, err = contentSelector(request.Contents.Text)
 		if err != nil {
 			web.WriteError(w, r, 400, err.Error())
 			return
 		}
-		highlights, maxHighlightCharacters, err = (ContentOptions{Text: request.Contents.Highlights}).validate()
+		highlights, maxHighlightCharacters, err = contentSelector(request.Contents.Highlights)
 		if err != nil {
 			web.WriteError(w, r, 400, "invalid highlights: "+err.Error())
 			return

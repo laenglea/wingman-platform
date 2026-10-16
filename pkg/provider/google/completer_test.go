@@ -218,3 +218,33 @@ func TestConvertMessages_RejectsInvalidContent(t *testing.T) {
 		}
 	}
 }
+
+func TestInteractionState_StatusUpdateCarriesUsage(t *testing.T) {
+	state := newInteractionState("gemini-3.8-flash", &provider.CompleteOptions{})
+	inputTokens := 12
+	outputTokens := 5
+	thoughtTokens := 3
+	cachedTokens := 4
+
+	delta, err := state.event(interactions.InteractionSSEEvent{
+		InteractionStatusUpdate: &interactions.InteractionStatusUpdate{
+			InteractionID: "int_123",
+			Status:        interactions.InteractionStatusUpdateStatusIncomplete,
+			Usage: &interactions.Usage{
+				TotalInputTokens:   &inputTokens,
+				TotalOutputTokens:  &outputTokens,
+				TotalThoughtTokens: &thoughtTokens,
+				TotalCachedTokens:  &cachedTokens,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delta == nil || delta.Status != provider.CompletionStatusIncomplete || delta.StopReason != provider.StopReasonMaxTokens {
+		t.Fatalf("unexpected delta: %+v", delta)
+	}
+	if delta.Usage == nil || delta.Usage.InputTokens != 12 || delta.Usage.OutputTokens != 8 || delta.Usage.ReasoningTokens == nil || *delta.Usage.ReasoningTokens != 3 || delta.Usage.CacheReadInputTokens != 4 {
+		t.Fatalf("status_update usage lost: %+v", delta.Usage)
+	}
+}

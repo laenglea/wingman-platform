@@ -21,7 +21,7 @@ type Extractor struct {
 	dispatcher *extract.Dispatcher
 }
 
-func (e *Extractor) Capabilities() extractor.Capabilities {
+func (e *Extractor) ExtractCapabilities() extractor.Capabilities {
 	return extractor.Capabilities{UnknownFormats: true}
 }
 

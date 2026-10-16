@@ -31,14 +31,13 @@ type Result struct {
 type ContentOptions struct {
 	Text       json.RawMessage `json:"text"`
 	Highlights json.RawMessage `json:"highlights"`
-	Summary    json.RawMessage `json:"summary"`
 }
 
 type ContentsRequest struct {
 	web.Selection
-	URLs web.URLList `json:"urls"`
-	IDs  web.URLList `json:"ids"`
-	ContentOptions
+	URLs web.URLList     `json:"urls"`
+	IDs  web.URLList     `json:"ids"`
+	Text json.RawMessage `json:"text"`
 }
 
 type Status struct {

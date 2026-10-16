@@ -23,6 +23,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider/tools/toolsearch"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
 var _ provider.Completer = (*Completer)(nil)
@@ -64,7 +65,22 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		// A paused turn (stop_reason pause_turn, raised by server tools) is
 		// passed through as the native stop reason; the caller resends the
 		// conversation to continue, as the API documents.
-		c.streamMessage(ctx, req, options)(yield)
+		emitted, fallback := false, false
+		c.streamMessage(ctx, req, options)(func(delta *provider.Completion, err error) bool {
+			if !emitted && req.Speed == anthropic.BetaMessageNewParamsSpeedFast && fastUnavailable(err) {
+				fallback = true
+				return false
+			}
+			if delta != nil {
+				emitted = true
+			}
+			return yield(delta, err)
+		})
+		if fallback {
+			standard := *req
+			standard.Speed = anthropic.BetaMessageNewParamsSpeedStandard
+			c.streamMessage(ctx, &standard, options)(yield)
+		}
 	}
 }
 
@@ -74,7 +90,11 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 		notes := progressNotes(req.Thinking)
 
 		message := anthropic.BetaMessage{}
-		stream := c.messages.NewStreaming(ctx, *req)
+		var requestOptions []option.RequestOption
+		if req.Speed == anthropic.BetaMessageNewParamsSpeedFast {
+			requestOptions = append(requestOptions, option.WithMaxRetries(0))
+		}
+		stream := c.messages.NewStreaming(ctx, *req, requestOptions...)
 		defer stream.Close()
 		messageStopped := false
 
@@ -118,6 +138,12 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 			}
 
 			switch event := event.AsAny().(type) {
+			case anthropic.BetaRawMessageStartEvent:
+				if tier := effectiveTier(message.Usage); tier != "" {
+					if !yield(&provider.Completion{ID: message.ID, Model: c.model, Tier: tier, Usage: toUsage(message.Usage)}, nil) {
+						return
+					}
+				}
 			case anthropic.BetaRawContentBlockStartEvent:
 				startIndex := event.Index
 
@@ -461,6 +487,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 						Role: provider.MessageRoleAssistant,
 					},
 
+					Tier:       effectiveTier(message.Usage),
 					Usage:      toUsage(message.Usage),
 					StopReason: provider.StopReason(message.StopReason),
 				}
@@ -589,6 +616,12 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		Model: anthropic.Model(c.model),
 
 		MaxTokens: 64000,
+	}
+	switch options.Tier {
+	case provider.TierDefault:
+		req.Speed = anthropic.BetaMessageNewParamsSpeedStandard
+	case provider.TierPriority:
+		req.Speed = anthropic.BetaMessageNewParamsSpeedFast
 	}
 	explicitCache := options.CacheOptions != nil && options.CacheOptions.Mode == provider.CacheModeExplicit
 	if !explicitCache {

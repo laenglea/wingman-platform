@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"iter"
 	"maps"
 	"slices"
@@ -48,6 +49,14 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 	return func(yield func(*provider.Completion, error) bool) {
 		if options == nil {
 			options = new(provider.CompleteOptions)
+		}
+		emitted := false
+		forward := yield
+		yield = func(delta *provider.Completion, err error) bool {
+			if delta != nil {
+				emitted = true
+			}
+			return forward(delta, err)
 		}
 
 		req, err := c.convertCompletionRequest(messages, options)
@@ -103,12 +112,23 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			delta := &provider.Completion{
 				ID:    chunk.ID,
 				Model: c.model,
+				Tier:  provider.NormalizeTier(string(chunk.ServiceTier)),
 
 				Message: &provider.Message{
 					Role: provider.MessageRoleAssistant,
 				},
 
 				Usage: toUsage(chunk.Usage),
+			}
+			// Mistral reports the effective tier inside usage rather than on
+			// the chunk's top level. Preserve it through the compatible API.
+			if delta.Tier == "" {
+				var tier string
+				if raw := chunk.Usage.JSON.ExtraFields["service_tier"].Raw(); raw != "" {
+					if json.Unmarshal([]byte(raw), &tier) == nil {
+						delta.Tier = provider.NormalizeTier(tier)
+					}
+				}
 			}
 
 			if len(chunk.Choices) > 0 {
@@ -188,6 +208,12 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		}
 
 		if err := stream.Err(); err != nil && (stops == nil || !stops.done) {
+			if !emitted && req.ServiceTier != "" && unsupportedTier(err) {
+				fallback := *options
+				fallback.Tier = ""
+				c.Complete(ctx, messages, &fallback)(yield)
+				return
+			}
 			yield(nil, convertError(err))
 			return
 		}
@@ -210,8 +236,10 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 		return nil, err
 	}
 
+	tier := provider.ParseTier(string(options.Tier))
 	req := &openai.ChatCompletionNewParams{
-		Model: c.model,
+		Model:       c.model,
+		ServiceTier: openai.ChatCompletionNewParamsServiceTier(tier),
 	}
 
 	req.StreamOptions = openai.ChatCompletionStreamOptionsParam{

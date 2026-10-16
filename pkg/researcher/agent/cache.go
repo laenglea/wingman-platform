@@ -71,8 +71,8 @@ type cachedSearcher struct {
 	cache runCache[[]searcher.Result]
 }
 
-func (c *cachedSearcher) Capabilities() searcher.Capabilities {
-	return c.Provider.Capabilities()
+func (c *cachedSearcher) SearchCapabilities() searcher.Capabilities {
+	return c.Provider.SearchCapabilities()
 }
 
 func (c *cachedSearcher) Search(ctx context.Context, query string, options *searcher.SearchOptions) ([]searcher.Result, error) {

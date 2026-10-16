@@ -297,6 +297,36 @@ func TestTranscribe_StreamedUtterances(t *testing.T) {
 	}
 }
 
+func TestTranscribe_UtteranceOffsets(t *testing.T) {
+	tr := newTestTranscriber(t, serveSSE(
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"audioTranscription":{"text":"First line.","speakerLabel":"spk:0","startOffset":"0.200s","endOffset":"1.500s"}},{"audioTranscription":{"text":"Second line.","speakerLabel":"spk:1","startOffset":"1.800s","endOffset":"3.100s"}}]},"finishReason":"STOP"}]}`+"\n\n",
+	))
+
+	_, result, err := transcribe(t, tr, provider.File{Name: "sample.mp3"}, &provider.TranscribeOptions{Diarize: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []provider.TranscriptionSegment{
+		{ID: "0", Speaker: "A", Start: 0.2, End: 1.5, Text: "First line."},
+		{ID: "1", Speaker: "B", Start: 1.8, End: 3.1, Text: "Second line."},
+	}
+
+	if len(result.Segments) != len(want) {
+		t.Fatalf("segments = %+v, want %+v", result.Segments, want)
+	}
+
+	for i := range want {
+		if result.Segments[i] != want[i] {
+			t.Errorf("segment %d = %+v, want %+v", i, result.Segments[i], want[i])
+		}
+	}
+
+	if result.Duration != 3.1 {
+		t.Errorf("duration = %v, want 3.1", result.Duration)
+	}
+}
+
 func TestTranscribe_APIError(t *testing.T) {
 	tr := newTestTranscriber(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -38,9 +38,8 @@ type StreamEventHandler func(event StreamEvent) error
 
 // StreamingAccumulator manages streaming state and emits events
 type StreamingAccumulator struct {
+	handler     StreamEventHandler
 	accumulator provider.CompletionAccumulator
-
-	handler StreamEventHandler
 
 	// Configuration
 	id    string

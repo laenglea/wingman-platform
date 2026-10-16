@@ -41,7 +41,10 @@ func (h *Handler) handleGenerateContent(w http.ResponseWriter, r *http.Request) 
 		result.ModelVersion = model
 	}
 
-	result.UsageMetadata = toUsageMetadata(completion.Usage)
+	result.UsageMetadata = withTier(toUsageMetadata(completion.Usage), completion.Tier)
+	if result.UsageMetadata != nil && result.UsageMetadata.Tier != "" {
+		w.Header().Set("X-Gemini-Service-Tier", result.UsageMetadata.Tier)
+	}
 
 	var content *Content
 	if completion.Message != nil {
@@ -120,6 +123,11 @@ func (h *Handler) handleStreamGenerateContent(w http.ResponseWriter, r *http.Req
 			return
 		}
 
+		if !headersSent {
+			if metadata := withTier(nil, completion.Tier); metadata != nil {
+				w.Header().Set("X-Gemini-Service-Tier", metadata.Tier)
+			}
+		}
 		sendHeaders()
 
 		if err := accumulator.Add(*completion); err != nil {
@@ -177,6 +185,7 @@ func (h *Handler) parseGenerateRequest(r *http.Request) (provider.Completer, []p
 
 	options := &provider.CompleteOptions{
 		Tools: toTools(req.Tools, strict),
+		Tier:  provider.ParseTier(string(provider.NormalizeTier(req.Tier))),
 	}
 
 	if fcc != nil {

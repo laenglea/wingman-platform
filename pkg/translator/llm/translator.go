@@ -24,7 +24,7 @@ func New(completer provider.Completer) *Translator {
 	}
 }
 
-func (a *Translator) Capabilities() translator.Capabilities {
+func (a *Translator) TranslateCapabilities() translator.Capabilities {
 	// The completer reads supported attachments, but generates only text.
 	return translator.Capabilities{TextToText: translator.Supported, FileToText: translator.Supported}
 }

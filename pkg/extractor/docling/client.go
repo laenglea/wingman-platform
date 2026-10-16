@@ -55,7 +55,7 @@ func (c *Client) Extract(ctx context.Context, file extractor.File, options *extr
 		options = new(extractor.ExtractOptions)
 	}
 
-	if !c.Capabilities().MaySupport(file) {
+	if !c.ExtractCapabilities().MaySupport(file) {
 		return nil, extractor.ErrUnsupported
 	}
 
@@ -194,7 +194,7 @@ func (c *Client) request(ctx context.Context, method, path string, body io.Reade
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
-func (c *Client) Capabilities() extractor.Capabilities {
+func (c *Client) ExtractCapabilities() extractor.Capabilities {
 	return extractor.Capabilities{
 		MediaTypes: slices.Clone(SupportedMimeTypes),
 		Extensions: slices.Clone(SupportedExtensions),

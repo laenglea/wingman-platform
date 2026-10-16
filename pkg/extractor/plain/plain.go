@@ -14,7 +14,7 @@ var _ extractor.Provider = &Extractor{}
 type Extractor struct {
 }
 
-func (e *Extractor) Capabilities() extractor.Capabilities {
+func (e *Extractor) ExtractCapabilities() extractor.Capabilities {
 	return extractor.Capabilities{
 		MediaTypes:     slices.Clone(SupportedMimeTypes),
 		Extensions:     slices.Clone(SupportedExtensions),

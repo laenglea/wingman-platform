@@ -9,7 +9,7 @@ import (
 
 func TestOptionalTextAcrossProviders(t *testing.T) {
 	for _, backend := range []string{"tavily", "exa", "plain"} {
-		for _, selector := range []string{"true", `"markdown"`} {
+		for _, selector := range []string{"true", `"markdown"`, `"text"`} {
 			s, providers := webtest.NewServer(t, false)
 			p := providers[backend]
 			page, empty := "Native full page", ""

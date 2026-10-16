@@ -200,7 +200,7 @@ func TestSearchPublicationCategoryAndLegacyAlias(t *testing.T) {
 	}
 	c, _ := New("test")
 	var publication bool
-	for _, category := range c.Capabilities().Categories {
+	for _, category := range c.SearchCapabilities().Categories {
 		publication = publication || category.Name == "publication"
 		if category.Name == "research paper" {
 			t.Fatal("advertised the legacy category")

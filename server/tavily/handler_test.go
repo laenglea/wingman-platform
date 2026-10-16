@@ -115,14 +115,9 @@ func TestCredentials(t *testing.T) {
 	}
 }
 
-func TestRejectsUnsupportedOrInvalidRequestsBeforeRetrieval(t *testing.T) {
+func TestRejectsInvalidSupportedFieldsBeforeRetrieval(t *testing.T) {
 	for _, tc := range []struct{ path, body string }{
-		{"/v1/tavily/search", `{"query":"test","include_answer":true}`},
-		{"/v1/tavily/search", `{"query":"test","search_depth":"advanced"}`},
-		{"/v1/tavily/search", `{"query":"test","include_images":true}`},
-		{"/v1/tavily/search", `{"query":"test","include_raw_content":"text"}`},
 		{"/v1/tavily/search", `{"query":"test","include_raw_content":{}}`},
-		{"/v1/tavily/search", `{"query":"test","unknown":false}`},
 		{"/v1/tavily/search", `{"query":"test","max_results":21}`},
 		{"/v1/tavily/search", `{"query":"test","max_results":1.5}`},
 		{"/v1/tavily/search", `{"query":"test","model":"plain","topic":"news"}`},
@@ -133,7 +128,6 @@ func TestRejectsUnsupportedOrInvalidRequestsBeforeRetrieval(t *testing.T) {
 		{"/v1/tavily/extract", `{"urls":["file:///etc/passwd"]}`},
 		{"/v1/tavily/extract", `{"urls":["https://user:pass@example.com"]}`},
 		{"/v1/tavily/extract", `{"urls":["https://example.com"],"timeout":0}`},
-		{"/v1/tavily/extract", `{"urls":["https://example.com"],"query":"select passages"}`},
 		{"/v1/tavily/search", `null`},
 		{"/v1/tavily/search", `{"query":"test"} {}`},
 		{"/v1/tavily/search", `{"query":" "}`},

@@ -18,7 +18,7 @@ func (f *fakeSearcher) Search(ctx context.Context, q string, o *searcher.SearchO
 	return []searcher.Result{{Source: "https://example.com", Title: "Example", Excerpt: "body"}}, nil
 }
 
-func (f *fakeSearcher) Capabilities() searcher.Capabilities {
+func (f *fakeSearcher) SearchCapabilities() searcher.Capabilities {
 	return searcher.Capabilities{DateFilters: true}
 }
 

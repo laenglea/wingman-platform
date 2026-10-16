@@ -43,7 +43,7 @@ func TestCapabilities_FormatMatching(t *testing.T) {
 
 func TestBuiltinCapabilities_AndTracingWrapper(t *testing.T) {
 	for _, provider := range []extractor.Provider{&azure.Client{}, &docling.Client{}, &kreuzberg.Client{}, &mistral.Client{}, llm.New(nil)} {
-		capability := provider.Capabilities()
+		capability := provider.ExtractCapabilities()
 		if !capability.MaySupport(extractor.File{Name: "report.pdf"}) || capability.MaySupport(extractor.File{Name: "binary.unknown"}) {
 			t.Fatalf("incorrect capabilities for %T: %+v", provider, capability)
 		}
@@ -52,19 +52,19 @@ func TestBuiltinCapabilities_AndTracingWrapper(t *testing.T) {
 		}
 		original := capability.MediaTypes[0]
 		capability.MediaTypes[0] = "changed"
-		if provider.Capabilities().MediaTypes[0] != original {
+		if provider.ExtractCapabilities().MediaTypes[0] != original {
 			t.Fatalf("capability mutation changed %T", provider)
 		}
 	}
 	wrapped := otel.NewExtractor("mistral", "ocr", &mistral.Client{})
-	if wrapped.Capabilities().MaySupport(extractor.File{Name: "table.xlsx"}) {
+	if wrapped.ExtractCapabilities().MaySupport(extractor.File{Name: "table.xlsx"}) {
 		t.Fatal("wrapper lost Mistral's format restrictions")
 	}
-	if !wrapped.Capabilities().MaySupport(extractor.File{Name: "image.png"}) {
+	if !wrapped.ExtractCapabilities().MaySupport(extractor.File{Name: "image.png"}) {
 		t.Fatal("wrapper lost Mistral's image support")
 	}
 	p, _ := plain.New()
-	if !p.Capabilities().MaySupport(extractor.File{Name: "unknown.bin", ContentType: "application/octet-stream"}) {
+	if !p.ExtractCapabilities().MaySupport(extractor.File{Name: "unknown.bin", ContentType: "application/octet-stream"}) {
 		t.Fatal("plain text sniffing was ruled out by metadata")
 	}
 }

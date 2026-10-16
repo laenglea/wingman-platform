@@ -60,7 +60,7 @@ func newOpenAISession(conn *websocket.Conn, realtime provider.Realtime, model st
 	return &openAISession{
 		conn:         conn,
 		provider:     realtime,
-		capabilities: realtime.Capabilities(),
+		capabilities: realtime.RealtimeCapabilities(),
 		model:        model,
 
 		id:             newID("sess"),

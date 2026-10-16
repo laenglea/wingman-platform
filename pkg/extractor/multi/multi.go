@@ -33,7 +33,7 @@ func (e *Extractor) Extract(ctx context.Context, file extractor.File, options *e
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if p == nil || !p.Capabilities().MaySupport(file) {
+		if p == nil || !p.ExtractCapabilities().MaySupport(file) {
 			continue
 		}
 		result, err := p.Extract(ctx, file, options)
@@ -64,13 +64,13 @@ func (e *Extractor) Extract(ctx context.Context, file extractor.File, options *e
 	return nil, extractor.ErrUnsupported
 }
 
-func (e *Extractor) Capabilities() extractor.Capabilities {
+func (e *Extractor) ExtractCapabilities() extractor.Capabilities {
 	var result extractor.Capabilities
 	for _, p := range e.providers {
 		if p == nil {
 			continue
 		}
-		capability := p.Capabilities()
+		capability := p.ExtractCapabilities()
 		result.MediaTypes = append(result.MediaTypes, capability.MediaTypes...)
 		result.Extensions = append(result.Extensions, capability.Extensions...)
 		result.UnknownFormats = result.UnknownFormats || capability.UnknownFormats

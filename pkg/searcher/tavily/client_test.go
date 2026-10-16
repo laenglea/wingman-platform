@@ -90,7 +90,7 @@ func TestTopicMapping(t *testing.T) {
 	if _, err := topic("research paper"); err == nil {
 		t.Fatal("accepted unsupported category")
 	}
-	if len((&Client{}).Capabilities().Categories) != 3 {
+	if len((&Client{}).SearchCapabilities().Categories) != 3 {
 		t.Fatal("expected general, news and finance categories")
 	}
 }

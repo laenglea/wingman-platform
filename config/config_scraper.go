@@ -41,6 +41,8 @@ type scraperConfig struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token"`
 
+	Guard string `yaml:"guard"`
+
 	Vars  map[string]string `yaml:"vars"`
 	Proxy *proxyConfig      `yaml:"proxy"`
 }
@@ -76,17 +78,27 @@ func (cfg *Config) registerScrapers(f *configFile) error {
 			context.Client = client
 		}
 
-		scraper, err := createScraper(config, context)
+		p, err := createScraper(config, context)
 
 		if err != nil {
 			return err
 		}
 
-		if _, ok := scraper.(otel.Scraper); !ok {
-			scraper = otel.NewScraper(config.Type, id, scraper)
+		if config.Guard != "" {
+			g, err := cfg.Guard(config.Guard)
+
+			if err != nil {
+				return err
+			}
+
+			p = scraper.WithGuard(g, p)
 		}
 
-		cfg.RegisterScraper(id, scraper)
+		if !otel.Instrumented(p) {
+			p = otel.NewScraper(config.Type, id, p)
+		}
+
+		cfg.RegisterScraper(id, p)
 	}
 
 	return nil

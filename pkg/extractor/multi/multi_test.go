@@ -19,7 +19,7 @@ type fakeExtractor struct {
 	execute func()
 }
 
-func (f *fakeExtractor) Capabilities() extractor.Capabilities {
+func (f *fakeExtractor) ExtractCapabilities() extractor.Capabilities {
 	return extractor.Capabilities{UnknownFormats: true}
 }
 
@@ -36,7 +36,7 @@ type formatExtractor struct {
 	capability extractor.Capabilities
 }
 
-func (f *formatExtractor) Capabilities() extractor.Capabilities { return f.capability }
+func (f *formatExtractor) ExtractCapabilities() extractor.Capabilities { return f.capability }
 
 func TestExtract_RoutesByCapabilitiesAndPreservesProviderOrder(t *testing.T) {
 	pdf := &formatExtractor{fakeExtractor: &fakeExtractor{result: &extractor.Document{Text: "wrong"}}, capability: extractor.Capabilities{Extensions: []string{".pdf"}}}
@@ -48,12 +48,12 @@ func TestExtract_RoutesByCapabilitiesAndPreservesProviderOrder(t *testing.T) {
 	if err != nil || got.Text != "table" || pdf.calls != 0 || csv.calls != 1 {
 		t.Fatalf("got %+v, err %v, calls %d/%d", got, err, pdf.calls, csv.calls)
 	}
-	capability := e.Capabilities()
+	capability := e.ExtractCapabilities()
 	if !reflect.DeepEqual(capability.Extensions, []string{".csv", ".pdf"}) {
 		t.Fatalf("combined capabilities %+v", capability)
 	}
 	capability.Extensions[0] = "changed"
-	if e.Capabilities().Extensions[0] != ".csv" {
+	if e.ExtractCapabilities().Extensions[0] != ".csv" {
 		t.Fatal("aggregate capabilities mutated the provider")
 	}
 }
@@ -82,7 +82,7 @@ func TestExtract_FallbackAndFailureSemantics(t *testing.T) {
 		if test.first.calls != 1 || test.second.calls != 1 {
 			t.Fatal("providers with unknown formats were skipped")
 		}
-		if !e.Capabilities().UnknownFormats {
+		if !e.ExtractCapabilities().UnknownFormats {
 			t.Fatal("unknown provider restrictions were invented")
 		}
 	}
@@ -114,7 +114,7 @@ func TestExtract_ExplicitUnsupportedProviderIsSkipped(t *testing.T) {
 	if err != nil || got == nil || got.Text != "remote" || unsupported.calls != 0 || unknown.calls != 1 {
 		t.Fatalf("got %+v, error %v, calls %d/%d", got, err, unsupported.calls, unknown.calls)
 	}
-	if caps := e.Capabilities(); !caps.UnknownFormats {
+	if caps := e.ExtractCapabilities(); !caps.UnknownFormats {
 		t.Fatalf("unknown format support was lost: %+v", caps)
 	}
 }

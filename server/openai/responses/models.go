@@ -12,29 +12,25 @@ import (
 // https://platform.openai.com/docs/api-reference/responses/create
 type ResponsesRequest struct {
 	Model string `json:"model,omitempty"`
+	Tier  string `json:"service_tier,omitempty"`
 
 	Stream bool `json:"stream,omitempty"`
 
-	Instructions string `json:"instructions,omitempty"`
+	Instructions string         `json:"instructions,omitempty"`
+	Input        ResponsesInput `json:"input"`
 
-	Input ResponsesInput `json:"input"`
+	MaxOutputTokens *int             `json:"max_output_tokens,omitempty"`
+	Reasoning       *ReasoningConfig `json:"reasoning,omitempty"`
+	Text            *TextConfig      `json:"text,omitempty"`
 
-	Include []string `json:"include,omitempty"`
-
-	Tools []Tool `json:"tools,omitempty"`
-
-	Text *TextConfig `json:"text,omitempty"`
-
-	MaxOutputTokens *int `json:"max_output_tokens,omitempty"`
-
-	Reasoning *ReasoningConfig `json:"reasoning,omitempty"`
-
-	ContextManagement []ContextManagementConfig `json:"context_management,omitempty"`
-
+	Tools             []Tool      `json:"tools,omitempty"`
 	ToolChoice        *ToolChoice `json:"tool_choice,omitempty"`
 	ParallelToolCalls *bool       `json:"parallel_tool_calls,omitempty"`
 
-	Truncation string `json:"truncation,omitempty"`
+	ContextManagement []ContextManagementConfig `json:"context_management,omitempty"`
+	Truncation        string                    `json:"truncation,omitempty"`
+
+	Include []string `json:"include,omitempty"`
 
 	PromptCacheKey       *string             `json:"prompt_cache_key,omitempty"`
 	PromptCacheRetention *string             `json:"prompt_cache_retention,omitempty"`
@@ -936,56 +932,50 @@ const (
 type Response struct {
 	ID     string `json:"id"`
 	Object string `json:"object"` // response
-
-	CreatedAt   int64  `json:"created_at"`
-	CompletedAt *int64 `json:"completed_at"`
-
 	Model  string `json:"model"`
-	Status string `json:"status"` // completed, failed, in_progress, incomplete
 
-	Background     bool            `json:"background"`
+	Tier           *string         `json:"service_tier"`
 	AccessPrograms json.RawMessage `json:"access_programs"`
 
-	Output []ResponseOutput `json:"output"`
-
+	Status            string             `json:"status"` // completed, failed, in_progress, incomplete
+	CreatedAt         int64              `json:"created_at"`
+	CompletedAt       *int64             `json:"completed_at"`
 	Error             *ResponseError     `json:"error"`
 	IncompleteDetails *IncompleteDetails `json:"incomplete_details"`
 
-	Instructions       *string `json:"instructions"`
-	MaxOutputTokens    *int    `json:"max_output_tokens"`
-	MaxToolCalls       *int    `json:"max_tool_calls"`
-	Metadata           any     `json:"metadata"`
-	ParallelToolCalls  bool    `json:"parallel_tool_calls"`
+	Background         bool    `json:"background"`
+	Store              bool    `json:"store"`
 	PreviousResponseID *string `json:"previous_response_id"`
 
-	Reasoning *ResponseReasoning `json:"reasoning"`
+	Instructions    *string            `json:"instructions"`
+	MaxOutputTokens *int               `json:"max_output_tokens"`
+	Reasoning       *ResponseReasoning `json:"reasoning"`
+	Text            *TextConfig        `json:"text"`
 
-	ServiceTier      string  `json:"service_tier"`
-	Store            bool    `json:"store"`
+	Tools             []any `json:"tools"`
+	ToolChoice        any   `json:"tool_choice"`
+	ParallelToolCalls bool  `json:"parallel_tool_calls"`
+	MaxToolCalls      *int  `json:"max_tool_calls"`
+
+	Output []ResponseOutput `json:"output"`
+
 	FrequencyPenalty float32 `json:"frequency_penalty"`
 	PresencePenalty  float32 `json:"presence_penalty"`
-
-	Text *TextConfig `json:"text"`
-
-	ToolChoice any       `json:"tool_choice"`
-	Tools      []any     `json:"tools"`
-	ToolUsage  ToolUsage `json:"tool_usage"`
-
-	TopLogprobs int    `json:"top_logprobs"`
-	Truncation  string `json:"truncation"`
+	TopLogprobs      int     `json:"top_logprobs"`
+	Truncation       string  `json:"truncation"`
 
 	PromptCacheKey       *string             `json:"prompt_cache_key"`
 	PromptCacheRetention *string             `json:"prompt_cache_retention"`
 	PromptCacheOptions   *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
 
-	Moderation *any `json:"moderation"`
-
-	Billing *ResponseBilling `json:"billing,omitempty"`
-
+	Metadata         any     `json:"metadata"`
+	User             *any    `json:"user"`
 	SafetyIdentifier *string `json:"safety_identifier"`
+	Moderation       *any    `json:"moderation"`
 
-	Usage *Usage `json:"usage"`
-	User  *any   `json:"user"`
+	Usage     *Usage           `json:"usage"`
+	ToolUsage ToolUsage        `json:"tool_usage"`
+	Billing   *ResponseBilling `json:"billing,omitempty"`
 }
 
 // These hosted tools are not executed by the Responses gateway, so their

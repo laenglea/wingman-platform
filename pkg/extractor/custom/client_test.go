@@ -41,7 +41,7 @@ func TestDiscoveredFormatsSkipUnsupportedRequests(t *testing.T) {
 	if _, err := c.Extract(t.Context(), extractor.File{Name: "data.csv"}, nil); !errors.Is(err, extractor.ErrUnsupported) || rpc.calls != 0 {
 		t.Fatalf("unsupported file: error %v, calls %d", err, rpc.calls)
 	}
-	got := c.Capabilities()
+	got := c.ExtractCapabilities()
 	got.Extensions[0] = ".csv"
 	result, err := c.Extract(t.Context(), extractor.File{Name: "report.pdf"}, nil)
 	if err != nil || result == nil || result.Text != "extracted" || rpc.calls != 1 {
@@ -58,7 +58,7 @@ func TestUnknownFormatsRemainCandidates(t *testing.T) {
 	if err := c.loadCapabilities(); err != nil {
 		t.Fatal(err)
 	}
-	if caps := c.Capabilities(); !caps.UnknownFormats {
+	if caps := c.ExtractCapabilities(); !caps.UnknownFormats {
 		t.Fatalf("unconfigured capabilities = %+v", caps)
 	}
 	if _, err := c.Extract(t.Context(), extractor.File{Name: "unknown.bin"}, nil); err != nil || rpc.calls != 1 {

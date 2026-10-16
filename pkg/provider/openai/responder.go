@@ -49,6 +49,14 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 		if options == nil {
 			options = new(provider.CompleteOptions)
 		}
+		emitted := false
+		forward := yield
+		yield = func(delta *provider.Completion, err error) bool {
+			if delta != nil {
+				emitted = true
+			}
+			return forward(delta, err)
+		}
 
 		req, err := r.convertResponsesRequest(messages, options)
 
@@ -93,6 +101,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 
 		var responseID, responseModel string
 		var reasoningContext provider.ReasoningContext
+		var tier provider.Tier
 		var searchCallID string
 
 		emit := func(content provider.Content, status provider.CompletionStatus) bool {
@@ -101,6 +110,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 				Model:     responseModel,
 				Status:    status,
 				Reasoning: reasoningContext,
+				Tier:      tier,
 
 				Message: &provider.Message{
 					Role:    provider.MessageRoleAssistant,
@@ -122,6 +132,7 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 				Status:    status,
 				Usage:     usage,
 				Reasoning: reasoningContext,
+				Tier:      tier,
 			}, nil)
 		}
 
@@ -159,6 +170,9 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 			if data.Response.Reasoning.Context != "" {
 				reasoningContext = provider.ReasoningContext(data.Response.Reasoning.Context)
 			}
+			if data.Response.ServiceTier != "" {
+				tier = provider.NormalizeTier(string(data.Response.ServiceTier))
+			}
 
 			switch event := data.AsAny().(type) {
 			case responses.ResponseCreatedEvent:
@@ -172,13 +186,13 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 
 				case responses.ResponseFunctionToolCall:
 					itemToCallID[item.ID] = item.CallID
-					if !emit(provider.ToolCallContent(provider.ToolCall{ID: item.CallID, Async: responseToolCallAsync(item.RawJSON()), Name: item.Name, Namespace: item.Namespace}), "") {
+					if !emit(provider.ToolCallContent(provider.ToolCall{ID: item.CallID, Async: item.Async, Name: item.Name, Namespace: item.Namespace}), "") {
 						return
 					}
 
 				case responses.ResponseCustomToolCall:
 					itemToCallID[item.ID] = item.CallID
-					if !emit(provider.ToolCallContent(provider.ToolCall{ID: item.CallID, Async: responseToolCallAsync(item.RawJSON()), Kind: provider.ToolKindCustom, Name: item.Name, Namespace: item.Namespace}), "") {
+					if !emit(provider.ToolCallContent(provider.ToolCall{ID: item.CallID, Async: item.Async, Kind: provider.ToolKindCustom, Name: item.Name, Namespace: item.Namespace}), "") {
 						return
 					}
 
@@ -256,12 +270,12 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 			case responses.ResponseOutputItemDoneEvent:
 				switch item := event.Item.AsAny().(type) {
 				case responses.ResponseFunctionToolCall:
-					if responseToolCallAsync(item.RawJSON()) && !emit(provider.ToolCallContent(provider.ToolCall{ID: item.CallID, Async: true}), "") {
+					if item.Async && !emit(provider.ToolCallContent(provider.ToolCall{ID: item.CallID, Async: true}), "") {
 						return
 					}
 
 				case responses.ResponseCustomToolCall:
-					if responseToolCallAsync(item.RawJSON()) && !emit(provider.ToolCallContent(provider.ToolCall{ID: item.CallID, Async: true}), "") {
+					if item.Async && !emit(provider.ToolCallContent(provider.ToolCall{ID: item.CallID, Async: true}), "") {
 						return
 					}
 
@@ -401,6 +415,12 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 		}
 
 		if err := stream.Err(); err != nil && (stops == nil || !stops.done) {
+			if !emitted && req.ServiceTier != "" && unsupportedTier(err) {
+				fallback := *options
+				fallback.Tier = ""
+				r.Complete(ctx, messages, &fallback)(yield)
+				return
+			}
 			yield(nil, convertError(err))
 			return
 		}
@@ -408,14 +428,6 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 			yield(nil, fmt.Errorf("openai: response stream ended without a terminal event: %w", io.ErrUnexpectedEOF))
 		}
 	}
-}
-
-func responseToolCallAsync(raw string) bool {
-	var item struct {
-		Async bool `json:"async"`
-	}
-	_ = json.Unmarshal([]byte(raw), &item)
-	return item.Async
 }
 
 func (r *Responder) convertResponsesRequest(messages []provider.Message, options *provider.CompleteOptions) (*responses.ResponseNewParams, error) {
@@ -447,8 +459,10 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		return nil, err
 	}
 
+	tier := provider.ParseTier(string(options.Tier))
 	req := &responses.ResponseNewParams{
-		Model: r.model,
+		ServiceTier: responses.ResponseNewParamsServiceTier(tier),
+		Model:       r.model,
 
 		Store: openai.Bool(false),
 
@@ -1092,7 +1106,7 @@ func responseFunctionCallParam(call provider.ToolCall, name, arguments string) *
 		item.Namespace = openai.String(call.Namespace)
 	}
 	if call.Async {
-		item.SetExtraFields(map[string]any{"async": true})
+		item.Async = openai.Bool(true)
 	}
 	return item
 }
@@ -1107,7 +1121,7 @@ func responseCustomToolCallParam(call provider.ToolCall, name, input string) *re
 		item.Namespace = openai.String(call.Namespace)
 	}
 	if call.Async {
-		item.SetExtraFields(map[string]any{"async": true})
+		item.Async = openai.Bool(true)
 	}
 	return item
 }
@@ -1362,7 +1376,7 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 					fn.DeferLoading = openai.Bool(true)
 				}
 				if inner.Async != nil {
-					fn.SetExtraFields(map[string]any{"async": *inner.Async})
+					fn.Async = openai.Bool(*inner.Async)
 				}
 				ns.Tools = append(ns.Tools, responses.NamespaceToolToolUnionParam{
 					OfFunction: &fn,
@@ -1415,7 +1429,7 @@ func (r *Responder) convertResponsesTools(tools []provider.Tool) ([]responses.To
 			function.DeferLoading = openai.Bool(true)
 		}
 		if t.Async != nil {
-			function.SetExtraFields(map[string]any{"async": *t.Async})
+			function.Async = openai.Bool(*t.Async)
 		}
 
 		result = append(result, responses.ToolUnionParam{
@@ -1443,7 +1457,7 @@ func customToolParam(t provider.Tool) *responses.CustomToolParam {
 		custom.DeferLoading = openai.Bool(true)
 	}
 	if t.Async != nil {
-		custom.SetExtraFields(map[string]any{"async": *t.Async})
+		custom.Async = openai.Bool(*t.Async)
 	}
 
 	return custom

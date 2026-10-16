@@ -154,7 +154,7 @@ func readSearchRequest(w http.ResponseWriter, r *http.Request) (*SearchRequest, 
 	}
 	if media == "application/json" {
 		var request SearchRequest
-		if err := web.ReadRequest(w, r, &request, nil); err != nil {
+		if err := web.ReadRequest(w, r, &request); err != nil {
 			return nil, err
 		}
 		return &request, nil

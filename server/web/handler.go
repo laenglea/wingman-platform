@@ -76,9 +76,18 @@ func WriteJSON(w http.ResponseWriter, body any) {
 	json.NewEncoder(w).Encode(body)
 }
 
-// SDKs sometimes send disabled options explicitly. Accept only the documented
-// default of an unsupported option, so requested behavior is never dropped.
-func ReadRequest(w http.ResponseWriter, r *http.Request, target any, defaults map[string]any) error {
+// ReadRequest validates the native API's request schema.
+func ReadRequest(w http.ResponseWriter, r *http.Request, target any) error {
+	return readRequest(w, r, target, true)
+}
+
+// ReadCompatibleRequest decodes supported vendor fields and ignores the rest,
+// including unknown nested options, so SDK additions do not break retrieval.
+func ReadCompatibleRequest(w http.ResponseWriter, r *http.Request, target any) error {
+	return readRequest(w, r, target, false)
+}
+
+func readRequest(w http.ResponseWriter, r *http.Request, target any, strict bool) error {
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {
 		return errors.New("Content-Type must be application/json")
@@ -95,20 +104,11 @@ func ReadRequest(w http.ResponseWriter, r *http.Request, target any, defaults ma
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return errors.New("request must contain one JSON object")
 	}
-	for name, expected := range defaults {
-		value, ok := fields[name]
-		if !ok {
-			continue
-		}
-		want, _ := json.Marshal(expected)
-		if string(value) != "null" && !bytes.Equal(bytes.TrimSpace(value), want) {
-			return fmt.Errorf("%s is unsupported; omit it or use %s", name, want)
-		}
-		delete(fields, name)
-	}
 	body, _ := json.Marshal(fields)
 	decoder = json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
+	if strict {
+		decoder.DisallowUnknownFields()
+	}
 	if err := decoder.Decode(target); err != nil {
 		return fmt.Errorf("invalid request: %w", err)
 	}

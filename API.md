@@ -43,6 +43,7 @@ Prompt caching is on by default on every backend that supports it: the stable pr
 | `model`                | String       | Model ID                                            |
 | `input`                | String/Array | Input text or conversation messages                 |
 | `stream`               | Boolean      | Enable streaming                                    |
+| `service_tier`         | String       | Best-effort processing tier: `auto`, `default`, `flex`, or `priority` |
 | `max_output_tokens`    | Integer      | Maximum tokens to generate                          |
 | `tools`                | Array        | Available tools/functions                           |
 | `tool_choice`          | String/Object| Tool selection mode (auto, none, required)          |
@@ -58,6 +59,25 @@ Prompt caching is on by default on every backend that supports it: the stable pr
 | `prompt_cache_options` | Object       | `mode` `implicit` (default) or `explicit`; explicit caches only at `prompt_cache_breakpoint` parts |
 
 Prompt caching is on by default on every backend that supports it: the stable prefix is cached automatically, as on OpenAI, and cached tokens are reported in `usage.input_tokens_details.cached_tokens`. A `prompt_cache_breakpoint` on an input content part marks the end of a reusable prefix: GPT-5.6 and later take it natively, Claude backends receive it as a cache breakpoint, and other backends keep caching implicitly.
+
+Processing tier preferences use `Tier` internally and `service_tier` on the OpenAI-compatible wire. `auto`, omission, and unknown values keep the backend's default and share the empty internal value. `default` explicitly requests standard processing. Known values map as follows; unsupported preferences are omitted:
+
+| Provider | `auto` | `default` | `flex` | `priority` |
+|----------|--------|-----------|--------|------------|
+| OpenAI / Azure OpenAI | Omit | `default` | `flex` | `priority` |
+| Gemini Interactions | Omit | `standard` | `flex` | `priority` |
+| Bedrock Converse | Omit | `default` | `flex` | `priority` |
+| Claude direct | Omit | `speed: standard` | Omit | `speed: fast` |
+| xAI | Omit | `default` | Omit | `priority` |
+| Other OpenAI-compatible endpoints | Pass through | Pass through | Pass through | Pass through |
+
+Availability still depends on the model, account, and region. OpenAI-compatible endpoints that explicitly reject `service_tier` with HTTP 400/422 are retried once without it, before any output is delivered. OpenAI-compatible capacity errors such as HTTP 429 are returned normally. Mistral's native selectors are `auto` and `standard_only`; through the generic adapter, rejected common values fall back to omission. OpenRouter supports Flex routing and priority routing with its own fallback rules.
+
+Claude's mapping uses fast inference rather than its legacy Priority Tier capacity. `usage.speed: fast` maps back to `priority`, and `standard` maps to `default`. Unsupported fast mode (HTTP 400/422 referring to speed/fast) or unavailable fast capacity (HTTP 429/529) triggers one retry at standard speed before any completion is delivered. Bedrock uses AWS's native processing tiers separately. See [Claude fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode).
+
+The response's `service_tier` reports the provider's effective tier, including downgrades. Native `standard` is returned as `default`. It is `null` before the provider reports it or when that metadata is unavailable; the requested preference is never used as proof of the tier actually served.
+
+References (checked 2026-10-16): [OpenAI Flex](https://developers.openai.com/api/docs/guides/flex-processing), [OpenAI Priority/Fast](https://developers.openai.com/api/docs/guides/fast-mode), [Azure](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/flex-processing), [Gemini Flex](https://ai.google.dev/gemini-api/docs/flex-inference?hl=en), [Gemini Priority](https://ai.google.dev/gemini-api/docs/priority-inference), [Bedrock](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ServiceTier.html), [Claude](https://platform.claude.com/docs/en/api/service-tiers), [xAI](https://docs.x.ai/developers/advanced-api-usage/priority-processing), [OpenRouter](https://openrouter.ai/docs/guides/features/service-tiers), [Mistral](https://docs.mistral.ai/inference/priority-tier).
 
 ## Decisions
 
@@ -212,6 +232,7 @@ Anthropic-compatible endpoints. See [Anthropic API Reference](https://docs.anthr
 | `output_format`       | Object       | Structured output with JSON schema             |
 | `output_config`       | Object       | Structured output and reasoning effort         |
 | `thinking`            | Object       | Thinking configuration (type, budget_tokens)   |
+| `speed`               | String       | `standard` maps to `TierDefault`; `fast` maps to `TierPriority`, with best-effort backend support |
 | `context_management`  | Object       | Context management with compaction edits       |
 | `compaction`          | Object       | `{"type":"summarize"}` requests on-demand Claude compaction |
 | `cache_control`       | Object       | Breakpoints on system and message blocks; the prefix is cached by default on Claude backends, GPT-5.6 and later receive them as `prompt_cache_breakpoint`, and `ttl: "1h"` asks for extended retention |
@@ -245,6 +266,9 @@ Gemini-compatible endpoints. See [Gemini API Reference](https://ai.google.dev/ap
 | `toolConfig`         | Object | Tool configuration (mode: AUTO, ANY, NONE)   |
 | `generationConfig`   | Object | Generation parameters                        |
 | `safetySettings`     | Array  | Safety filter settings                       |
+| `serviceTier`        | String | Best-effort processing tier: `standard`, `flex`, or `priority`; `service_tier` spelling is also accepted |
+
+The tier is a top-level request field for both `generateContent` and `streamGenerateContent`. Native `standard` maps to the shared `TierDefault`; unknown values keep the backend's default. When available, the effective tier is returned as `usageMetadata.serviceTier` and as `X-Gemini-Service-Tier` if known before response headers are sent. See the [Gemini Flex guide](https://ai.google.dev/gemini-api/docs/generate-content/flex-inference).
 
 **Generation Config:**
 
@@ -460,7 +484,7 @@ await exa.getContents(['https://go.dev/doc/'], { text: { maxCharacters: 1000 } }
 | URL extraction | `urls`: string or array, 1–20 URLs | `urls` or legacy `ids`: string or array, 1–20 URL identifiers |
 | Extraction timeout | `timeout`: 1–60 seconds per URL; default 10 | 30 seconds per URL |
 | Search excerpts | Always in `content` | `contents.highlights`: true or `{ "maxCharacters": N }` |
-| Page text in search | `include_raw_content`: true or `"markdown"` | `contents.text`: true or `{ "maxCharacters": N }` |
+| Page text in search | `include_raw_content`: true, `"markdown"`, or `"text"` | `contents.text`: true or `{ "maxCharacters": N }` |
 | Extracted text limit | Unavailable | `text`: true or `{ "maxCharacters": N }` |
 
 Domain filters allow up to 300 included and 150 excluded hostnames. Date and
@@ -469,15 +493,31 @@ category filters require support from the selected backend; `finance` and
 1, 7, 30, or 365 days and intersect with explicit publication bounds.
 
 Search and extraction use the backend's configured retrieval strategy.
-Tavily's default `search_depth: basic`, `extract_depth: basic`, and
-`format: markdown`, and Exa's `type: auto`, are accepted as baseline SDK hints;
-they do not override backend configuration. Extracted content is the backend's
-normalized text, which may contain Markdown. Backend-specific depth modes,
-format conversion, images, summaries, custom excerpt-selection queries, cached snapshot
-controls, generated answers, and billing/usage fields are not emulated.
-Unsupported active options and unknown fields return HTTP 400, rather than
-silently losing the requested behavior. Disabled SDK options may be omitted,
-null, or their documented defaults. Other endpoints return HTTP 404.
+The compatibility request schemas contain only implemented fields. All other
+fields are ignored, including unknown nested content options, so new vendor
+parameters do not break existing clients. For example, `livecrawlTimeout`,
+`search_depth`, `extract_depth`, and future SDK fields do not cause HTTP 400.
+Ignored fields are not forwarded to the backend.
+
+The current [Exa Search](https://exa.ai/docs/reference/search),
+[Exa Contents](https://exa.ai/docs/reference/get-contents),
+[Tavily Search](https://docs.tavily.com/documentation/api-reference/endpoint/search),
+and [Tavily Extract](https://docs.tavily.com/documentation/api-reference/endpoint/extract)
+references distinguish several kinds of options:
+
+| Field role | Examples | Compatibility behavior |
+| --- | --- | --- |
+| Implemented inputs and retrieval controls | Query/URLs, result count, domains, category, location, publication bounds, text/highlights selectors, `maxCharacters`; Tavily extraction `timeout` | Applied and validated. |
+| Retrieval tuning | Exa `livecrawlTimeout`, retrieval-only `type` modes, `useAutoprompt`, verbosity/highlight sizing; Tavily depth/chunk settings and language preference | Ignored; backend configuration applies. |
+| Additional behavior or output | Exa deep search, answers/summaries, images, streaming, structured output, freshness/snapshots, subpages, strict language or moderation controls | Ignored; the response contains only Wingman's supported retrieval fields. |
+| Optional metadata or future fields | User attribution, usage, favicons, newly introduced parameters | Ignored. |
+
+This is best-effort compatibility: accepting an unsupported field does not
+implement its behavior. Extracted content is the backend's normalized text,
+which may contain Markdown. Tavily `include_raw_content: true`, `"markdown"`,
+and `"text"` all request that same text; format hints do not trigger conversion.
+Malformed JSON and invalid supported fields still return HTTP 400. Unknown
+endpoints return HTTP 404. The native `/v1/search` schema remains strict.
 
 Tavily returns `query`, `answer: null`, `images: []`, `results`, `response_time`,
 and `request_id`; each result includes `url`, `title`, `content`, and
@@ -568,8 +608,9 @@ interfaces do not expose, so they are outside this retrieval subset.
 
 The dedicated `server/tavily` and `server/exa` tests cover authentication,
 access policies, filter translation, partial failures, Unicode limits, and
-rejection of unsupported options. Live tests load the nearest `.env` and require
-both `TAVILY_API_KEY` and `EXA_API_KEY`. They compare portable response fields
+ignored vendor/future fields alongside validation of supported inputs. Live
+tests load the nearest `.env` and require both `TAVILY_API_KEY` and `EXA_API_KEY`.
+They compare portable response fields
 against the native APIs and exercise both API dialects over both hosted backends,
 plus extraction through the built-in HTTP fetcher.
 

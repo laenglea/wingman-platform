@@ -87,7 +87,7 @@ func (r *Realtime) Defaults() provider.RealtimeOptions {
 	}
 }
 
-func (r *Realtime) Capabilities() provider.RealtimeCapabilities {
+func (r *Realtime) RealtimeCapabilities() provider.RealtimeCapabilities {
 	return provider.RealtimeCapabilities{
 		SessionUpdates:      true,
 		AudioBufferClearing: true,
@@ -408,7 +408,7 @@ func openAISessionObject(options provider.RealtimeOptions) map[string]any {
 			},
 			"output": map[string]any{
 				"format": openAIAudioFormat(options.OutputAudio),
-				"voice":  options.Voice,
+				"voice":  openAIVoice(options.Voice),
 			},
 		},
 	}
@@ -427,6 +427,13 @@ func openAISessionObject(options provider.RealtimeOptions) map[string]any {
 		}
 	}
 	return result
+}
+
+func openAIVoice(voice string) any {
+	if strings.HasPrefix(voice, "voice_") {
+		return map[string]any{"id": voice}
+	}
+	return voice
 }
 
 func openAIAudioFormat(format provider.RealtimeAudioFormat) map[string]any {

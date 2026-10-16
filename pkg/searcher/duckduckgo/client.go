@@ -151,7 +151,7 @@ func (c *Client) search(ctx context.Context, query, region string) ([]searcher.R
 	return parseResults(resp.Body)
 }
 
-func (c *Client) Capabilities() searcher.Capabilities { return searcher.Capabilities{} }
+func (c *Client) SearchCapabilities() searcher.Capabilities { return searcher.Capabilities{} }
 
 func parseResults(body io.Reader) ([]searcher.Result, error) {
 	doc, err := html.Parse(body)

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/config"
+	"github.com/adrianliechti/wingman/pkg/guard"
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/searcher"
 )
@@ -29,6 +30,11 @@ func StatusOf(err error) int {
 	var request *requestError
 	if errors.As(err, &request) {
 		return request.status
+	}
+
+	var flagged *guard.FlaggedError
+	if errors.As(err, &flagged) {
+		return http.StatusBadRequest
 	}
 	return http.StatusBadGateway
 }
@@ -52,7 +58,7 @@ func (h *Retriever) Search(r *http.Request, model, query string, options *search
 	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, model, policy.ActionAccess); err != nil {
 		return nil, &requestError{404, "searcher not found"}
 	}
-	caps := p.Capabilities()
+	caps := p.SearchCapabilities()
 	if (options.Since != nil || options.Until != nil) && !caps.DateFilters {
 		return nil, BadRequest("selected searcher does not support publication date filters")
 	}
@@ -96,7 +102,7 @@ func (h *Retriever) SearchProvider(r *http.Request, p searcher.Provider, model, 
 		settings = *options
 	}
 	includeText := settings.Text != nil
-	nativeText := p.Capabilities().Content
+	nativeText := p.SearchCapabilities().Content
 	if !nativeText {
 		settings.Text = nil
 	}

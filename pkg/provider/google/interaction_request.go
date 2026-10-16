@@ -75,6 +75,13 @@ func convertInteraction(model string, messages []provider.Message, options *prov
 		Store:            new(false),
 		Stream:           new(true),
 	}
+	switch options.Tier {
+	case "":
+	case provider.TierDefault:
+		request.ServiceTier = new(interactions.ServiceTierStandard)
+	case provider.TierFlex, provider.TierPriority:
+		request.ServiceTier = new(interactions.ServiceTier(options.Tier))
+	}
 	var instructions []string
 	for _, message := range messages {
 		if message.Role == provider.MessageRoleSystem {

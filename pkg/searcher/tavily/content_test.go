@@ -33,7 +33,7 @@ func TestOptionalFullTextPreservesExcerptsAndFailedAttempts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !c.Capabilities().Content || len(results) != 2 || results[0].Excerpt != "Excerpt" || results[1].Excerpt != "Still useful" {
+		if !c.SearchCapabilities().Content || len(results) != 2 || results[0].Excerpt != "Excerpt" || results[1].Excerpt != "Still useful" {
 			t.Fatal("excerpts were lost")
 		}
 		if include {

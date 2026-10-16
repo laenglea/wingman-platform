@@ -632,9 +632,33 @@ researchers:
 ```
 
 
+### Guards (Content Moderation)
+
+Guards classify text. Types: `openai` and `custom` (gRPC).
+Use `guard:` on searchers, scrapers or researchers to check queries, URLs or
+instructions before forwarding. Flagged inputs and guard errors block requests;
+returned content and redirects are not checked.
+
+```yaml
+guards:
+  moderation:
+    type: openai
+    token: ${OPENAI_API_KEY}
+
+searchers:
+  web:
+    type: exa
+    token: ${EXA_API_KEY}
+    guard: moderation
+```
+
+`POST /v1/guard` checks text directly. Omitting `model` combines all configured
+guards and flags content if any guard does.
+
+
 ### Document Extraction
 
-Extraction providers implement `Capabilities()` with media types, extensions, and `UnknownFormats`. `MaySupport(file)` selects candidates; the provider validates the actual contents. `UnknownFormats` keeps unlisted files eligible for provider validation, whether the provider inspects contents or delegates to a service whose formats are unknown. The multi-extractor skips incompatible providers, tries candidates in order, and preserves failures when none succeed. Cancellation stops fallback.
+Extraction providers implement `ExtractCapabilities()` with media types, extensions, and `UnknownFormats`. `MaySupport(file)` selects candidates; the provider validates the actual contents. `UnknownFormats` keeps unlisted files eligible for provider validation, whether the provider inspects contents or delegates to a service whose formats are unknown. The multi-extractor skips incompatible providers, tries candidates in order, and preserves failures when none succeed. Cancellation stops fallback.
 
 #### Default Extractor
 
@@ -966,7 +990,7 @@ Exa extraction is independent of tool context limits. `web_fetch` receives all r
 
 Built-in tools wrap the providers you configured elsewhere. Valid types: `search`, `scraper` (alias `crawler`), `research`, `translator`, `mcp`, `custom`.
 
-The Go search, extraction, and translation provider interfaces require their family's typed `Capabilities()` method. Search categories are part of that record. Tool schemas, routing, caching, and tracing use these records directly; custom Go implementations must supply them. Request-specific combinations, file formats, and credentials still require provider validation. Optional interfaces such as `tool.Resulter` remain separate when they add behavior.
+The Go provider interfaces use operation-specific methods: `SearchCapabilities()`, `ExtractCapabilities()`, `TranslateCapabilities()`, and `RealtimeCapabilities()`. Their return types remain the family's typed capability records; search categories are part of that record. Tool schemas, routing, caching, and tracing use these records directly; custom Go implementations must supply the renamed methods. Custom gRPC capability-discovery RPC names remain unchanged. Request-specific combinations, file formats, and credentials still require provider validation. Optional interfaces such as `tool.Resulter` remain separate when they add behavior.
 
 Custom searchers report category names, descriptions, and date-filter support through the gRPC `Capabilities` RPC. Search requests carry optional `since` and `until` publication timestamps (inclusive start, exclusive end). Legacy services without discovery expose no category enum or date filters. Discovery runs once at construction with a five-second deadline; errors other than `Unimplemented` fail initialization. The extractor and translator clients follow the same discovery behavior.
 
@@ -1073,7 +1097,7 @@ Summarization is automatically available for any chat model:
 
 Translators back the `/v1/translate` endpoint and the `translator` tool. Types: `deepl`, `azure`, `google`, `llm` (use any completer), `custom`.
 
-Translation providers implement `Capabilities()` with three modes: `TextToText`, `FileToText`, and `FileToDocument`. Each reports `supported`, `unsupported`, or `unknown`; the zero value is unsupported. DeepL, Azure, and Google translate text and return translated documents for file input. The LLM adapter reads files supported by its model and returns plain text. Capabilities describe modes; providers still validate credentials, formats, and model restrictions when translating.
+Translation providers implement `TranslateCapabilities()` with three modes: `TextToText`, `FileToText`, and `FileToDocument`. Each reports `supported`, `unsupported`, or `unknown`; the zero value is unsupported. DeepL, Azure, and Google translate text and return translated documents for file input. The LLM adapter reads files supported by its model and returns plain text. Capabilities describe modes; providers still validate credentials, formats, and model restrictions when translating.
 
 The `translate` tool requires possible text-to-text support. The API returns text by default or with `Accept: text/plain`. It sends uploads directly to providers with confirmed file-to-text support, including the LLM adapter, and uses the configured extractor before text translation for other text providers. Request a translated document with a document MIME type such as `Accept: application/pdf`; the API checks file-to-document support before calling the provider. Providers that accept files but return only text respond with HTTP 406 for document output requests.
 

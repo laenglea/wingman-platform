@@ -21,16 +21,20 @@ type interactionStep struct {
 }
 
 type interactionState struct {
-	id, model  string
-	options    *provider.CompleteOptions
-	aliases    map[string]provider.Tool
-	steps      map[int]*interactionStep
-	sawTool    bool
+	options *provider.CompleteOptions
+	aliases map[string]provider.Tool
+
+	id, model string
+	tier      provider.Tier
+
+	status     provider.CompletionStatus
+	stopReason provider.StopReason
+	details    *provider.StopDetails
 	terminal   bool
 	completed  bool
-	status     provider.CompletionStatus
-	details    *provider.StopDetails
-	stopReason provider.StopReason
+
+	steps   map[int]*interactionStep
+	sawTool bool
 }
 
 func newInteractionState(model string, options *provider.CompleteOptions) *interactionState {
@@ -52,6 +56,7 @@ func (s *interactionState) setIdentity(id, model string) {
 func (s *interactionState) completion() *provider.Completion {
 	return &provider.Completion{
 		ID: s.id, Model: s.model,
+		Tier:    s.tier,
 		Message: &provider.Message{Role: provider.MessageRoleAssistant},
 	}
 }
@@ -65,6 +70,7 @@ func (s *interactionState) event(event interactions.InteractionSSEEvent) (*provi
 	case event.InteractionCreatedEvent != nil:
 		interaction := event.InteractionCreatedEvent.Interaction
 		s.setIdentity(interaction.ID, value(interaction.Model))
+		s.setTier(interaction.ServiceTier)
 		return s.completion(), nil
 	case event.StepStart != nil:
 		return s.start(event.StepStart.Index, event.StepStart.Step)
@@ -91,9 +97,10 @@ func (s *interactionState) event(event interactions.InteractionSSEEvent) (*provi
 				return nil, err
 			}
 		}
-		return s.finish(status, nil), nil
+		return s.finish(status, event.InteractionStatusUpdate.Usage), nil
 	case event.InteractionCompletedEvent != nil:
 		interaction := event.InteractionCompletedEvent.Interaction
+		s.setTier(interaction.ServiceTier)
 		status := string(interaction.Status)
 		if status == "completed" || status == "requires_action" {
 			if err := s.checkStoppedTools(); err != nil {

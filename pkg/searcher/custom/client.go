@@ -196,7 +196,7 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 	return results, nil
 }
 
-func (c *Client) Capabilities() searcher.Capabilities {
+func (c *Client) SearchCapabilities() searcher.Capabilities {
 	result := c.capabilities
 	result.Categories = slices.Clone(result.Categories)
 	return result

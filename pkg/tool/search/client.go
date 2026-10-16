@@ -52,7 +52,7 @@ func New(p searcher.Provider, options ...Option) (*Client, error) {
 }
 
 func (c *Client) Tools(ctx context.Context) ([]tool.Tool, error) {
-	capabilities := c.provider.Capabilities()
+	capabilities := c.provider.SearchCapabilities()
 	props := map[string]any{
 		"query": map[string]any{
 			"type":        "string",
@@ -199,7 +199,7 @@ func (c *Client) Execute(ctx context.Context, name string, parameters map[string
 		}
 		options.Since = &since
 	}
-	if !c.provider.Capabilities().DateFilters && (options.Since != nil || options.Until != nil) {
+	if !c.provider.SearchCapabilities().DateFilters && (options.Since != nil || options.Until != nil) {
 		return nil, errors.New("search: this provider does not support publication date filters")
 	}
 

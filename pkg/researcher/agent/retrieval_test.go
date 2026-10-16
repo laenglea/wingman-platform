@@ -28,7 +28,7 @@ func TestResearch_PromptAndSchemaRespectCapabilities(t *testing.T) {
 	answer := provider.AssistantMessage("answer")
 	completer := &fakeCompleter{script: []provider.Completion{{Message: &answer}}}
 	p := &cachedSearcher{Provider: &duckduckgo.Client{}}
-	if p.Capabilities().DateFilters {
+	if p.SearchCapabilities().DateFilters {
 		t.Fatal("cache wrapper lost capabilities")
 	}
 	c, _ := New(completer, p)

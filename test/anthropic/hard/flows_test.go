@@ -295,7 +295,7 @@ func compareEventFields(t *testing.T, label string, reference, actual []*harness
 // optionalUsageFields describe the Anthropic service rather than the turn
 // (tier, geo, cache TTL breakdown) or depend on thinking being active; the
 // gateway reports them only when the backend does.
-var optionalUsageFields = map[string]bool{"cache_creation": true, "service_tier": true, "inference_geo": true, "output_tokens_details": true}
+var optionalUsageFields = map[string]bool{"cache_creation": true, "service_tier": true, "speed": true, "inference_geo": true, "output_tokens_details": true}
 
 func compareFieldSets(t *testing.T, label string, want, got map[string]bool) {
 	t.Helper()

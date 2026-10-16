@@ -134,22 +134,23 @@ type accumulatedToolCall struct {
 // inner accumulator that could get out of sync.
 type StreamingAccumulator struct {
 	handler StreamEventHandler
-
 	// When true, incoming Reasoning.Text is emitted as summary events instead of text events.
 	ReasoningAsSummary bool
-
 	// When true, reasoning output is silently dropped (client didn't request reasoning).
 	SuppressReasoning bool
 
 	// Completion metadata (captured from chunks)
-	id               string
-	model            string
+	id    string
+	model string
+
+	tier             provider.Tier
 	reasoningContext provider.ReasoningContext
-	status           provider.CompletionStatus
-	usage            *provider.Usage
-	started          bool
-	message          *streamMessage
-	messages         []*streamMessage
+
+	started bool
+	status  provider.CompletionStatus
+
+	message  *streamMessage
+	messages []*streamMessage
 
 	// Tool call state — single source of truth
 	toolCalls      []accumulatedToolCall
@@ -160,42 +161,45 @@ type StreamingAccumulator struct {
 	// In-flight reasoning state. Closed items archive into completedReasonings
 	// before a new ID starts so each item's ID stays paired with its own
 	// encrypted_content (otherwise OpenAI rejects the next turn).
-	reasoningID              string
-	reasoningSignature       string
-	hasReasoningItem         bool
-	hasReasoningTextPart     bool
-	hasReasoningSummaryPart  bool
-	reasoningOutputIndex     int
-	reasoningClosed          bool
+	reasoningID             string
+	reasoningSignature      string
+	reasoningOutputIndex    int
+	reasoningClosed         bool
+	hasReasoningItem        bool
+	hasReasoningTextPart    bool
+	hasReasoningSummaryPart bool
+
 	streamedReasoningText    strings.Builder
 	streamedReasoningSummary strings.Builder
-
-	completedReasonings []provider.Reasoning
+	completedReasonings      []provider.Reasoning
 
 	compactionID        string
-	compactionText      string
-	compactionEncrypted string
-	hasCompactionItem   bool
 	compactionIndex     int
-
-	compactions []provider.Compaction
+	compactionEncrypted string
+	compactionText      string
+	hasCompactionItem   bool
+	compactions         []provider.Compaction
 
 	// Register every item when its output index is assigned so snapshots
 	// retain the stream's order, including reasoning after a message.
 	outputOrder []streamItemRef
+
+	usage *provider.Usage
 }
 
 type streamMessage struct {
 	id                 string
 	phase              provider.MessagePhase
-	hasOutputItem      bool
-	hasContentPart     bool
-	hasRefusalPart     bool
-	refusalFirst       bool
-	messageClosed      bool
 	messageOutputIndex int
-	streamedText       strings.Builder
-	streamedRefusal    strings.Builder
+
+	hasOutputItem  bool
+	hasContentPart bool
+	hasRefusalPart bool
+	refusalFirst   bool
+	messageClosed  bool
+
+	streamedText    strings.Builder
+	streamedRefusal strings.Builder
 }
 
 type streamItemKind int
@@ -797,6 +801,9 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 	if c.Reasoning != "" {
 		s.reasoningContext = c.Reasoning
 	}
+	if c.Tier != "" {
+		s.tier = c.Tier
+	}
 	if c.Status != "" {
 		s.status = c.Status
 	}
@@ -1343,6 +1350,7 @@ func (s *StreamingAccumulator) Result() *provider.Completion {
 		Status:    s.status,
 		Usage:     s.usage,
 		Reasoning: s.reasoningContext,
+		Tier:      s.tier,
 
 		Message: &provider.Message{
 			Role:    provider.MessageRoleAssistant,

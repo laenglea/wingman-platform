@@ -59,6 +59,7 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	options := &provider.CompleteOptions{
+		Tier:        provider.ParseTier(req.Tier),
 		Tools:       tools,
 		ToolOptions: toToolOptions(req.ToolChoice),
 
@@ -310,7 +311,10 @@ func responseDefaults(resp *Response, req ResponsesRequest, completion *provider
 	resp.Object = "response"
 	resp.Background = false
 	resp.Store = false
-	resp.ServiceTier = "default"
+	resp.Tier = nil
+	if completion != nil && completion.Tier != "" {
+		resp.Tier = new(string(completion.Tier))
+	}
 
 	resp.ParallelToolCalls = true
 	if req.ParallelToolCalls != nil {

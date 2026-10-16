@@ -443,6 +443,24 @@ func toFinishReason(completion *provider.Completion) FinishReason {
 	return FinishReasonStop
 }
 
+// withTier adds effective processing metadata using Gemini's native spelling.
+func withTier(metadata *UsageMetadata, tier provider.Tier) *UsageMetadata {
+	var native string
+	switch tier {
+	case provider.TierDefault:
+		native = "standard"
+	case provider.TierFlex, provider.TierPriority:
+		native = string(tier)
+	}
+	if native != "" {
+		if metadata == nil {
+			metadata = &UsageMetadata{}
+		}
+		metadata.Tier = native
+	}
+	return metadata
+}
+
 // toUsageMetadata maps the provider-level usage to Gemini's UsageMetadata.
 // Returns nil when no usage data is available.
 func toUsageMetadata(u *provider.Usage) *UsageMetadata {

@@ -25,7 +25,7 @@ type Client struct {
 	capabilities *extractor.Capabilities
 }
 
-func (c *Client) Capabilities() extractor.Capabilities {
+func (c *Client) ExtractCapabilities() extractor.Capabilities {
 	if c.capabilities == nil {
 		return extractor.Capabilities{UnknownFormats: true}
 	}
@@ -85,7 +85,7 @@ func (c *Client) loadCapabilities() error {
 }
 
 func (c *Client) Extract(ctx context.Context, file extractor.File, options *extractor.ExtractOptions) (*extractor.Document, error) {
-	if !c.Capabilities().MaySupport(file) {
+	if !c.ExtractCapabilities().MaySupport(file) {
 		return nil, extractor.ErrUnsupported
 	}
 	if options == nil {

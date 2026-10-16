@@ -51,24 +51,24 @@ type StreamEventHandler func(event StreamEvent) error
 
 // StreamingAccumulator manages streaming state and emits events
 type StreamingAccumulator struct {
+	handler     StreamEventHandler
 	accumulator provider.CompletionAccumulator
-
-	handler StreamEventHandler
 
 	// Configuration
 	messageID string
 	model     string
 
 	// State tracking
-	started bool
+	started    bool
+	stopReason StopReason
 
 	// Content blocks may interleave; deltas are routed to stable indexes
 	// and open blocks are closed on Complete
 	nextBlockIndex int
 	openBlocks     []int
 
-	textIndex int
 	textID    string
+	textIndex int
 
 	thinkingID     string
 	thinkingIndex  int
@@ -84,7 +84,6 @@ type StreamingAccumulator struct {
 	// Usage tracking
 	inputTokens  int
 	outputTokens int
-	stopReason   StopReason
 }
 
 // NewStreamingAccumulator creates a new StreamingAccumulator with an event handler
@@ -231,6 +230,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 				Content: []ContentBlock{},
 
 				Usage: Usage{
+					Speed:        speedFromTier(c.Tier),
 					InputTokens:  inputTokens,
 					OutputTokens: 0,
 

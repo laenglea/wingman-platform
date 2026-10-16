@@ -56,6 +56,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		if response.Interaction != nil {
 			result := response.Interaction
 			state.setIdentity(value(result.ID), string(value(result.Model)))
+			state.setTier(result.ServiceTier)
 			for index, step := range result.Steps {
 				delta, err := state.start(index, step)
 				if err != nil {

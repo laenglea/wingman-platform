@@ -11,8 +11,7 @@ import (
 func (h *Handler) handleExtract(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	var request ExtractRequest
-	defaults := map[string]any{"extract_depth": "basic", "format": "markdown", "query": "", "include_images": false, "include_favicon": false, "include_usage": false}
-	if err := web.ReadRequest(w, r, &request, defaults); err != nil {
+	if err := web.ReadCompatibleRequest(w, r, &request); err != nil {
 		web.WriteError(w, r, 400, err.Error())
 		return
 	}

@@ -16,7 +16,7 @@ import (
 
 type unknownTranslator struct{}
 
-func (unknownTranslator) Capabilities() translator.Capabilities {
+func (unknownTranslator) TranslateCapabilities() translator.Capabilities {
 	return translator.Capabilities{TextToText: translator.Unknown, FileToText: translator.Unknown, FileToDocument: translator.Unknown}
 }
 
@@ -34,7 +34,7 @@ func TestUnknownProviderRemainsUsableThroughTracing(t *testing.T) {
 		if err != nil || got != "hello" {
 			t.Fatalf("unknown provider: got %v, error %v", got, err)
 		}
-		if p.Capabilities() != (unknownTranslator{}).Capabilities() {
+		if p.TranslateCapabilities() != (unknownTranslator{}).TranslateCapabilities() {
 			t.Fatal("unknown support changed through tracing")
 		}
 	}
@@ -49,10 +49,10 @@ func TestBuiltinModesAndTracing(t *testing.T) {
 		{&deepl.Client{}, translator.Capabilities{TextToText: translator.Supported, FileToDocument: translator.Supported}},
 		{&google.Client{}, translator.Capabilities{TextToText: translator.Supported, FileToDocument: translator.Supported}},
 		{llm.New(nil), translator.Capabilities{TextToText: translator.Supported, FileToText: translator.Supported}},
-		{&custom.Client{}, (unknownTranslator{}).Capabilities()},
+		{&custom.Client{}, (unknownTranslator{}).TranslateCapabilities()},
 	} {
 		for _, p := range []translator.Provider{tt.provider, otel.NewTranslator("test", "", tt.provider)} {
-			if got := p.Capabilities(); got != tt.want {
+			if got := p.TranslateCapabilities(); got != tt.want {
 				t.Fatalf("%T modes = %+v, want %+v", p, got, tt.want)
 			}
 		}
