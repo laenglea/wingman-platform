@@ -29,7 +29,7 @@ type Config struct {
 	models map[string]provider.Model
 
 	completer   map[string]provider.Completer
-	decider     map[string]provider.Decider
+	decider     map[string]registeredDecider
 	embedder    map[string]provider.Embedder
 	renderer    map[string]provider.Renderer
 	reranker    map[string]provider.Reranker
@@ -121,6 +121,10 @@ func Parse(path string) (*Config, error) {
 		return nil, err
 	}
 
+	if err := c.registerDeciders(file); err != nil {
+		return nil, err
+	}
+
 	if err := c.registerMCP(file); err != nil {
 		return nil, err
 	}
@@ -134,6 +138,7 @@ type configFile struct {
 	Policy *policyConfig `yaml:"policy"`
 
 	Providers []providerConfig `yaml:"providers"`
+	Deciders  yaml.Node        `yaml:"deciders"`
 
 	Extractors  yaml.Node `yaml:"extractors"`
 	Segmenters  yaml.Node `yaml:"segmenters"`

@@ -16,6 +16,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/policy/noop"
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/pkg/provider/adapter/decider"
 	"github.com/adrianliechti/wingman/server"
 )
 
@@ -60,6 +61,8 @@ func decisionsServer(t *testing.T, backend *decisionCompleter) (*config.Config, 
 	cfg := &config.Config{Policy: noop.New()}
 	cfg.RegisterCompleter("chat", backend)
 	cfg.RegisterEmbedder("embedding", decisionEmbedder{})
+	cfg.RegisterDecisionAdapter("chat", decider.FromCompleter("chat", backend))
+	cfg.RegisterDecisionAdapter("embedding", decider.FromEmbedder("embedding", decisionEmbedder{}))
 	s, err := server.New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +137,7 @@ func TestDecisionsEmbedder(t *testing.T) {
 
 func TestDecisionsValidation(t *testing.T) {
 	for name, body := range map[string]string{
-		"invalid json": `{`, "null request": `null`, "missing model": `{"state":{},"questions":{"q":{"type":"noul"}}}`,
+		"invalid json": `{`, "null request": `null`,
 		"unknown model":             `{"model":"missing","state":{},"questions":{"q":{"type":"noul"}}}`,
 		"missing state":             `{"model":"chat","questions":{"q":{"type":"noul"}}}`,
 		"scalar state":              `{"model":"chat","state":true,"questions":{"q":{"type":"noul"}}}`,

@@ -140,6 +140,12 @@ func DetectModelType(id string) ModelType {
 		"reranker",
 	}
 
+	deciders := []string{
+		"decider",
+		"decision",
+		"jev",
+	}
+
 	renderers := []string{
 		"dall-e",
 		"flux",
@@ -194,6 +200,12 @@ func DetectModelType(id string) ModelType {
 	for _, val := range rerankers {
 		if strings.Contains(strings.ToLower(id), strings.ToLower(val)) {
 			return ModelTypeReranker
+		}
+	}
+
+	for _, val := range deciders {
+		if strings.Contains(strings.ToLower(id), strings.ToLower(val)) {
+			return ModelTypeDecider
 		}
 	}
 

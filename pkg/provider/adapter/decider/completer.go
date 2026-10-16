@@ -15,10 +15,32 @@ var _ provider.Decider = (*CompleterAdapter)(nil)
 type CompleterAdapter struct {
 	model     string
 	completer provider.Completer
+	reasoning provider.ReasoningOptions
 }
 
-func FromCompleter(model string, completer provider.Completer) *CompleterAdapter {
-	return &CompleterAdapter{model: model, completer: completer}
+type Option func(*CompleterAdapter)
+
+func FromCompleter(model string, completer provider.Completer, options ...Option) *CompleterAdapter {
+	a := &CompleterAdapter{
+		model: model, completer: completer,
+		reasoning: provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled},
+	}
+	for _, option := range options {
+		option(a)
+	}
+	return a
+}
+
+// WithEffort enables adaptive reasoning at the requested level. Empty or "none"
+// preserves the default disabled reasoning request.
+func WithEffort(effort provider.Effort) Option {
+	return func(a *CompleterAdapter) {
+		if effort == "" || effort == "none" {
+			a.reasoning = provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled}
+		} else {
+			a.reasoning = provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: effort}
+		}
+	}
 }
 
 func (a *CompleterAdapter) Decide(ctx context.Context, input *provider.DecisionInput) (*provider.Decision, error) {
@@ -75,11 +97,13 @@ func (a *CompleterAdapter) Decide(ctx context.Context, input *provider.DecisionI
 		},
 	}
 
-	var acc provider.CompletionAccumulator
-	for completion, err := range a.completer.Complete(ctx, messages, &provider.CompleteOptions{
+	reasoning := a.reasoning
+	completeOptions := &provider.CompleteOptions{
 		Schema:           schema,
-		ReasoningOptions: &provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled},
-	}) {
+		ReasoningOptions: &reasoning,
+	}
+	var acc provider.CompletionAccumulator
+	for completion, err := range a.completer.Complete(ctx, messages, completeOptions) {
 		if err != nil {
 			return nil, err
 		}
