@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -64,21 +63,17 @@ func (h *Handler) handleDecisions(w http.ResponseWriter, r *http.Request) {
 		writeDecisionError(w, http.StatusBadRequest, errors.New("request must contain a single JSON object"))
 		return
 	}
-	if strings.TrimSpace(req.Model) == "" {
-		writeDecisionError(w, http.StatusBadRequest, errors.New("model is required"))
-		return
-	}
 	input, err := req.input()
 	if err != nil {
 		writeDecisionError(w, http.StatusBadRequest, err)
 		return
 	}
-	p, err := h.Decider(req.Model)
+	model, p, err := h.Decider(req.Model)
 	if err != nil {
 		writeDecisionError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
+	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, model, policy.ActionAccess); err != nil {
 		writeDecisionError(w, http.StatusNotFound, err)
 		return
 	}

@@ -95,6 +95,50 @@ func TestCompleterDecision(t *testing.T) {
 	}
 }
 
+func TestCompleterDecisionEffort(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		options []Option
+		want    provider.ReasoningOptions
+	}{
+		{"default", nil, provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled}},
+		{"none", []Option{WithEffort("none")}, provider.ReasoningOptions{Type: provider.ReasoningTypeDisabled}},
+		{"low", []Option{WithEffort(provider.EffortLow)}, provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortLow}},
+		{"high", []Option{WithEffort(provider.EffortHigh)}, provider.ReasoningOptions{Type: provider.ReasoningTypeAdaptive, Effort: provider.EffortHigh}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			backend := completerFunc(func(_ context.Context, _ []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
+				calls++
+				if options.ReasoningOptions == nil || *options.ReasoningOptions != tt.want {
+					t.Fatalf("reasoning = %+v, want %+v", options.ReasoningOptions, tt.want)
+				}
+				if options.OutputOptions != nil || options.Schema == nil || options.Schema.Strict == nil || !*options.Schema.Strict {
+					t.Fatal("effort should preserve strict output and leave verbosity unset")
+				}
+				// Provider request conversion may modify options. The next decision
+				// must still use the alias's configured effort.
+				options.ReasoningOptions.Effort = provider.EffortMax
+				return func(yield func(*provider.Completion, error) bool) {
+					message := provider.AssistantMessage(`{"q0":{"0":1,"1":0}}`)
+					yield(&provider.Completion{Message: &message}, nil)
+				}
+			})
+			p := FromCompleter("chat", backend, tt.options...)
+			input := decisionInput()
+			input.Questions = input.Questions[:1]
+			for range 2 {
+				if _, err := p.Decide(t.Context(), input); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if calls != 2 {
+				t.Fatalf("completion calls = %d, want 2", calls)
+			}
+		})
+	}
+}
+
 func TestCompleterRejectsInvalidDecisions(t *testing.T) {
 	for _, output := range []string{
 		`{}`, `null`, `{"q0":{"0":0,"1":0}}`, `{"q0":{"0":null,"1":1}}`,

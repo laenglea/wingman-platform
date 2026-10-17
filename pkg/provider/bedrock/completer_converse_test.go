@@ -268,3 +268,76 @@ func TestConvertToolResultFile_Video(t *testing.T) {
 		t.Fatalf("source = %T", video.Value.Source)
 	}
 }
+
+// Bedrock Converse requires toolResult blocks to precede text blocks in the
+// user message following an assistant toolUse turn, even when a user text item
+// was supplied before or between function_call_output items.
+func TestConvertConverseInput_ToolResultsPrecedeUserText(t *testing.T) {
+	c := &Completer{Config: &Config{model: "eu.anthropic.claude-sonnet-4-6"}}
+
+	history := []provider.Message{
+		provider.UserMessage("Check weather"),
+		{
+			Role: provider.MessageRoleAssistant,
+			Content: []provider.Content{
+				provider.ToolCallContent(provider.ToolCall{ID: "call_1", Name: "get_weather", Arguments: `{"city":"Zurich"}`}),
+				provider.ToolCallContent(provider.ToolCall{ID: "call_2", Name: "get_weather", Arguments: `{"city":"Bern"}`}),
+			},
+		},
+		provider.UserMessage("Here are the results:"),
+		{
+			Role: provider.MessageRoleUser,
+			Content: []provider.Content{
+				provider.ToolResultContent(provider.ToolResult{ID: "call_1", Parts: []provider.Part{{Text: "18C"}}}),
+			},
+		},
+		// Unsigned foreign reasoning turn in the middle should drop cleanly and
+		// still merge the surrounding user messages with toolResult blocks first.
+		{
+			Role: provider.MessageRoleAssistant,
+			Content: []provider.Content{
+				provider.ReasoningContent(provider.Reasoning{Summary: "unsigned foreign summary"}),
+			},
+		},
+		{
+			Role: provider.MessageRoleUser,
+			Content: []provider.Content{
+				provider.ToolResultContent(provider.ToolResult{ID: "call_2", Parts: []provider.Part{{Text: "16C"}}}),
+			},
+		},
+	}
+
+	req, err := c.convertConverseInput(history, &provider.CompleteOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(req.Messages) != 3 {
+		t.Fatalf("messages = %d, want 3 (user, assistant, merged user)", len(req.Messages))
+	}
+
+	userBlocks := req.Messages[2].Content
+	// Expect: toolResult(call_1), toolResult(call_2), text("Here are the results:"), cachePoint
+	if len(userBlocks) != 4 {
+		t.Fatalf("user blocks = %d, want 4", len(userBlocks))
+	}
+	if _, ok := userBlocks[0].(*types.ContentBlockMemberToolResult); !ok {
+		t.Fatalf("block[0] = %T, want ToolResult", userBlocks[0])
+	}
+	if _, ok := userBlocks[1].(*types.ContentBlockMemberToolResult); !ok {
+		t.Fatalf("block[1] = %T, want ToolResult", userBlocks[1])
+	}
+	if _, ok := userBlocks[2].(*types.ContentBlockMemberText); !ok {
+		t.Fatalf("block[2] = %T, want Text", userBlocks[2])
+	}
+
+	// Omitted tools on a turn with tool history must still populate ToolConfig.
+	if req.ToolConfig == nil || len(req.ToolConfig.Tools) == 0 {
+		t.Fatal("expected ToolConfig to be populated from historical toolUse blocks when tools are omitted")
+	}
+	spec, ok := req.ToolConfig.Tools[0].(*types.ToolMemberToolSpec)
+	if !ok || aws.ToString(spec.Value.Name) != "get_weather" {
+		t.Fatalf("tool[0] = %T %+v, want get_weather spec", req.ToolConfig.Tools[0], req.ToolConfig.Tools[0])
+	}
+}
+

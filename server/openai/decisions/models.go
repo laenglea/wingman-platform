@@ -89,9 +89,6 @@ type Usage struct {
 
 // ProviderInput validates the supported wire variants before adapting them.
 func (r Request) ProviderInput() (*provider.DecisionInput, error) {
-	if strings.TrimSpace(r.Model) == "" {
-		return nil, errors.New("model is required")
-	}
 	if err := validateInput(r.Input); err != nil {
 		return nil, err
 	}

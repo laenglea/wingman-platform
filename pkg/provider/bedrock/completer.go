@@ -735,12 +735,18 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 	// so with tool history "none" is best effort.
 	toolOptions := options.ToolOptions
 	none := toolOptions != nil && toolOptions.Choice == provider.ToolChoiceNone
+	hasToolHistory := inputHasToolBlocks(input)
 
-	if none && inputHasToolBlocks(input) {
+	if none && hasToolHistory {
 		toolOptions = nil
 	}
 
-	config, err := c.convertToolConfigPolicy(provider.FlattenTools(options.Tools), toolOptions, cache)
+	tools := provider.FlattenTools(options.Tools)
+	if hasToolHistory {
+		tools = withHistoryTools(tools, input)
+	}
+
+	config, err := c.convertToolConfigPolicy(tools, toolOptions, cache)
 
 	if err != nil {
 		return nil, err
@@ -977,6 +983,16 @@ func (c *Completer) convertMessagesPolicy(messages []provider.Message, cache cac
 			continue
 		}
 
+		if len(result) > 0 && result[len(result)-1].Role == role {
+			last := &result[len(result)-1]
+			if role == types.ConversationRoleUser {
+				last.Content = mergeUserBlocks(last.Content, content)
+			} else {
+				last.Content = append(last.Content, content...)
+			}
+			continue
+		}
+
 		result = append(result, types.Message{
 			Role:    role,
 			Content: content,
@@ -996,11 +1012,33 @@ func (c *Completer) convertMessagesPolicy(messages []provider.Message, cache cac
 	return result, nil
 }
 
+func mergeUserBlocks(a, b []types.ContentBlock) []types.ContentBlock {
+	var results, content []types.ContentBlock
+	for _, list := range [][]types.ContentBlock{a, b} {
+		for i := 0; i < len(list); i++ {
+			if _, ok := list[i].(*types.ContentBlockMemberToolResult); ok {
+				results = append(results, list[i])
+				if i+1 < len(list) {
+					if _, cp := list[i+1].(*types.ContentBlockMemberCachePoint); cp {
+						i++
+						results = append(results, list[i])
+					}
+				}
+			} else {
+				content = append(content, list[i])
+			}
+		}
+	}
+	return append(results, content...)
+}
+
 func convertUserContent(m provider.Message) ([]types.ContentBlock, error) {
 	return convertUserContentPolicy(m, cachePolicy{})
 }
 
 func convertUserContentPolicy(m provider.Message, cache cachePolicy) ([]types.ContentBlock, error) {
+	// toolResult blocks must precede other content in a user message.
+	var results []types.ContentBlock
 	var content []types.ContentBlock
 
 	for _, c := range m.Content {
@@ -1051,7 +1089,7 @@ func convertUserContentPolicy(m provider.Message, cache cachePolicy) ([]types.Co
 				status = types.ToolResultStatusError
 			}
 
-			content = append(content, &types.ContentBlockMemberToolResult{
+			results = append(results, &types.ContentBlockMemberToolResult{
 				Value: types.ToolResultBlock{
 					Status: status,
 
@@ -1061,12 +1099,12 @@ func convertUserContentPolicy(m provider.Message, cache cachePolicy) ([]types.Co
 				},
 			})
 			if cache.marks(c) {
-				content = append(content, &types.ContentBlockMemberCachePoint{Value: cachePoint()})
+				results = append(results, &types.ContentBlockMemberCachePoint{Value: cachePoint()})
 			}
 		}
 	}
 
-	return content, nil
+	return append(results, content...), nil
 }
 
 // Blocks keep the order the model produced them in, so interleaved thinking
@@ -1257,6 +1295,45 @@ func inputHasToolBlocks(messages []provider.Message) bool {
 		}
 	}
 	return false
+}
+
+// withHistoryTools ensures toolConfig defines any tool referenced by historical
+// toolUse blocks even when the caller omits or narrows tools on a later turn.
+func withHistoryTools(tools []provider.Tool, messages []provider.Message) []provider.Tool {
+	known := make(map[string]bool, len(tools))
+	for _, t := range tools {
+		switch t.Kind {
+		case provider.ToolKindTextEditor:
+			known[texteditor.FunctionTool(t).Name] = true
+		case provider.ToolKindComputer:
+			known[computeruse.FunctionTool(t).Name] = true
+		case provider.ToolKindShell:
+			known[shell.FunctionTool(t).Name] = true
+		default:
+			if t.Name != "" {
+				known[t.Name] = true
+			}
+		}
+	}
+
+	for _, m := range messages {
+		for _, c := range m.Content {
+			if c.ToolCall == nil {
+				continue
+			}
+			name := provider.FlattenToolName(*c.ToolCall)
+			if name == "" || known[name] {
+				continue
+			}
+			known[name] = true
+			tools = append(tools, provider.Tool{
+				Name:       name,
+				Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
+			})
+		}
+	}
+
+	return tools
 }
 
 func convertToolResultFile(val *provider.File) (types.ToolResultContentBlock, error) {

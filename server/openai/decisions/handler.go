@@ -35,11 +35,12 @@ func (h *Handler) handleDecisions(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusBadRequest, err)
 		return
 	}
-	p, err := h.Decider(req.Model)
+	model, p, err := h.Decider(req.Model)
 	if err != nil {
 		shared.WriteError(w, http.StatusBadRequest, err)
 		return
 	}
+	req.Model = model
 	if err := h.Policy.Verify(r.Context(), policy.ResourceModel, req.Model, policy.ActionAccess); err != nil {
 		shared.WriteError(w, http.StatusNotFound, err)
 		return

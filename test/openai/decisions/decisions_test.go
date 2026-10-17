@@ -64,8 +64,8 @@ func TestNativeHTTP(t *testing.T) {
 	}})
 }
 
-// Run the same contract and classification checks across configured completion
-// and embedding models. TEST_DECISIONS_MODELS overrides the default model list.
+// Run the same contract and classification checks across enabled decision
+// aliases. TEST_DECISIONS_MODELS overrides the default gpt-6-luna alias.
 func TestCrossModelHTTP(t *testing.T) {
 	h := openai.New(t)
 	if *configPath != "" {
@@ -92,10 +92,7 @@ func TestCrossModelHTTP(t *testing.T) {
 			}
 		}
 	} else {
-		for _, model := range openai.DefaultModels() {
-			models = append(models, model.Name)
-		}
-		models = append(models, "text-embedding-3-small")
+		models = []string{"gpt-6-luna"}
 	}
 	if len(models) == 0 {
 		t.Fatal("TEST_DECISIONS_MODELS contains no models")
