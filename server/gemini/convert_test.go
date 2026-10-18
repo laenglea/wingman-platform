@@ -233,3 +233,24 @@ func TestToMessagesRejectsInvalidRoleAndSkipsNilElements(t *testing.T) {
 		t.Fatalf("toTools with nil elements: %+v", tools)
 	}
 }
+
+func TestToMessagesFunctionResponseForcesUserRole(t *testing.T) {
+	messages, err := toMessages(nil, []*Content{
+		{Role: "user", Parts: []*Part{{Text: "Hi"}}},
+		{Role: "model", Parts: []*Part{{FunctionCall: &FunctionCall{ID: "toolu_1", Name: "lookup", Args: map[string]any{"q": "x"}}}}},
+		{Role: "model", Parts: []*Part{{FunctionResponse: &FunctionResponse{ID: "toolu_1", Name: "lookup", Response: map[string]any{"ok": true}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("len(messages) = %d, want 3", len(messages))
+	}
+	if messages[2].Role != provider.MessageRoleUser {
+		t.Fatalf("messages[2].Role = %q, want %q", messages[2].Role, provider.MessageRoleUser)
+	}
+	if result, ok := messages[2].ToolResult(); !ok || result.ID != "toolu_1" {
+		t.Fatalf("messages[2] tool result = %+v, %v", result, ok)
+	}
+}
+

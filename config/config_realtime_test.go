@@ -105,6 +105,7 @@ func TestDetectRealtimeAndTranscriptionModels(t *testing.T) {
 		"gemini-3.8-live":                               ModelTypeRealtime,
 		"gemini-3.8-live-extended-thinking":             ModelTypeRealtime,
 		"gemini-3.8-flash":                              ModelTypeCompleter,
+		"gemini-nano-banana-2.1":                        ModelTypeRenderer,
 		"amazon.nova-2-sonic-v1:0":                      ModelTypeRealtime,
 		"gpt-live-transcribe":                           ModelTypeRealtime,
 		"gpt-transcribe":                                ModelTypeTranscriber,

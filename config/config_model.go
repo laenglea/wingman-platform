@@ -151,6 +151,7 @@ func DetectModelType(id string) ModelType {
 		"flux",
 		"gpt-image",
 		"image",
+		"nano-banana",
 	}
 
 	synthesizers := []string{
