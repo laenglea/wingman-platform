@@ -1,4 +1,4 @@
-package azurespeech
+package azure
 
 import (
 	"bytes"
@@ -23,20 +23,10 @@ type Transcriber struct {
 	*Config
 }
 
-func NewTranscriber(region, model string, options ...Option) (*Transcriber, error) {
-	if region == "" {
-		return nil, fmt.Errorf("azure speech region is required (e.g. eastus)")
-	}
-
-	cfg := &Config{
-		region: region,
-		model:  model,
-
-		client: provider.DefaultClient,
-	}
-
-	for _, option := range options {
-		option(cfg)
+func NewTranscriber(endpoint, model string, options ...Option) (*Transcriber, error) {
+	cfg, err := newConfig(endpoint, model, options...)
+	if err != nil {
+		return nil, err
 	}
 
 	return &Transcriber{
@@ -130,7 +120,7 @@ func (t *Transcriber) transcribe(ctx context.Context, input provider.File, optio
 
 	writer.Close()
 
-	endpoint := t.sttURL() + "/speechtotext/transcriptions:transcribe?api-version=2025-10-15"
+	endpoint := t.url + "/speechtotext/transcriptions:transcribe?api-version=2025-10-15"
 
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, body)
 	if err != nil {

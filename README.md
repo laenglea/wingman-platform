@@ -451,26 +451,27 @@ providers:
 
 https://learn.microsoft.com/en-us/azure/ai-services/speech-service/
 
-Text-to-speech and speech-to-text using Azure Cognitive Services Speech. Supports multilingual voices with automatic language detection. OpenAI voice names (alloy, echo, fable, nova, onyx, shimmer) are automatically mapped to Azure equivalents.
+Text-to-speech and fast speech-to-text using Azure Speech. Uses the resource endpoint for both APIs. The default synthesis voice is `en-US-Ava:DragonHDLatestNeural`; set `vars.voice` to choose another default. An explicit request voice takes precedence, and Azure voice names (including Dragon HD and Dragon HD Omni) pass through unchanged. OpenAI voice names (alloy, echo, fable, nova, onyx, shimmer) map to Dragon HD personas.
 
 ```yaml
 providers:
-  - type: azurespeech
+  - type: azure
+    url: https://YOUR_RESOURCE.cognitiveservices.azure.com/
     token: ${AZURE_SPEECH_KEY}
     vars:
-      region: eastus
+      voice: en-US-Ava:DragonHDLatestNeural
     models:
-      azure-tts:
-        id: azure-tts
-        type: synthesizer
-      azure-stt:
-        id: azure-stt
-        type: transcriber
+      - azure-tts
+      - azure-stt
 ```
 
-The `region` variable is used to construct the appropriate endpoints:
-- TTS: `https://{region}.tts.speech.microsoft.com`
-- STT: `https://{region}.api.cognitive.microsoft.com`
+The `models` entries are names exposed by Wingman: use `model: azure-tts` for speech synthesis and `model: azure-stt` for transcription. Wingman infers the operation from `tts` and `stt` in these names, so no model-level `type` is needed. For names without a recognized type, use the model mapping syntax with an explicit `type: synthesizer` or `type: transcriber`. Azure's synthesis voice is selected by `vars.voice` or the request's `voice` field. These speech APIs don't receive a model or deployment ID, so no `id` field is needed here.
+
+With `url`, the provider uses `/tts/cognitiveservices/v1` for synthesis and `/speechtotext/transcriptions:transcribe?api-version=2025-10-15` for fast transcription. Set `url` to the resource's base URL without an API path; no region is required.
+
+Voice availability depends on the resource's region. See Microsoft's [HD voice documentation](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/high-definition-voices) and [REST API reference](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech).
+
+Synthesis accepts `mp3` (default), `opus` (Ogg container), `wav`, and `pcm` (24 kHz, 16-bit mono). Azure Speech doesn't support AAC or FLAC output; these and other unsupported formats return a validation error. Input is plain text and is escaped when constructing SSML.
 
 
 #### Ollama
