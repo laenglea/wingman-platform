@@ -60,10 +60,18 @@ func toMessages(systemInstruction *Content, contents []*Content) ([]provider.Mes
 func toMessage(c Content, pendingCallIDs map[string][]string) (*provider.Message, error) {
 	var role provider.MessageRole
 
-	switch c.Role {
-	case "", "user":
+	hasFunctionResponse := false
+	for _, part := range c.Parts {
+		if part != nil && part.FunctionResponse != nil {
+			hasFunctionResponse = true
+			break
+		}
+	}
+
+	switch {
+	case hasFunctionResponse, c.Role == "", c.Role == "user":
 		role = provider.MessageRoleUser
-	case "model":
+	case c.Role == "model":
 		role = provider.MessageRoleAssistant
 	default:
 		return nil, fmt.Errorf("Please use a valid role: user, model.")
