@@ -31,7 +31,7 @@ func New(token string, options ...Option) (*Client, error) {
 		token:  token,
 		client: http.DefaultClient,
 
-		mode: "fast",
+		mode: "auto",
 	}
 
 	for _, option := range options {
@@ -44,7 +44,7 @@ func New(token string, options ...Option) (*Client, error) {
 
 	// Search stays retrieval-only. Synthesis belongs to Wingman's own model.
 	switch c.mode {
-	case "fast", "instant", "auto":
+	case "auto", "lite", "fast", "instant":
 	default:
 		return nil, fmt.Errorf("exa search: mode %q is not a retrieval-only search mode", c.mode)
 	}
@@ -84,9 +84,12 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 		return nil, errors.New("exa search: at most 1200 included or excluded domains are supported")
 	}
 	if settings.Category == CategoryCompany || settings.Category == CategoryPeople {
-		if settings.Since != nil || settings.Until != nil || len(settings.Exclude) > 0 {
-			return nil, fmt.Errorf("exa search: category %q does not support date filters or excluded domains; omit those filters or use another category", settings.Category)
+		if settings.Since != nil || settings.Until != nil {
+			return nil, fmt.Errorf("exa search: category %q does not support date filters; omit those filters or use another category", settings.Category)
 		}
+	}
+	if settings.Category == CategoryPeople && len(settings.Exclude) > 0 {
+		return nil, errors.New("exa search: category people does not support excluded domains; omit those filters or use another category")
 	}
 
 	request := &SearchRequest{
@@ -100,7 +103,7 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 		ExcludeDomains: settings.Exclude,
 
 		Contents: &SearchContents{
-			Highlights: true,
+			Highlights: &SearchHighlights{Dynamic: true},
 			Text:       settings.Text != nil,
 		},
 	}
@@ -134,6 +137,8 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 	}
 	req.Header.Set("x-api-key", c.token)
 	req.Header.Set("Content-Type", "application/json")
+	// The published API schema still requires this header for dynamic highlights.
+	req.Header.Set("Exa-Beta", "dynamic-highlights-2026-08-28")
 
 	resp, err := c.client.Do(req)
 
@@ -168,9 +173,6 @@ func (c *Client) Search(ctx context.Context, query string, options *searcher.Sea
 		}
 		if settings.Text != nil {
 			result.Text = &r.Text
-			if result.Excerpt == "" {
-				result.Excerpt = searchExcerpt(r.Text, query)
-			}
 		}
 
 		if t, err := time.Parse(time.RFC3339, r.PublishedDate); err == nil {
@@ -200,7 +202,7 @@ func (c *Client) SearchCapabilities() searcher.Capabilities {
 		DateFilters: true,
 		Content:     true,
 		Categories: []searcher.Category{
-			{Name: CategoryCompany, Description: "Specific companies or organizations (e.g. SaaS vendors, public companies). Date filters and domain exclusions are not supported; omit those filters or choose another category."},
+			{Name: CategoryCompany, Description: "Specific companies or organizations (e.g. SaaS vendors, public companies). Date filters are not supported; omit those filters or choose another category."},
 			{Name: CategoryPeople, Description: "Specific people or profile pages (e.g. LinkedIn-style biographies). Date filters and domain exclusions are not supported; omit those filters or choose another category."},
 			{Name: CategoryNews, Description: "News articles and current-events coverage from media outlets."},
 			{Name: CategoryPublication, Description: "Scholarly publications, including research papers, preprints, and journal articles."},

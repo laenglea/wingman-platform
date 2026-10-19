@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/adrianliechti/wingman/pkg/searcher"
+	"github.com/joho/godotenv"
 )
 
 // Opt-in real retrieval test. Never log request headers or credentials.
@@ -19,18 +20,21 @@ func TestSearchLive(t *testing.T) {
 	if os.Getenv("EXA_LIVE_TEST") != "1" {
 		t.Skip("set EXA_LIVE_TEST=1 and EXA_API_KEY to exercise Exa search")
 	}
+	// Match the server's opt-in live probes; never print upstream credentials.
+	_ = godotenv.Load("../../../.env")
 	token := os.Getenv("EXA_API_KEY")
 	if token == "" {
 		t.Fatal("EXA_API_KEY is required")
 	}
 	for _, tc := range []struct {
+		mode     string
 		query    string
 		evidence string
 	}{
-		{"AgentWebBench number websites documents", "18.4"},
-		{"2021 Cannes Palme d'Or winning film", "titane"},
+		{"auto", "AgentWebBench number websites documents", "18.4"},
+		{"lite", "2021 Cannes Palme d'Or winning film", "titane"},
 	} {
-		t.Run(tc.query, func(t *testing.T) {
+		t.Run(tc.mode, func(t *testing.T) {
 			rawChars := 0
 			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				resp, err := http.DefaultTransport.RoundTrip(r)
@@ -51,7 +55,7 @@ func TestSearchLive(t *testing.T) {
 				resp.Body = io.NopCloser(bytes.NewReader(body))
 				return resp, nil
 			})
-			c, err := New(token, WithClient(&http.Client{Transport: transport}))
+			c, err := New(token, WithClient(&http.Client{Transport: transport}), WithMode(tc.mode))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -67,8 +71,8 @@ func TestSearchLive(t *testing.T) {
 			for _, result := range results {
 				chars += len([]rune(result.Excerpt))
 				found = found || strings.Contains(strings.ToLower(result.Excerpt), tc.evidence)
-				if result.Source == "" || result.Excerpt == "" {
-					t.Error("result lacks source/evidence")
+				if result.Source == "" {
+					t.Error("result lacks source")
 				}
 			}
 			if !found {

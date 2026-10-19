@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { tavily } from '@tavily/core';
-import Exa from 'exa-js';
+import Exa, { DYNAMIC_HIGHLIGHTS_BETA } from 'exa-js';
 
 const root = process.env.WEB_TEST_URL;
 const key = process.env.WEB_TEST_KEY;
@@ -24,7 +24,8 @@ if (dialect === 'tavily') {
 } else {
   const client = new Exa(key, `${root}/v1/exa`);
   const search = await client.search('Go programming language documentation', {
-    numResults: 1, includeDomains: ['go.dev'], contents: { text: true, highlights: true },
+    type: 'lite', numResults: 1, includeDomains: ['go.dev'],
+    contents: { text: true, highlights: { dynamic: true } }, betas: [DYNAMIC_HIGHLIGHTS_BETA],
   });
   assert.equal(search.results.length, 1);
   assert.equal(new URL(search.results[0].url).hostname, 'go.dev');

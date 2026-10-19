@@ -8,12 +8,12 @@ import (
 
 func TestTuningHintsAcrossProviders(t *testing.T) {
 	for _, backend := range []string{"exa", "tavily", "plain"} {
-		for _, mode := range []string{"auto", "fast", "instant", "neural", "keyword", "deep", "future-mode"} {
+		for _, mode := range []string{"auto", "lite", "fast", "instant", "neural", "keyword", "deep-lite", "deep", "future-mode"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				s, providers := webtest.NewServer(t, false)
 				body := `{"model":"` + backend + `","query":"test","numResults":2,
 					"includeDomains":["example.com"],"type":"` + mode + `",
-					"useAutoprompt":true,"userIdentifier":"test-user","stream":true,
+					"useAutoprompt":true,"userIdentifier":"test-user","stream":true,"objective":"Find supporting evidence",
 					"outputSchema":{"type":"object"},"future_option":{"enabled":true},
 					"startCrawlDate":"2026-01-01","endCrawlDate":"2026-10-01",
 					"contents":{"livecrawlTimeout":15000,"summary":true,"maxAgeHours":-1,"future_option":[],

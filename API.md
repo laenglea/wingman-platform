@@ -427,7 +427,7 @@ being silently ignored.
 
 | Provider | Categories | Location | Date filters | Result limit |
 |----------|------------|----------|--------------|--------------|
-| Exa | `company`, `people`, `news`, `publication`, `personal site`, `financial report`; other strings are hints. Legacy `research paper` maps to `publication`. | ISO country code | Supported except with `company` or `people`, which also reject domain exclusions | 1–100 |
+| Exa | `company`, `people`, `news`, `publication`, `personal site`, `financial report`; other strings are hints. Legacy `research paper` maps to `publication`. | ISO country code | Supported except with `company` or `people`; only `people` rejects domain exclusions | 1–100 |
 | Tavily | `general` (default), `news`, `finance`; legacy `financial report` maps to `finance` | Supported country code, translated to Tavily's country name; `general` only | Strict filtering by estimated publication/update dates; undated results are omitted when bounds are supplied | 0–20 |
 | DuckDuckGo | General web search only | Supported country code, translated to a documented region/locale | Not supported by the HTML adapter | Positive integer |
 | Custom | Forwarded to the gRPC provider | Forwarded to the gRPC provider | When advertised by the gRPC provider | Positive int32 |
@@ -546,6 +546,14 @@ references distinguish several kinds of options:
 | Additional behavior or output | Exa deep search, answers/summaries, images, streaming, structured output, freshness/snapshots, subpages, strict language or moderation controls | Ignored; the response contains only Wingman's supported retrieval fields. |
 | Optional metadata or future fields | User attribution, usage, favicons, newly introduced parameters | Ignored. |
 
+Checked against Exa 3.0 on 2026-10-20 and the official Exa SDKs 2.26.0.
+The portable endpoint retains its 20-result and 300/150-hostname limits;
+the Exa provider itself supports 100 results and 1200 included/excluded domains.
+Exa's domain paths, location objects, `objective`, synthesized
+output and streaming are outside this subset. `type: "lite"` and
+`contents.highlights.dynamic` are accepted as tuning hints; configured backend
+behavior applies, including Dynamic Highlights when using the Exa provider.
+
 This is best-effort compatibility: accepting an unsupported field does not
 implement its behavior. Extracted content is the backend's normalized text,
 which may contain Markdown. Tavily `include_raw_content: true`, `"markdown"`,
@@ -604,15 +612,26 @@ searcher-plus-scraper fallback. An unavailable page
 must retain its retrieval failure rather than silently substituting a snippet
 for full text or initiating an unrequested fresh crawl.
 
-Exa SDK 2.25.0 defaults `search()` to requesting text, even though its HTTP
+Exa SDK 2.26.0 defaults `search()` to requesting text, even though its HTTP
 content controls are optional. The official SDK probes explicitly request
-both text and highlights through each backend.
+both text and dynamic highlights through each backend.
 Absent or empty search `contents` does not request text in Wingman. The
 `/contents` extraction subset defaults to text retrieval when no text selector
 is supplied.
-The Exa provider requests native highlights for excerpts and adds page text
-only when `SearchOptions.Text` is non-nil. Shared result fields are `Excerpt`
-for query evidence and `Text` for page text. Compatibility endpoints expose excerpts only
+The Exa provider defaults to `auto` and always requests Dynamic Highlights
+(`contents.highlights.dynamic: true`). It sends the
+`Exa-Beta: dynamic-highlights-2026-08-28` header still required by the published
+[Highlights documentation](https://exa.ai/docs/search/highlights) and OpenAPI
+schema, although the [Exa 3.0 announcement](https://exa.ai/blog/exa-3) describes
+general availability. No separate Wingman configuration switch is needed.
+Dynamic selection can leave a redundant result without an excerpt; Wingman
+preserves that decision instead of filling it with locally selected text.
+`vars.mode: lite` selects cached-only retrieval with lower cost and latency;
+legacy `fast` and `instant` modes remain supported. Deep/synthesis modes belong
+to research rather than this search provider.
+
+Page text is added only when `SearchOptions.Text` is non-nil. Shared result fields
+are `Excerpt` for query evidence and `Text` for page text. Compatibility endpoints expose excerpts only
 in the fields requested by their SDK dialect. Custom gRPC services can advertise
 `content` and handle the optional `text` options message; older services continue to return
 excerpts, with optional text composed through the configured scraper.

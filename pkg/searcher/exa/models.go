@@ -20,8 +20,12 @@ type SearchRequest struct {
 }
 
 type SearchContents struct {
-	Text       bool `json:"text,omitempty"`
-	Highlights bool `json:"highlights,omitempty"`
+	Text       bool              `json:"text,omitempty"`
+	Highlights *SearchHighlights `json:"highlights,omitempty"`
+}
+
+type SearchHighlights struct {
+	Dynamic bool `json:"dynamic"`
 }
 
 type SearchResponse struct {

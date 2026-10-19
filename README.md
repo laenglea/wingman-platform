@@ -621,6 +621,11 @@ searchers:
     token: ${EXA_API_KEY}
 ```
 
+Exa search uses `auto` mode with Dynamic Highlights, which select evidence
+across the result set. Set `vars: { mode: lite }` for lower cost and latency;
+`lite` retrieves cached content only. Existing `fast` and `instant`
+configurations remain accepted as legacy modes.
+
 #### Scrapers
 
 Fetch and extract clean content from a URL. Types: `fetch` (built-in HTTP), `exa`, `tavily`, `custom`.
