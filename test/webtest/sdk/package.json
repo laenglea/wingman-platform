@@ -4,6 +4,6 @@
   "type": "module",
   "dependencies": {
     "@tavily/core": "0.7.14",
-    "exa-js": "2.25.0"
+    "exa-js": "2.26.0"
   }
 }

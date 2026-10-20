@@ -8,7 +8,7 @@ import (
 
 func TestHighlightsAcrossProviders(t *testing.T) {
 	for _, backend := range []string{"tavily", "exa", "plain"} {
-		for _, selector := range []string{"true", "{}", `{"maxCharacters":4}`} {
+		for _, selector := range []string{"true", "{}", `{"dynamic":true}`, `{"dynamic":true,"verbosity":"high"}`, `{"maxCharacters":4}`} {
 			s, providers := webtest.NewServer(t, false)
 			got := webtest.Response(t, webtest.Send(t, s, "/v1/exa/search", `{"model":"`+backend+`","query":"test","contents":{"highlights":`+selector+`}}`, nil), 200)
 			hit := got["results"].([]any)[0].(map[string]any)

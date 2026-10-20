@@ -30,11 +30,14 @@ func TestSearchRetrievalOnlyAndOptionsUnchanged(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body["type"] != "fast" || body["query"] != "launch date" || body["numResults"] != float64(3) || body["category"] != "news" || body["userLocation"] != "CH" {
+		if body["type"] != "auto" || body["query"] != "launch date" || body["numResults"] != float64(3) || body["category"] != "news" || body["userLocation"] != "CH" {
 			t.Fatalf("wrong request: %#v", body)
 		}
-		if !reflect.DeepEqual(body["contents"], map[string]any{"highlights": true}) {
+		if !reflect.DeepEqual(body["contents"], map[string]any{"highlights": map[string]any{"dynamic": true}}) {
 			t.Fatalf("default search must retrieve excerpts without full text: %#v", body["contents"])
+		}
+		if r.Header.Get("Exa-Beta") != "dynamic-highlights-2026-08-28" {
+			t.Fatal("missing dynamic highlights header")
 		}
 		for _, name := range []string{"outputSchema", "summary", "highlights", "systemPrompt", "additionalQueries"} {
 			if _, ok := body[name]; ok {
@@ -64,8 +67,9 @@ func TestSearchRetrievalOnlyAndOptionsUnchanged(t *testing.T) {
 
 func TestSearchRetainsFullTextIncludingFailedRetrievals(t *testing.T) {
 	page := strings.Repeat("Full source evidence. ", 200)
-	body, _ := json.Marshal(map[string]any{"results": []map[string]string{
-		{"url": "https://example.com/full", "title": "Full", "text": page},
+	body, _ := json.Marshal(map[string]any{"results": []map[string]any{
+		{"url": "https://example.com/full", "title": "Full", "text": page, "highlights": []string{"Selected evidence"}},
+		{"url": "https://example.com/redundant", "title": "Redundant", "text": page, "highlights": []string{}},
 		{"url": "https://example.com/empty", "title": "Empty"},
 	}})
 	c, err := New("test", WithClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -73,7 +77,7 @@ func TestSearchRetainsFullTextIncludingFailedRetrievals(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		if request.Contents == nil || !request.Contents.Text || !request.Contents.Highlights {
+		if request.Contents == nil || !request.Contents.Text || request.Contents.Highlights == nil || !request.Contents.Highlights.Dynamic {
 			t.Fatal("full text must be requested alongside excerpts")
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
@@ -85,10 +89,13 @@ func TestSearchRetainsFullTextIncludingFailedRetrievals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 2 || results[0].Text == nil || *results[0].Text != page || len(results[0].Excerpt) >= len(page) {
+	if len(results) != 3 || results[0].Text == nil || *results[0].Text != page || results[0].Excerpt != "Selected evidence" {
 		t.Fatal("full text was lost or replaced the bounded excerpt")
 	}
-	if results[1].Text == nil || *results[1].Text != "" {
+	if results[1].Excerpt != "" || results[1].Text == nil || *results[1].Text != page {
+		t.Fatal("locally generated excerpts defeated dynamic highlight selection")
+	}
+	if results[2].Text == nil || *results[2].Text != "" {
 		t.Fatal("unavailable text was mistaken for unattempted retrieval")
 	}
 }
@@ -116,31 +123,35 @@ func TestSearchRejectsSynthesisModesAndInvalidInput(t *testing.T) {
 	}
 }
 
-func TestSearchExcerptFindsLateEvidenceWithoutSynthesizing(t *testing.T) {
-	page := strings.Repeat("Routine operations and background. ", 800) + "\nLaunch date: 14 May 2031.\n" + strings.Repeat("Appendix. ", 1000)
-	got := searchExcerpt(page, "launch date")
-	if !strings.Contains(got, "Launch date: 14 May 2031.") {
-		t.Fatal("lost late evidence")
-	}
-	if len([]rune(got)) > 1500 {
-		t.Fatal("excerpt exceeds the frontend snippet budget")
-	}
-	_, body, _ := strings.Cut(got, "\n")
-	if !strings.Contains(page, body) {
-		t.Fatal("excerpt was not verbatim")
-	}
-}
-
-func TestSearchExcerptUnicodeAndMissingMatches(t *testing.T) {
-	page := strings.Repeat("背景。", 1500) + "公開日：2031年5月14日。" + strings.Repeat("付録。", 800)
-	if got := searchExcerpt(page, "公開日"); !strings.Contains(got, "公開日：2031年5月14日。") {
-		t.Fatal("lost Unicode evidence")
-	}
-	if got := searchExcerpt("  Short text.\n", "other"); got != "  Short text.\n" {
-		t.Fatal("changed short text")
-	}
-	if got := searchExcerpt(strings.Repeat("a", 2000), "missing"); !strings.HasSuffix(got, strings.Repeat("a", excerptCharacters)) {
-		t.Fatal("missing prefix fallback")
+func TestSearchRetrievalModesAndCompanyExclusions(t *testing.T) {
+	for _, mode := range []string{"auto", "lite", "fast", "instant"} {
+		t.Run(mode, func(t *testing.T) {
+			httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if body["type"] != mode || body["category"] != "company" || body["numResults"] != float64(100) {
+					t.Fatalf("unexpected request: %#v", body)
+				}
+				if !reflect.DeepEqual(body["excludeDomains"], []any{"spam.example"}) {
+					t.Fatal("company domain exclusions were lost")
+				}
+				if !reflect.DeepEqual(body["contents"], map[string]any{"highlights": map[string]any{"dynamic": true}}) || r.Header.Get("Exa-Beta") != "dynamic-highlights-2026-08-28" {
+					t.Fatalf("dynamic highlights are not enabled: %#v", body["contents"])
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"results":[]}`))}, nil
+			})}
+			c, err := New("test", WithClient(httpClient), WithMode(mode))
+			if err != nil {
+				t.Fatal(err)
+			}
+			limit := 100
+			options := &searcher.SearchOptions{Limit: &limit, Category: " Company ", Exclude: []string{"spam.example"}}
+			if _, err := c.Search(t.Context(), "software companies", options); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -221,6 +232,9 @@ func TestSearchRejectsUnsupportedEntityFilters(t *testing.T) {
 		for _, options := range []searcher.SearchOptions{
 			{Since: &date}, {Until: &date}, {Exclude: []string{"spam.example"}},
 		} {
+			if category == "company" && len(options.Exclude) > 0 {
+				continue // Company search supports domain exclusions.
+			}
 			c, _ := New("test", WithClient(httpClient), WithCategory(category))
 			want := options
 			if _, err := c.Search(context.Background(), "founder", &options); err == nil || !strings.Contains(err.Error(), "does not support") {

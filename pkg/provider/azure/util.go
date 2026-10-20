@@ -1,4 +1,4 @@
-package azurespeech
+package azure
 
 import (
 	"io"

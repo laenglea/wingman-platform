@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/adrianliechti/wingman/pkg/provider/azurespeech"
+	"github.com/adrianliechti/wingman/pkg/provider/azure"
 	"github.com/adrianliechti/wingman/pkg/provider/google"
 	"github.com/adrianliechti/wingman/pkg/provider/mistral"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
@@ -48,8 +48,8 @@ func createSynthesizer(cfg providerConfig, model modelContext) (provider.Synthes
 	case "openrouter":
 		return openrouterSynthesizer(cfg, model)
 
-	case "azurespeech", "azure-speech":
-		return azureSpeechSynthesizer(cfg, model)
+	case "azure":
+		return azureSynthesizer(cfg, model)
 
 	case "gemini", "google":
 		return googleSynthesizer(cfg, model)
@@ -62,20 +62,22 @@ func createSynthesizer(cfg providerConfig, model modelContext) (provider.Synthes
 	}
 }
 
-func azureSpeechSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesizer, error) {
-	var options []azurespeech.Option
+func azureSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesizer, error) {
+	var options []azure.Option
+
+	if voice := cfg.Vars["voice"]; voice != "" {
+		options = append(options, azure.WithVoice(voice))
+	}
 
 	if cfg.Token != "" {
-		options = append(options, azurespeech.WithToken(cfg.Token))
+		options = append(options, azure.WithToken(cfg.Token))
 	}
 
 	if model.Client != nil {
-		options = append(options, azurespeech.WithClient(model.Client))
+		options = append(options, azure.WithClient(model.Client))
 	}
 
-	region := cfg.Vars["region"]
-
-	return azurespeech.NewSynthesizer(region, model.ID, options...)
+	return azure.NewSynthesizer(cfg.URL, model.ID, options...)
 }
 
 func googleSynthesizer(cfg providerConfig, model modelContext) (provider.Synthesizer, error) {

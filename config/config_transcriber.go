@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/adrianliechti/wingman/pkg/provider/azurespeech"
+	"github.com/adrianliechti/wingman/pkg/provider/azure"
 	"github.com/adrianliechti/wingman/pkg/provider/google"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
 	"github.com/adrianliechti/wingman/pkg/provider/openrouter"
@@ -50,8 +50,8 @@ func createTranscriber(cfg providerConfig, model modelContext) (provider.Transcr
 	case "openrouter":
 		return openrouterTranscriber(cfg, model)
 
-	case "azurespeech", "azure-speech":
-		return azureSpeechTranscriber(cfg, model)
+	case "azure":
+		return azureTranscriber(cfg, model)
 
 	case "gemini", "google":
 		return googleTranscriber(cfg, model)
@@ -61,20 +61,18 @@ func createTranscriber(cfg providerConfig, model modelContext) (provider.Transcr
 	}
 }
 
-func azureSpeechTranscriber(cfg providerConfig, model modelContext) (provider.Transcriber, error) {
-	var options []azurespeech.Option
+func azureTranscriber(cfg providerConfig, model modelContext) (provider.Transcriber, error) {
+	var options []azure.Option
 
 	if cfg.Token != "" {
-		options = append(options, azurespeech.WithToken(cfg.Token))
+		options = append(options, azure.WithToken(cfg.Token))
 	}
 
 	if model.Client != nil {
-		options = append(options, azurespeech.WithClient(model.Client))
+		options = append(options, azure.WithClient(model.Client))
 	}
 
-	region := cfg.Vars["region"]
-
-	return azurespeech.NewTranscriber(region, model.ID, options...)
+	return azure.NewTranscriber(cfg.URL, model.ID, options...)
 }
 
 func googleTranscriber(cfg providerConfig, model modelContext) (provider.Transcriber, error) {
