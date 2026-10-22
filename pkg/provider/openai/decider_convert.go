@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+
 	"github.com/openai/openai-go/v3"
 )
 
@@ -15,28 +16,24 @@ func (d *Decider) convertDecisionRequest(input *provider.DecisionInput) (*openai
 		return nil, err
 	}
 	req := &openai.DecisionNewParams{Model: d.model}
-	raw, _ := json.Marshal(input.State)
-	// System One also accepts structured state; serialize it as text. Preserve
-	// user message arrays from the Decisions endpoint as multimodal input.
-	var messages []struct {
-		Role string `json:"role"`
-	}
-	hasMessages := json.Unmarshal(raw, &messages) == nil && len(messages) > 0
-	if hasMessages {
-		for _, m := range messages {
-			if m.Role != "user" {
-				hasMessages = false
-				break
-			}
+	if cache := input.CacheOptions; cache != nil {
+		extra := map[string]any{}
+		if cache.Key != "" {
+			extra["prompt_cache_key"] = cache.Key
 		}
-	}
-	if hasMessages {
-		if err := json.Unmarshal(raw, &req.Input.OfDecisionInputMessageArray); err != nil {
-			return nil, err
+		cacheOptions := map[string]any{}
+		if cache.Mode == provider.CacheModeExplicit {
+			cacheOptions["mode"] = "explicit"
 		}
-	} else {
-		req.Input.OfString = openai.String(decisionText(input.State))
+		if ttl := cacheTTL(cache.Retention); ttl != "" {
+			cacheOptions["ttl"] = ttl
+		}
+		if len(cacheOptions) > 0 {
+			extra["prompt_cache_options"] = cacheOptions
+		}
+		req.SetExtraFields(extra)
 	}
+	req.Input.OfString = openai.String(decisionText(input.State))
 	for _, q := range input.Questions {
 		instructions := decisionText(q.Instructions)
 		name := openai.String(q.ID)
@@ -102,6 +99,7 @@ func convertDecision(decision *openai.Decision, input *provider.DecisionInput) (
 		InputTokens: int(decision.Usage.InputTokens), OutputTokens: int(decision.Usage.OutputTokens),
 		CacheReadInputTokens:     int(decision.Usage.InputTokensDetails.CachedTokens),
 		CacheCreationInputTokens: int(decision.Usage.InputTokensDetails.CacheWriteTokens),
+		CacheWriteTokensDetails:  cacheWriteDetails(decision.Usage.InputTokensDetails.JSON.ExtraFields["cache_write_tokens_details"].Raw()),
 	}}
 	if decision.Usage.OutputTokensDetails.JSON.ReasoningTokens.Valid() {
 		tokens := int(decision.Usage.OutputTokensDetails.ReasoningTokens)

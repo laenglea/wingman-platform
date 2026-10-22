@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/adrianliechti/wingman/pkg/jsonutil"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
 // https://platform.openai.com/docs/api-reference/responses/create
@@ -37,23 +38,12 @@ type ResponsesRequest struct {
 	PromptCacheOptions   *PromptCacheOptions `json:"prompt_cache_options,omitempty"`
 }
 
-// PromptCacheOptions selects implicit or explicit prompt caching. ttl is
-// accepted for compatibility; its only value is the backend default.
-type PromptCacheOptions struct {
-	Mode string `json:"mode,omitempty"`
-	TTL  string `json:"ttl,omitempty"`
-}
-
-func (o *PromptCacheOptions) mode() string {
-	if o == nil {
-		return ""
-	}
-	return o.Mode
-}
+type PromptCacheOptions = shared.PromptCacheOptions
 
 // PromptCacheBreakpoint marks the end of a reusable prefix on a content part.
 type PromptCacheBreakpoint struct {
 	Mode string `json:"mode,omitempty"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 // ContextManagementConfig represents a context management entry
@@ -1016,8 +1006,9 @@ type Usage struct {
 
 // InputTokensDetails contains detailed input token breakdown
 type InputTokensDetails struct {
-	CachedTokens     int `json:"cached_tokens"`
-	CacheWriteTokens int `json:"cache_write_tokens"`
+	CachedTokens            int                             `json:"cached_tokens"`
+	CacheWriteTokens        int                             `json:"cache_write_tokens"`
+	CacheWriteTokensDetails *shared.CacheWriteTokensDetails `json:"cache_write_tokens_details,omitempty"`
 }
 
 // OutputTokensDetails contains detailed output token breakdown

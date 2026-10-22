@@ -407,10 +407,10 @@ func TestToContentBlocksRefusal(t *testing.T) {
 func TestToMessageRejectsUnknownBlock(t *testing.T) {
 	_, err := toMessage(2, MessageParam{Role: MessageRoleUser, Content: []any{
 		map[string]any{"type": "text", "text": "hi"},
-		map[string]any{"type": "search_result"},
+		map[string]any{"type": "unknown_block"},
 	}})
 
-	if err == nil || !strings.HasPrefix(err.Error(), "messages.2.content.1: Input tag 'search_result' found using 'type'") {
+	if err == nil || !strings.HasPrefix(err.Error(), "messages.2.content.1: Input tag 'unknown_block' found using 'type'") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

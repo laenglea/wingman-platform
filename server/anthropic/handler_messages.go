@@ -15,6 +15,10 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := validateAPIVersion(r.Header.Get("anthropic-version"), req.Messages); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	if req.Model == "" || len(req.Messages) == 0 {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("model and non-empty messages are required"))
 		return
@@ -83,12 +87,7 @@ func toCompleteOptions(req MessageRequest) (*provider.CompleteOptions, error) {
 		Tools: tools,
 
 		Stop: req.StopSequences,
-	}
-	switch req.Speed {
-	case "standard":
-		options.Tier = provider.TierDefault
-	case "fast":
-		options.Tier = provider.TierPriority
+		Tier: tierFromSpeed(req.Speed),
 	}
 
 	if req.ToolChoice != nil {
@@ -403,6 +402,7 @@ func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request,
 
 			CacheReadInputTokens:     completion.Usage.CacheReadInputTokens,
 			CacheCreationInputTokens: completion.Usage.CacheCreationInputTokens,
+			CacheCreation:            cacheCreation(completion.Usage),
 		}
 
 		if completion.Usage.ReasoningTokens != nil {
@@ -541,5 +541,15 @@ func (h *Handler) handleMessagesStream(w http.ResponseWriter, r *http.Request, r
 		writeSSERetry(w, err)
 		accumulator.Error(err)
 		return
+	}
+}
+
+func cacheCreation(usage *provider.Usage) *CacheCreation {
+	if usage == nil || usage.CacheWriteTokensDetails == nil {
+		return nil
+	}
+	return &CacheCreation{
+		Ephemeral5mInputTokens: usage.CacheWriteTokensDetails.StandardTokens,
+		Ephemeral1hInputTokens: usage.CacheWriteTokensDetails.ExtendedTokens,
 	}
 }

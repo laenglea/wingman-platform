@@ -22,6 +22,11 @@ func (h *Handler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := req.PromptCacheOptions.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
 	completer, err := h.Completer(req.Model)
 
 	if err != nil {
@@ -89,7 +94,7 @@ func toCompleteOptions(req ChatCompletionRequest, tools []provider.Tool) *provid
 
 		MaxTokens: maxTokens,
 
-		CacheOptions: shared.CacheOptions(req.PromptCacheKey, req.PromptCacheRetention, req.PromptCacheOptions.mode()),
+		CacheOptions: shared.CacheOptions(req.PromptCacheKey, req.PromptCacheRetention, req.PromptCacheOptions),
 	}
 
 	if req.ParallelToolCalls != nil && !*req.ParallelToolCalls {

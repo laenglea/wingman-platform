@@ -73,6 +73,19 @@ func TestDeciderNativeQuestions(t *testing.T) {
 	}
 }
 
+func TestDeciderKeepsApplicationStateAsText(t *testing.T) {
+	d, _ := NewDecider("", "gpt-6-luna")
+	for _, state := range []string{`[{"role":"system","uptime":5}]`, `[{"role":"user","content":"hello","uptime":5}]`, `[{"type":"function_call","uptime":5}]`} {
+		req, err := d.convertDecisionRequest(&provider.DecisionInput{State: json.RawMessage(state), Questions: []provider.DecisionQuestion{{ID: "q", Instructions: json.RawMessage(`["uptime"]`), Noul: &provider.NoulQuestion{True: "five"}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if req.Input.OfString.Value != state || !strings.Contains(req.Questions[0].OfPredicate.Instructions, "Criteria") {
+			t.Fatalf("state or criteria changed: %+v", req)
+		}
+	}
+}
+
 func TestDeciderErrorsAndRetries(t *testing.T) {
 	calls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
 type MessageRole string
@@ -173,23 +174,12 @@ type MessageContent struct {
 	PromptCacheBreakpoint *PromptCacheBreakpoint `json:"prompt_cache_breakpoint,omitempty"`
 }
 
-// PromptCacheOptions selects implicit or explicit prompt caching. ttl is
-// accepted for compatibility; its only value is the backend default.
-type PromptCacheOptions struct {
-	Mode string `json:"mode,omitempty"`
-	TTL  string `json:"ttl,omitempty"`
-}
-
-func (o *PromptCacheOptions) mode() string {
-	if o == nil {
-		return ""
-	}
-	return o.Mode
-}
+type PromptCacheOptions = shared.PromptCacheOptions
 
 // PromptCacheBreakpoint marks the end of a reusable prefix on a content part.
 type PromptCacheBreakpoint struct {
 	Mode string `json:"mode,omitempty"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type MessageContentImage struct {

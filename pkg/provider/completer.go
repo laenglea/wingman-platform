@@ -426,25 +426,17 @@ type CompactionOptions struct {
 	Threshold int
 }
 
-// CacheOptions refines the prompt caching a provider applies by default
-// wherever its backend offers it. Key groups requests that share a prefix on
-// backends that route caches by key, and Retention asks to keep cached
-// prefixes longer than the backend's default where that is available.
-// Neither turns caching on or off.
 type CacheOptions struct {
 	Key       string
 	Retention CacheRetention
-
-	// Mode selects how the prefix is cached: implicit, the default, lets the
-	// provider cache the stable prefix on its own; explicit caches only at
-	// the parts marked with a CacheControl.
-	Mode CacheMode
+	Mode      CacheMode
 }
 
 type CacheRetention string
 
 const (
 	CacheRetentionDefault  CacheRetention = ""
+	CacheRetentionStandard CacheRetention = "standard"
 	CacheRetentionExtended CacheRetention = "extended"
 )
 
@@ -455,9 +447,6 @@ const (
 	CacheModeExplicit CacheMode = "explicit"
 )
 
-// CacheControl marks a content part as a cache breakpoint. Retention
-// overrides the request's retention for this breakpoint where the backend
-// allows it.
 type CacheControl struct {
 	Retention CacheRetention
 }

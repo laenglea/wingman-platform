@@ -112,7 +112,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			delta := &provider.Completion{
 				ID:    chunk.ID,
 				Model: c.model,
-				Tier:  provider.NormalizeTier(string(chunk.ServiceTier)),
+				Tier:  tierFromServiceTier(string(chunk.ServiceTier)),
 
 				Message: &provider.Message{
 					Role: provider.MessageRoleAssistant,
@@ -126,7 +126,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				var tier string
 				if raw := chunk.Usage.JSON.ExtraFields["service_tier"].Raw(); raw != "" {
 					if json.Unmarshal([]byte(raw), &tier) == nil {
-						delta.Tier = provider.NormalizeTier(tier)
+						delta.Tier = tierFromServiceTier(tier)
 					}
 				}
 			}
@@ -236,7 +236,7 @@ func (c *Completer) convertCompletionRequest(input []provider.Message, options *
 		return nil, err
 	}
 
-	tier := provider.ParseTier(string(options.Tier))
+	tier := serviceTier(options.Tier)
 	req := &openai.ChatCompletionNewParams{
 		Model:       c.model,
 		ServiceTier: openai.ChatCompletionNewParamsServiceTier(tier),

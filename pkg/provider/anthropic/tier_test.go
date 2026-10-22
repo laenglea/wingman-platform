@@ -17,8 +17,9 @@ func TestTierMapping(t *testing.T) {
 		tier   provider.Tier
 		native string
 	}{
-		{"", ""}, {"auto", ""}, {provider.TierDefault, "standard"},
+		{"", ""}, {"auto", ""}, {provider.TierStandard, "standard"},
 		{provider.TierFlex, ""}, {provider.TierPriority, "fast"}, {"unknown", ""},
+		{"default", ""}, {"fast", ""}, {"ultrafast", ""},
 	} {
 		req, err := c.convertMessageRequest([]provider.Message{provider.UserMessage("hi")}, &provider.CompleteOptions{Tier: test.tier})
 		if err != nil {
@@ -37,7 +38,7 @@ func TestTierFromUsage(t *testing.T) {
 	for _, test := range []struct {
 		native string
 		want   provider.Tier
-	}{{"standard", provider.TierDefault}, {"fast", provider.TierPriority}, {"", ""}} {
+	}{{"standard", provider.TierStandard}, {"fast", provider.TierPriority}, {"", ""}, {"priority", ""}, {"unknown", ""}} {
 		events := lifecycleEvents("end_turn", true)
 		events = strings.Replace(events, `"input_tokens":10`, `"speed":"`+test.native+`","service_tier":"standard","input_tokens":10`, 1)
 		c, err := NewCompleter("http://anthropic.test", "claude-opus-5-5", WithClient(&http.Client{Transport: lifecycleTransport(func(*http.Request) (*http.Response, error) {
@@ -107,7 +108,7 @@ func TestFastTierFallback(t *testing.T) {
 				acc.Add(*delta)
 			}
 			if test.fallback {
-				if runErr != nil || requests != 2 || acc.Result().Tier != provider.TierDefault {
+				if runErr != nil || requests != 2 || acc.Result().Tier != provider.TierStandard {
 					t.Fatalf("requests=%d, tier=%q, error=%v", requests, acc.Result().Tier, runErr)
 				}
 			} else if runErr == nil || requests != 1 {

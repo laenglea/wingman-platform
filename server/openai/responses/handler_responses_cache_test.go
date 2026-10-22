@@ -107,3 +107,17 @@ func TestResponsesMapReasoningVisibility(t *testing.T) {
 		}
 	}
 }
+
+func TestResponseReasoningEffortDoesNotInventDefault(t *testing.T) {
+	for _, effort := range []*ReasoningEffort{nil, new(ReasoningEffortLow), new(ReasoningEffortNone)} {
+		var response Response
+		request := ResponsesRequest{}
+		if effort != nil {
+			request.Reasoning = &ReasoningConfig{Effort: effort}
+		}
+		responseDefaults(&response, request, nil)
+		if response.Reasoning.Effort != effort {
+			t.Fatalf("reasoning effort = %v, want requested value %v", response.Reasoning.Effort, effort)
+		}
+	}
+}

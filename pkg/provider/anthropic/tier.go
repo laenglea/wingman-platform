@@ -8,10 +8,21 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
+func speed(tier provider.Tier) anthropic.BetaMessageNewParamsSpeed {
+	switch tier {
+	case provider.TierStandard:
+		return anthropic.BetaMessageNewParamsSpeedStandard
+	case provider.TierPriority:
+		return anthropic.BetaMessageNewParamsSpeedFast
+	default:
+		return ""
+	}
+}
+
 func effectiveTier(usage anthropic.BetaUsage) provider.Tier {
 	switch usage.Speed {
 	case anthropic.BetaUsageSpeedStandard:
-		return provider.TierDefault
+		return provider.TierStandard
 	case anthropic.BetaUsageSpeedFast:
 		return provider.TierPriority
 	default:

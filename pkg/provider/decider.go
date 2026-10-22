@@ -12,8 +12,9 @@ type Decider interface {
 }
 
 type DecisionInput struct {
-	State     any
-	Questions []DecisionQuestion
+	State        any
+	Questions    []DecisionQuestion
+	CacheOptions *CacheOptions
 }
 
 // DecisionQuestion contains exactly one question variant. Instructions and

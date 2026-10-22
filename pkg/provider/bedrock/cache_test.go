@@ -59,3 +59,27 @@ func TestExplicitCacheModePlacesCachePoints(t *testing.T) {
 		t.Errorf("implicit user block 2 = %T, want the automatic cache point", content[2])
 	}
 }
+
+func TestExtendedCachePoints(t *testing.T) {
+	c := &Completer{Config: &Config{model: "anthropic.claude-sonnet-4-6"}}
+	messages := []provider.Message{provider.SystemMessage("rules"), provider.UserMessage("hello")}
+	options := &provider.CompleteOptions{CacheOptions: &provider.CacheOptions{Retention: provider.CacheRetentionExtended}, Tools: []provider.Tool{{Name: "lookup"}}}
+	req, err := c.convertConverseInput(messages, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	points := []types.CachePointBlock{
+		req.System[1].(*types.SystemContentBlockMemberCachePoint).Value,
+		req.Messages[0].Content[1].(*types.ContentBlockMemberCachePoint).Value,
+		req.ToolConfig.Tools[1].(*types.ToolMemberCachePoint).Value,
+	}
+	for _, point := range points {
+		if point.Ttl != types.CacheTTLOneHour {
+			t.Fatalf("cache point = %+v", point)
+		}
+	}
+	policy := newCachePolicy(nil, options)
+	if point := policy.point(&provider.CacheControl{Retention: provider.CacheRetentionStandard}); point.Ttl == types.CacheTTLOneHour {
+		t.Fatal("standard breakpoint did not override extended request")
+	}
+}

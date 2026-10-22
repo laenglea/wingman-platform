@@ -185,7 +185,7 @@ func (h *Handler) parseGenerateRequest(r *http.Request) (provider.Completer, []p
 
 	options := &provider.CompleteOptions{
 		Tools: toTools(req.Tools, strict),
-		Tier:  provider.ParseTier(string(provider.NormalizeTier(req.Tier))),
+		Tier:  parseTier(req.Tier),
 	}
 
 	if fcc != nil {

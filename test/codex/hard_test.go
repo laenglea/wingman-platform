@@ -48,7 +48,7 @@ func TestCodexHard(t *testing.T) {
 		}
 		writeArtifact(t, filepath.Join(dir, "compaction_context.txt"), []byte(context.String()))
 	}
-	compaction.prompt = "First use exec_command to run exactly `cat compaction_context.txt` with max_output_tokens set to 10000. Read that background context before starting the repair.\n" + compaction.prompt
+	compaction.prompt = "First use exec_command to run exactly `cat compaction_context.txt` with max_output_tokens set to 10000. Read that background context exactly once before starting the repair. After a context checkpoint, continue the repair from the handoff summary; do not read compaction_context.txt again.\n" + compaction.prompt
 	compaction.options.autoCompactTokenLimit = 8000
 	compaction.options.maxRequests = 30
 	compaction.options.timeout = 6 * time.Minute

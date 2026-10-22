@@ -1,13 +1,41 @@
 package shared
 
-import "github.com/adrianliechti/wingman/pkg/provider"
+import (
+	"fmt"
 
-// CacheOptions maps prompt_cache_key, prompt_cache_retention and the
-// prompt_cache_options mode onto the provider's caching intent. Backends
-// cache the stable prefix by default; "24h" asks for extended retention, and
-// "explicit" caches only at the client's breakpoints. Other values keep the
-// backend default.
-func CacheOptions(key, retention *string, mode string) *provider.CacheOptions {
+	"github.com/adrianliechti/wingman/pkg/provider"
+)
+
+type PromptCacheOptions struct {
+	Mode string `json:"mode,omitempty"`
+	TTL  string `json:"ttl,omitempty"`
+}
+
+func (o *PromptCacheOptions) Validate() error {
+	if o == nil {
+		return nil
+	}
+	if o.Mode != "" && o.Mode != "implicit" && o.Mode != "explicit" {
+		return fmt.Errorf("prompt_cache_options.mode: must be implicit or explicit")
+	}
+	_, err := CacheRetention(o.TTL)
+	return err
+}
+
+func CacheRetention(ttl string) (provider.CacheRetention, error) {
+	switch ttl {
+	case "":
+		return provider.CacheRetentionDefault, nil
+	case "30m":
+		return provider.CacheRetentionStandard, nil
+	case "12h":
+		return provider.CacheRetentionExtended, nil
+	default:
+		return "", fmt.Errorf("cache ttl: must be 30m or 12h")
+	}
+}
+
+func CacheOptions(key, retention *string, cache *PromptCacheOptions) *provider.CacheOptions {
 	options := provider.CacheOptions{}
 	if key != nil {
 		options.Key = *key
@@ -15,8 +43,13 @@ func CacheOptions(key, retention *string, mode string) *provider.CacheOptions {
 	if retention != nil && *retention == "24h" {
 		options.Retention = provider.CacheRetentionExtended
 	}
-	if mode == "explicit" {
-		options.Mode = provider.CacheModeExplicit
+	if cache != nil {
+		if cache.Mode == "explicit" {
+			options.Mode = provider.CacheModeExplicit
+		}
+		if cache.TTL != "" {
+			options.Retention, _ = CacheRetention(cache.TTL)
+		}
 	}
 	if options == (provider.CacheOptions{}) {
 		return nil

@@ -20,6 +20,10 @@ func (h *Handler) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := validateAPIVersion(r.Header.Get("anthropic-version"), req.Messages); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 
 	if _, err := h.Completer(req.Model); err != nil {
 		writeError(w, http.StatusNotFound, err)

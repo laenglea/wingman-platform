@@ -120,6 +120,25 @@ type Usage struct {
 
 	CacheReadInputTokens     int
 	CacheCreationInputTokens int
+	CacheWriteTokensDetails  *CacheWriteTokensDetails
+}
+
+type CacheWriteTokensDetails struct {
+	StandardTokens int
+	ExtendedTokens int
+}
+
+func (u *Usage) MergeCacheWrites(total int, details *CacheWriteTokensDetails) {
+	if total < u.CacheCreationInputTokens {
+		return
+	}
+	if total > u.CacheCreationInputTokens {
+		u.CacheCreationInputTokens = total
+		u.CacheWriteTokensDetails = nil
+	}
+	if details != nil && details.StandardTokens+details.ExtendedTokens == total {
+		u.CacheWriteTokensDetails = new(*details)
+	}
 }
 
 func (u *Usage) HasReasoningTokens() bool {

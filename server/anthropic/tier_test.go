@@ -33,10 +33,10 @@ func TestMessagesSpeed(t *testing.T) {
 		for _, test := range []struct {
 			speed string
 			want  provider.Tier
-		}{{"", ""}, {"standard", provider.TierDefault}, {"fast", provider.TierPriority}, {"unknown", ""}} {
+		}{{"", ""}, {"standard", provider.TierStandard}, {"fast", provider.TierPriority}, {"unknown", ""}} {
 			t.Run(fmt.Sprint(stream)+"/"+test.speed, func(t *testing.T) {
 				// Report standard even if fast was requested to test downgrades.
-				c := &speedCompleter{reported: provider.TierDefault}
+				c := &speedCompleter{reported: provider.TierStandard}
 				cfg := &config.Config{Policy: noop.New()}
 				cfg.RegisterCompleter("test", c)
 				body := fmt.Sprintf(`{"model":"test","messages":[{"role":"user","content":"hi"}],"max_tokens":16,"stream":%v,"speed":%q}`, stream, test.speed)

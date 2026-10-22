@@ -20,7 +20,7 @@ import (
 func TestOpenAIDecisionsRoutes(t *testing.T) {
 	calls := 0
 	fail := false
-	input := `[{"role":"user","content":[{"type":"input_text","text":"broken"},{"type":"input_image","image_url":"data:image/png;base64,aGk=","detail":"original"}]}]`
+	input := `[{"role":"user","content":[{"type":"input_text","text":"broken"}]}]`
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		calls++
@@ -37,7 +37,7 @@ func TestOpenAIDecisionsRoutes(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
 		}
-		if req.Model != "native-model" || !strings.Contains(string(req.Input), "data:image/png;base64,aGk=") || !strings.Contains(string(req.Input), `"detail":"original"`) ||
+		if req.Model != "native-model" || !strings.Contains(string(req.Input), "broken") ||
 			len(req.Questions) != 4 || req.Questions[0].Name == nil || *req.Questions[0].Name != "0" || req.Questions[1].Name == nil || *req.Questions[1].Name != "1" ||
 			req.Questions[2].Name == nil || *req.Questions[2].Name != "2" ||
 			req.Questions[1].Choices[0].Value != false || req.Questions[1].Choices[1].Value != "false" {
@@ -142,8 +142,9 @@ func TestOpenAIDecisionsAdapterAndValidation(t *testing.T) {
 	for _, invalid := range []string{
 		`null`, `{}`, `{"model":"chat","input":null,"questions":[]}`,
 		`{"model":"chat","input":"hello","questions":[{"type":"predicate"}]}`,
-		`{"model":"chat","input":[{"role":"system","content":"hello"}],"questions":[{"type":"predicate","instructions":""}]}`,
+		`{"model":"chat","input":[{"role":"tool","content":"hello"}],"questions":[{"type":"predicate","instructions":""}]}`,
 		`{"model":"chat","input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/image.png"}]}],"questions":[{"type":"predicate","instructions":""}]}`,
+		`{"model":"chat","input":"hello","questions":[{"type":"predicate","instructions":[{"type":"input_image","image_url":"data:image/png;base64,aGk="}]}]}`,
 		body + " {}",
 	} {
 		w = httptest.NewRecorder()

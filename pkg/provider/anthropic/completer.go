@@ -616,12 +616,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 		Model: anthropic.Model(c.model),
 
 		MaxTokens: 64000,
-	}
-	switch options.Tier {
-	case provider.TierDefault:
-		req.Speed = anthropic.BetaMessageNewParamsSpeedStandard
-	case provider.TierPriority:
-		req.Speed = anthropic.BetaMessageNewParamsSpeedFast
+		Speed:     speed(options.Tier),
 	}
 	explicitCache := options.CacheOptions != nil && options.CacheOptions.Mode == provider.CacheModeExplicit
 	if !explicitCache {
@@ -1339,11 +1334,18 @@ func toUsage(usage anthropic.BetaUsage) *provider.Usage {
 		CacheReadInputTokens:     cacheReadInputTokens,
 		CacheCreationInputTokens: cacheCreationInputTokens,
 	}
+	if usage.JSON.CacheCreation.Valid() {
+		result.MergeCacheWrites(cacheCreationInputTokens, &provider.CacheWriteTokensDetails{
+			StandardTokens: int(usage.CacheCreation.Ephemeral5mInputTokens),
+			ExtendedTokens: int(usage.CacheCreation.Ephemeral1hInputTokens),
+		})
+	}
 	if len(usage.Iterations) > 0 {
 		// Top-level usage excludes compaction. Keep the shared usage contract:
 		// total billed tokens, with cached tokens included in the input total.
 		result.InputTokens, result.OutputTokens = 0, 0
 		result.CacheReadInputTokens, result.CacheCreationInputTokens = 0, 0
+		result.CacheWriteTokensDetails = nil
 		for _, iteration := range usage.Iterations {
 			input := int(iteration.InputTokens + iteration.CacheReadInputTokens + iteration.CacheCreationInputTokens)
 			result.InputTokens += input

@@ -33,7 +33,7 @@ func (c *tierCompleter) Complete(_ context.Context, _ []provider.Message, option
 		// An explicit downgrade must replace an earlier tier; missing metadata
 		// in intervening deltas must not erase it.
 		if c.reported != "" {
-			yield(&provider.Completion{Tier: provider.TierDefault}, nil)
+			yield(&provider.Completion{Tier: provider.TierStandard}, nil)
 		}
 	}
 }
@@ -46,11 +46,12 @@ func TestResponsesTier(t *testing.T) {
 		}{
 			{"", ""}, {`,"service_tier":null`, ""},
 			{`,"service_tier":"auto"`, ""},
-			{`,"service_tier":"default"`, provider.TierDefault},
+			{`,"service_tier":"default"`, provider.TierStandard},
+			{`,"service_tier":"standard"`, provider.TierStandard},
 			{`,"service_tier":"flex"`, provider.TierFlex},
 			{`,"service_tier":"priority"`, provider.TierPriority},
 			{`,"service_tier":"unknown"`, ""},
-			{`,"service_tier":"fast"`, ""},
+			{`,"service_tier":"fast"`, provider.TierPriority},
 			{`,"service_tier":"ultrafast"`, ""},
 		} {
 			t.Run(fmt.Sprintf("stream=%v/%s", stream, test.input), func(t *testing.T) {
@@ -92,7 +93,7 @@ func TestResponsesTier(t *testing.T) {
 }
 
 func TestResponseTierUnavailable(t *testing.T) {
-	for _, completion := range []*provider.Completion{nil, {}} {
+	for _, completion := range []*provider.Completion{nil, {}, {Tier: "unknown"}, {Tier: "ultrafast"}} {
 		resp := &Response{}
 		responseDefaults(resp, ResponsesRequest{Tier: "flex"}, completion)
 		if resp.Tier != nil {

@@ -12,7 +12,14 @@ import (
 
 func TestTierRequestAndResponse(t *testing.T) {
 	for _, chat := range []bool{false, true} {
-		for _, tier := range []provider.Tier{"", provider.Tier("auto"), provider.TierDefault, provider.TierFlex, provider.TierPriority, "unknown"} {
+		for _, test := range []struct {
+			tier provider.Tier
+			wire string
+		}{
+			{"", ""}, {"auto", ""}, {provider.TierStandard, "default"}, {"default", ""},
+			{provider.TierFlex, "flex"}, {provider.TierPriority, "priority"}, {"ultrafast", ""}, {"unknown", ""},
+		} {
+			tier := test.tier
 			t.Run(fmt.Sprintf("chat=%v/%s", chat, tier), func(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					var body map[string]any
@@ -20,21 +27,23 @@ func TestTierRequestAndResponse(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					want := provider.ParseTier(string(tier))
+					want := test.wire
 					if want == "" {
 						if _, exists := body["service_tier"]; exists {
 							t.Error("default request must omit service_tier")
 						}
-					} else if body["service_tier"] != string(want) {
+					} else if body["service_tier"] != want {
 						t.Errorf("request tier = %v, want %s", body["service_tier"], want)
 					}
 					w.Header().Set("Content-Type", "text/event-stream")
 					if chat {
 						fmt.Fprint(w, "data: {\"id\":\"c1\",\"service_tier\":\"priority\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n")
+						fmt.Fprint(w, "data: {\"id\":\"c1\",\"service_tier\":\"unknown\",\"choices\":[]}\n\n")
 						// Native Mistral usage metadata is retained by the generic adapter.
 						fmt.Fprint(w, "data: {\"id\":\"c1\",\"choices\":[],\"usage\":{\"service_tier\":\"standard\",\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n")
 					} else {
 						fmt.Fprint(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\",\"service_tier\":\"priority\"}}\n\n")
+						fmt.Fprint(w, "event: response.in_progress\ndata: {\"type\":\"response.in_progress\",\"response\":{\"id\":\"r1\",\"service_tier\":\"unknown\"}}\n\n")
 						fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"status\":\"completed\",\"service_tier\":\"default\"}}\n\n")
 					}
 				}))
@@ -54,10 +63,15 @@ func TestTierRequestAndResponse(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					switch delta.Tier {
+					case "", provider.TierStandard, provider.TierFlex, provider.TierPriority:
+					default:
+						t.Errorf("native tier leaked into completion: %q", delta.Tier)
+					}
 					acc.Add(*delta)
 				}
-				if got := acc.Result().Tier; got != provider.TierDefault {
-					t.Fatalf("effective tier = %q, want default", got)
+				if got := acc.Result().Tier; got != provider.TierStandard {
+					t.Fatalf("effective tier = %q, want standard", got)
 				}
 			})
 		}
