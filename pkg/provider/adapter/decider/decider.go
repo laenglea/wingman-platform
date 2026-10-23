@@ -20,7 +20,11 @@ func options(q provider.DecisionQuestion) []provider.DecisionOption {
 	default:
 		result := make([]provider.DecisionOption, len(q.Score.Levels))
 		for i, description := range q.Score.Levels {
-			result[i] = provider.DecisionOption{Label: strconv.Itoa(i), Description: description}
+			val := i
+			if i < len(q.Score.Values) {
+				val = q.Score.Values[i]
+			}
+			result[i] = provider.DecisionOption{Label: strconv.Itoa(val), Description: description}
 		}
 		return result
 	}
@@ -76,8 +80,21 @@ func answer(q provider.DecisionQuestion, weights []float64) (provider.DecisionAn
 	case q.Score != nil:
 		result.Score = &provider.ScoreAnswer{Confidence: confidence, Levels: make([]provider.ScoreLevel, len(choices))}
 		for i, option := range choices {
-			result.Score.Score += float64(i) * probabilities[i]
-			result.Score.Levels[i] = provider.ScoreLevel{Description: option.Description, Probability: probabilities[i]}
+			val := i
+			if i < len(q.Score.Values) {
+				val = q.Score.Values[i]
+			}
+			var label string
+			if i < len(q.Score.Labels) {
+				label = q.Score.Labels[i]
+			}
+			result.Score.Score += float64(val) * probabilities[i]
+			result.Score.Levels[i] = provider.ScoreLevel{
+				Value:       val,
+				Label:       label,
+				Description: option.Description,
+				Probability: probabilities[i],
+			}
 		}
 	}
 	return result, nil

@@ -21,15 +21,17 @@ import (
 )
 
 type decisionCompleter struct {
-	output string
-	err    error
-	calls  int
-	prompt string
+	output   string
+	err      error
+	calls    int
+	prompt   string
+	messages []provider.Message
 }
 
 func (p *decisionCompleter) Complete(ctx context.Context, messages []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	p.calls++
-	p.prompt = messages[1].Text()
+	p.messages = messages
+	p.prompt = messages[len(messages)-1].Text()
 	return func(yield func(*provider.Completion, error) bool) {
 		if p.err != nil {
 			yield(nil, p.err)
@@ -149,7 +151,8 @@ func TestDecisionsValidation(t *testing.T) {
 		"choice criteria":           `{"model":"chat","state":{},"questions":{"q":{"type":"choice","criteria":[]}}}`,
 		"choice scalar description": `{"model":"chat","state":{},"questions":{"q":{"type":"choice","criteria":{"a":1}}}}`,
 		"score object":              `{"model":"chat","state":{},"questions":{"q":{"type":"score","criteria":{"0":"a","1":"b"}}}}`,
-		"score one level":           `{"model":"chat","state":{},"questions":{"q":{"type":"score","criteria":["low"]}}}`,
+		"box without image":         `{"model":"chat","state":"no image","questions":{"q":{"type":"box","instructions":"find cat"}}}`,
+		"box with criteria":         `{"model":"chat","state":{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aGk="}},"questions":{"q":{"type":"box","instructions":"find cat","criteria":{"a":null}}}}`,
 		"trailing json":             `{"model":"chat","state":{},"questions":{"q":{"type":"noul"}}} {}`,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -161,6 +164,37 @@ func TestDecisionsValidation(t *testing.T) {
 				t.Fatalf("status %d: %s, calls %d", w.Code, w.Body.String(), backend.calls)
 			}
 		})
+	}
+}
+
+func TestDecisionsMultimodalAndBox(t *testing.T) {
+	backend := &decisionCompleter{output: `{"q0":{"box":{"top":0.2,"bottom":0.66,"left":0.19,"right":0.68},"confidence":null},"q1":{"0":0.8,"1":0.2}}`}
+	_, s := decisionsServer(t, backend)
+	body := `{"model":"chat","state":["photo","caption"],"assets":{"photo":{"type":"image","format":"png","data_base64":"aGk="}},"questions":{
+		"box":{"type":"box","instructions":"Locate the object"},
+		"noul":{"type":"noul","instructions":["photo","Does it match?"]}
+	}}`
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/systemone", strings.NewReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var result struct {
+		Answers map[string]struct {
+			Type       string
+			Noul       float64
+			Box        *provider.BoxCoordinates
+			Confidence *float64
+		}
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Answers["box"].Box == nil || result.Answers["box"].Box.Right != 0.68 || result.Answers["box"].Confidence != nil || result.Answers["noul"].Noul != 0.8 || !strings.Contains(w.Body.String(), `"confidence":null`) {
+		t.Fatalf("unexpected result: %s", w.Body.String())
+	}
+	if len(backend.messages) < 3 || backend.messages[2].Content[1].File == nil {
+		t.Fatalf("image asset not attached: %+v", backend.messages)
 	}
 }
 

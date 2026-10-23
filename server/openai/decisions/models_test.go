@@ -13,6 +13,8 @@ func TestRequestValidation(t *testing.T) {
 		`""`, `"hello"`,
 		`[{"role":"user","content":"hello"}]`,
 		`[{"role":"assistant","content":"hello"}]`,
+		`[{"type":"message","role":"user","content":[{"type":"input_text","text":""},{"type":"input_image","image_url":"data:image/png;base64,aGk=","detail":"original"}]}]`,
+		`[{"type":"function_call","call_id":"c1","name":"fn","arguments":"{}"},{"type":"function_call_output","call_id":"c1","output":[{"type":"input_image","image_url":"data:image/png;base64,aGk="}]}]`,
 	} {
 		var r Request
 		if err := json.Unmarshal([]byte(fmt.Sprintf(`{"model":"m","input":%s,"questions":%s}`, input, validQuestions)), &r); err != nil {
@@ -24,8 +26,7 @@ func TestRequestValidation(t *testing.T) {
 	}
 	for _, input := range []string{
 		`null`, `{}`, `true`, `[]`,
-		`[{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/image.png"}]}]`,
-		`[{"type":"message","role":"user","content":[{"type":"input_text","text":""},{"type":"input_image","image_url":"data:image/png;base64,aGk=","detail":"original"}]}]`,
+		`[{"role":"user","content":[{"type":"input_image","image_url":"ftp://example.com/image.png"}]}]`,
 		`[{"role":"user","content":null}]`,
 		`[{"role":"user","content":[{"type":"input_file","file_id":"f"}]}]`,
 		`[{"role":"user","content":[{"type":"input_text"}]}]`,

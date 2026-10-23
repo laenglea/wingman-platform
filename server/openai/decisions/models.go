@@ -1,11 +1,11 @@
 package decisions
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/server/openai/shared"
@@ -22,6 +22,7 @@ type Request struct {
 
 type Question struct {
 	Type         string          `json:"type"`
+	ID           *string         `json:"id,omitempty"`
 	Name         *string         `json:"name,omitempty"`
 	Instructions json.RawMessage `json:"instructions"`
 	Choices      []Choice        `json:"choices,omitempty"`
@@ -34,22 +35,28 @@ type Choice struct {
 }
 
 type Level struct {
+	Value       *int   `json:"value,omitempty"`
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
 }
 
 func (l *Level) UnmarshalJSON(data []byte) error {
 	var value struct {
+		Value       *int    `json:"value"`
 		Label       *string `json:"label"`
 		Description string  `json:"description"`
 	}
 	if err := json.Unmarshal(data, &value); err != nil {
 		return err
 	}
-	if value.Label == nil {
-		return errors.New("score level label is required")
+	if value.Label == nil && value.Value == nil {
+		return errors.New("score level label or value is required")
 	}
-	l.Label, l.Description = *value.Label, value.Description
+	l.Value = value.Value
+	if value.Label != nil {
+		l.Label = *value.Label
+	}
+	l.Description = value.Description
 	return nil
 }
 
@@ -61,7 +68,9 @@ type Response struct {
 
 type Answer struct {
 	Type          string        `json:"type"`
+	ID            *string       `json:"id,omitempty"`
 	Name          *string       `json:"name"`
+	Message       string        `json:"message,omitempty"`
 	Probability   *float64      `json:"probability,omitempty"`
 	Choice        any           `json:"choice,omitempty"`
 	Confidence    *float64      `json:"confidence,omitempty"`
@@ -91,29 +100,66 @@ type Usage struct {
 
 // ProviderInput validates the supported wire variants before adapting them.
 func (r Request) ProviderInput() (*provider.DecisionInput, error) {
-	if err := validateInput(r.Input); err != nil {
+	messages, err := parseInput(r.Input)
+	if err != nil {
 		return nil, err
 	}
-	input := &provider.DecisionInput{State: r.Input}
+	input := &provider.DecisionInput{State: r.Input, Messages: messages}
 	if err := r.PromptCacheOptions.Validate(); err != nil {
 		return nil, err
+	}
+	if r.PromptCacheKey != nil && utf8.RuneCountInString(*r.PromptCacheKey) > 64 {
+		return nil, errors.New("prompt_cache_key must be at most 64 characters")
 	}
 	input.CacheOptions = shared.CacheOptions(r.PromptCacheKey, nil, r.PromptCacheOptions)
 	if len(r.Questions) > 400 {
 		return nil, errors.New("at most 400 questions are supported")
 	}
-	for i, q := range r.Questions {
-		if len(q.Instructions) == 0 || bytes.Equal(bytes.TrimSpace(q.Instructions), []byte("null")) {
-			return nil, fmt.Errorf("questions[%d]: instructions is required", i)
+	images := 0
+	for _, m := range messages {
+		for _, c := range m.Content {
+			if c.File != nil {
+				images++
+			}
+			if c.ToolResult != nil {
+				for _, p := range c.ToolResult.Parts {
+					if p.File != nil {
+						images++
+					}
+				}
+			}
 		}
-		if err := validateParts(q.Instructions, "question"); err != nil {
+	}
+	seenIDs := make(map[string]bool)
+	for i, q := range r.Questions {
+		if q.ID != nil {
+			if *q.ID == "" {
+				return nil, fmt.Errorf("questions[%d].id: must not be empty", i)
+			}
+			if seenIDs[*q.ID] {
+				return nil, fmt.Errorf("questions[%d].id: duplicate question id %q", i, *q.ID)
+			}
+			seenIDs[*q.ID] = true
+		}
+		instructions, err := parseQuestionInstructions(q.Instructions)
+		if err != nil {
 			return nil, fmt.Errorf("questions[%d].instructions: %w", i, err)
 		}
-		question := provider.DecisionQuestion{ID: strconv.Itoa(i), Instructions: q.Instructions}
+		if parts, ok := instructions.([]provider.Content); ok {
+			for _, c := range parts {
+				if c.File != nil {
+					images++
+				}
+			}
+		}
+		question := provider.DecisionQuestion{ID: strconv.Itoa(i), Instructions: instructions}
+		if _, ok := instructions.(string); ok {
+			question.Instructions = q.Instructions
+		}
 		switch q.Type {
-		case "predicate":
+		case "predicate", "binary":
 			if len(q.Choices) > 0 || len(q.Levels) > 0 {
-				return nil, errors.New("predicate does not accept choices or levels")
+				return nil, fmt.Errorf("%s does not accept choices or levels", q.Type)
 			}
 			question.Noul = &provider.NoulQuestion{}
 		case "choice":
@@ -139,14 +185,34 @@ func (r Request) ProviderInput() (*provider.DecisionInput, error) {
 				return nil, errors.New("score does not accept choices")
 			}
 			question.Score = &provider.ScoreQuestion{}
+			hasCustomValues := false
 			for _, l := range q.Levels {
+				if l.Value != nil {
+					hasCustomValues = true
+					break
+				}
+			}
+			if len(q.Levels) < 2 {
+				return nil, errors.New("score requires 2 to 10 levels")
+			}
+			for j, l := range q.Levels {
 				question.Score.Levels = append(question.Score.Levels, l.Description)
 				question.Score.Labels = append(question.Score.Labels, l.Label)
+				if hasCustomValues {
+					val := j
+					if l.Value != nil {
+						val = *l.Value
+					}
+					question.Score.Values = append(question.Score.Values, val)
+				}
 			}
 		default:
 			return nil, fmt.Errorf("questions[%d]: unsupported type %q", i, q.Type)
 		}
 		input.Questions = append(input.Questions, question)
+	}
+	if images > 128 {
+		return nil, errors.New("at most 128 images are supported per request")
 	}
 	return input, input.Validate()
 }

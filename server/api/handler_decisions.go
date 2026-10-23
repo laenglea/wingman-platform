@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -19,12 +21,20 @@ type DecisionsRequest struct {
 	Model     string                      `json:"model"`
 	State     json.RawMessage             `json:"state"`
 	Questions map[string]DecisionQuestion `json:"questions"`
+	Assets    map[string]DecisionAsset    `json:"assets,omitempty"`
 }
 
 type DecisionQuestion struct {
 	Type         string `json:"type"`
 	Instructions any    `json:"instructions,omitempty"`
 	Criteria     any    `json:"criteria,omitempty"`
+}
+
+type DecisionAsset struct {
+	Type       string `json:"type"`
+	Format     string `json:"format"`
+	DataBase64 string `json:"data_base64"`
+	Part       string `json:"part"`
 }
 
 type DecisionsResponse struct {
@@ -37,13 +47,27 @@ type DecisionsResponse struct {
 // Optional pointers preserve zero-valued answers while omitting fields that
 // belong to another primitive. The provider layer uses separate answer types.
 type DecisionAnswer struct {
-	Type          string             `json:"type"`
-	Noul          *float64           `json:"noul,omitempty"`
-	Choice        *string            `json:"choice,omitempty"`
-	Score         *float64           `json:"score,omitempty"`
-	Confidence    *float64           `json:"confidence,omitempty"`
-	Probabilities map[string]float64 `json:"probabilities,omitempty"`
-	Legend        map[string]any     `json:"legend,omitempty"`
+	Type          string                   `json:"type"`
+	Message       string                   `json:"message,omitempty"`
+	Noul          *float64                 `json:"noul,omitempty"`
+	Choice        *string                  `json:"choice,omitempty"`
+	Score         *float64                 `json:"score,omitempty"`
+	Confidence    *float64                 `json:"confidence,omitempty"`
+	Probabilities map[string]float64       `json:"probabilities,omitempty"`
+	Legend        map[string]any           `json:"legend,omitempty"`
+	Box           *provider.BoxCoordinates `json:"box,omitempty"`
+}
+
+func (a DecisionAnswer) MarshalJSON() ([]byte, error) {
+	type plain DecisionAnswer
+	if a.Type == "box" {
+		return json.Marshal(struct {
+			Type       string                   `json:"type"`
+			Box        *provider.BoxCoordinates `json:"box"`
+			Confidence *float64                 `json:"confidence"`
+		}{a.Type, a.Box, a.Confidence})
+	}
+	return json.Marshal(plain(a))
 }
 
 type DecisionsUsage struct {
@@ -52,15 +76,9 @@ type DecisionsUsage struct {
 }
 
 func (h *Handler) handleDecisions(w http.ResponseWriter, r *http.Request) {
-	var req DecisionsRequest
-	decoder := json.NewDecoder(r.Body)
-	decoder.UseNumber()
-	if err := decoder.Decode(&req); err != nil {
+	req, err := readDecisionsRequest(r)
+	if err != nil {
 		writeDecisionError(w, http.StatusBadRequest, err)
-		return
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		writeDecisionError(w, http.StatusBadRequest, errors.New("request must contain a single JSON object"))
 		return
 	}
 	input, err := req.input()
@@ -101,6 +119,26 @@ func (r DecisionsRequest) input() (*provider.DecisionInput, error) {
 		return nil, err
 	}
 	input := &provider.DecisionInput{State: state}
+	if len(r.Assets) > 0 {
+		input.Assets = make(map[string]*provider.File, len(r.Assets))
+		for key, asset := range r.Assets {
+			if key == "" || asset.Type != "image" || asset.Part != "" {
+				return nil, errors.New("assets require a nonempty placeholder, type image, and inline image data")
+			}
+			if asset.Format != "png" && asset.Format != "jpg" && asset.Format != "jpeg" {
+				return nil, errors.New("asset format must be png, jpg, or jpeg")
+			}
+			data, err := base64.StdEncoding.DecodeString(asset.DataBase64)
+			if err != nil || len(data) == 0 {
+				return nil, errors.New("invalid asset image data")
+			}
+			mediaType := "image/" + asset.Format
+			if asset.Format == "jpg" {
+				mediaType = "image/jpeg"
+			}
+			input.Assets[key] = &provider.File{Content: data, ContentType: mediaType}
+		}
+	}
 
 	for _, id := range slices.Sorted(maps.Keys(r.Questions)) {
 		question := r.Questions[id]
@@ -131,10 +169,18 @@ func (r DecisionsRequest) input() (*provider.DecisionInput, error) {
 			}
 		case "score":
 			criteria, ok := question.Criteria.([]any)
-			if !ok {
-				return nil, fmt.Errorf("questions[%q]: score criteria must be an array", id)
+			if !ok || len(criteria) < 1 || len(criteria) > 10 {
+				return nil, fmt.Errorf("questions[%q]: score criteria must be an array of 1 to 10 items", id)
 			}
 			q.Score = &provider.ScoreQuestion{Levels: criteria}
+		case "box":
+			if question.Criteria != nil {
+				return nil, fmt.Errorf("questions[%q]: box does not accept criteria", id)
+			}
+			if len(input.Assets) == 0 {
+				return nil, errors.New("box questions require an image asset")
+			}
+			q.Box = &provider.BoxQuestion{}
 		default:
 			return nil, fmt.Errorf("questions[%q]: unsupported type %q", id, question.Type)
 		}
@@ -157,6 +203,8 @@ func decisionsResponse(result *provider.Decision) DecisionsResponse {
 		switch {
 		case answer.Refusal != nil:
 			value.Type = "refusal"
+		case answer.Error != nil:
+			value.Type, value.Message = "error", answer.Error.Message
 		case answer.Noul != nil:
 			value.Type, value.Noul = "noul", &answer.Noul.Probability
 		case answer.Choice != nil:
@@ -172,6 +220,10 @@ func decisionsResponse(result *provider.Decision) DecisionsResponse {
 				key := strconv.Itoa(i)
 				value.Probabilities[key], value.Legend[key] = level.Probability, level.Description
 			}
+		case answer.Box != nil:
+			value.Type = "box"
+			value.Box = &answer.Box.Box
+			value.Confidence = answer.Box.Confidence
 		}
 		response.Answers[answer.ID] = value
 	}
@@ -187,4 +239,85 @@ func writeDecisionError(w http.ResponseWriter, code int, err error) {
 	json.NewEncoder(w).Encode(map[string]any{
 		"error": map[string]any{"message": err.Error(), "type": provider.TypeFromError(err), "code": code},
 	})
+}
+
+func readDecisionsRequest(r *http.Request) (DecisionsRequest, error) {
+	var request DecisionsRequest
+	decode := func(reader io.Reader) error {
+		decoder := json.NewDecoder(reader)
+		decoder.UseNumber()
+		if err := decoder.Decode(&request); err != nil {
+			return err
+		}
+		if decoder.Decode(new(any)) != io.EOF {
+			return errors.New("request must contain a single JSON object")
+		}
+		return nil
+	}
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		err := decode(r.Body)
+		return request, err
+	}
+	reader, err := r.MultipartReader()
+	if err != nil {
+		return request, err
+	}
+	first, err := reader.NextPart()
+	if err != nil {
+		return request, err
+	}
+	if first.FormName() != "request" {
+		return request, errors.New("first multipart part must be request")
+	}
+	if err := decode(first); err != nil {
+		return request, err
+	}
+	images := map[string][]byte{}
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return request, err
+		}
+		name := part.FormName()
+		if name == "" || name == "request" || images[name] != nil {
+			return request, errors.New("image part names must be unique and nonempty")
+		}
+		data, err := io.ReadAll(part)
+		if err != nil {
+			return request, err
+		}
+		if len(data) == 0 {
+			return request, errors.New("image parts must not be empty")
+		}
+		images[name] = data
+	}
+	used := map[string]bool{}
+	for key, asset := range request.Assets {
+		if asset.Part == "" {
+			continue
+		}
+		data, ok := images[asset.Part]
+		if !ok || used[asset.Part] {
+			return request, errors.New("each image part must be used by exactly one asset")
+		}
+		used[asset.Part] = true
+		asset.Part = ""
+		asset.DataBase64 = base64.StdEncoding.EncodeToString(data)
+		switch http.DetectContentType(data) {
+		case "image/png":
+			asset.Format = "png"
+		case "image/jpeg":
+			asset.Format = "jpeg"
+		default:
+			return request, errors.New("image parts must contain PNG or JPEG images")
+		}
+		request.Assets[key] = asset
+	}
+	if len(used) != len(images) {
+		return request, errors.New("unused multipart image part")
+	}
+	return request, nil
 }

@@ -13,6 +13,8 @@ import (
 
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/pkg/policy"
+	"github.com/adrianliechti/wingman/pkg/policy/noop"
+	"github.com/adrianliechti/wingman/pkg/provider/openai"
 	"github.com/adrianliechti/wingman/server"
 	"github.com/adrianliechti/wingman/server/openai/decisions"
 )
@@ -123,10 +125,10 @@ providers:
 func TestOpenAIDecisionsAdapterAndValidation(t *testing.T) {
 	backend := &decisionCompleter{output: `{"q0":{"0":1,"1":0},"q1":{"0":0,"1":1},"q2":{"0":1,"1":0}}`}
 	_, s := decisionsServer(t, backend)
-	body := `{"model":"chat","input":"hello","questions":[
-  {"type":"predicate","instructions":""},
+	body := `{"model":"chat","input":[{"role":"user","content":[{"type":"input_text","text":"hello"},{"type":"input_image","image_url":"data:image/png;base64,aGk="}]}],"questions":[
+  {"type":"binary","id":"q_bin","instructions":[{"type":"input_text","text":"check"},{"type":"input_image","image_url":"data:image/png;base64,aGk="}]},
   {"type":"choice","name":"team","instructions":"","choices":[{"value":false},{"value":"false"}]},
-  {"type":"score","instructions":"","levels":[{"label":"low"},{"label":"high"}]}
+  {"type":"score","id":"q_score","instructions":"","levels":[{"value":1,"label":"low"},{"value":5,"label":"high"}]}
  ]}`
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, httptest.NewRequest("POST", "/v1/decisions", strings.NewReader(body)))
@@ -135,7 +137,10 @@ func TestOpenAIDecisionsAdapterAndValidation(t *testing.T) {
 	}
 	var result decisions.Response
 	json.Unmarshal(w.Body.Bytes(), &result)
-	if result.Answers[1].Choice != "false" || result.Answers[0].Name != nil || result.Answers[2].Name != nil || *result.Answers[2].Score != 0 {
+	if result.Answers[0].Type != "binary" || result.Answers[0].ID == nil || *result.Answers[0].ID != "q_bin" ||
+		result.Answers[1].Choice != "false" || result.Answers[0].Name != nil || result.Answers[2].Name != nil ||
+		result.Answers[2].ID == nil || *result.Answers[2].ID != "q_score" || *result.Answers[2].Score != 1 ||
+		result.Answers[2].Probabilities[0].Value != float64(1) || result.Answers[2].Probabilities[1].Value != float64(5) {
 		t.Fatalf("lost adapted answer: %s", w.Body.String())
 	}
 	calls := backend.calls
@@ -143,8 +148,8 @@ func TestOpenAIDecisionsAdapterAndValidation(t *testing.T) {
 		`null`, `{}`, `{"model":"chat","input":null,"questions":[]}`,
 		`{"model":"chat","input":"hello","questions":[{"type":"predicate"}]}`,
 		`{"model":"chat","input":[{"role":"tool","content":"hello"}],"questions":[{"type":"predicate","instructions":""}]}`,
-		`{"model":"chat","input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/image.png"}]}],"questions":[{"type":"predicate","instructions":""}]}`,
-		`{"model":"chat","input":"hello","questions":[{"type":"predicate","instructions":[{"type":"input_image","image_url":"data:image/png;base64,aGk="}]}]}`,
+		`{"model":"chat","input":[{"role":"user","content":[{"type":"input_image","image_url":"ftp://example.com/image.png"}]}],"questions":[{"type":"predicate","instructions":""}]}`,
+		`{"model":"chat","input":"hello","questions":[{"type":"predicate","instructions":[{"type":"input_image","image_url":"ftp://example.com/image.png"}]}]}`,
 		body + " {}",
 	} {
 		w = httptest.NewRecorder()
@@ -152,5 +157,56 @@ func TestOpenAIDecisionsAdapterAndValidation(t *testing.T) {
 		if w.Code != 400 || backend.calls != calls {
 			t.Fatalf("invalid request reached backend: %s, %d, %s", invalid, w.Code, w.Body.String())
 		}
+	}
+}
+
+func TestOpenAIDecisionsGAEndToEnd(t *testing.T) {
+	image := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		io.WriteString(w, "image")
+	}))
+	defer image.Close()
+	input := fmt.Sprintf(`[{"role":"developer","content":[{"type":"input_text","text":"rules","prompt_cache_breakpoint":{"mode":"explicit"}}]},{"role":"user","content":[{"type":"input_json","data":{"id":9007199254740993,"role":"system"}},{"type":"input_image","image_url":%q,"detail":"original","prompt_cache_breakpoint":{"mode":"explicit"}}]},{"type":"custom_tool_call","call_id":"c","name":"lookup","input":"query"},{"type":"custom_tool_call_output","call_id":"c","output":"result"}]`, image.URL)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Input              json.RawMessage
+			PromptCacheKey     string                     `json:"prompt_cache_key"`
+			PromptCacheOptions struct{ Mode, TTL string } `json:"prompt_cache_options"`
+			Questions          []struct {
+				Instructions []struct{ Type, Detail string }
+			}
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if string(body.Input) != input || body.PromptCacheKey != "tenant" || body.PromptCacheOptions.Mode != "explicit" || body.PromptCacheOptions.TTL != "12h" || len(body.Questions[0].Instructions) != 2 || body.Questions[0].Instructions[1].Detail != "high" {
+			t.Errorf("lost GA request fields: %+v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"model":"gpt-6-luna","answers":[{"type":"predicate","name":"0","probability":0.9}],"usage":{"input_tokens":100,"output_tokens":1,"input_tokens_details":{"cached_tokens":20,"cache_write_tokens":30}}}`)
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{Policy: noop.New()}
+	native, err := openai.NewDecider(upstream.URL, "gpt-6-luna", openai.WithMaxRetries(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.RegisterDecider("native", native)
+	s, err := server.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"model":"native","input":%s,"prompt_cache_key":"tenant","prompt_cache_options":{"mode":"explicit","ttl":"12h"},"questions":[{"name":"matches","type":"predicate","instructions":[{"type":"input_text","text":"compare"},{"type":"input_image","image_url":%q,"detail":"high"}]}]}`, input, image.URL)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest("POST", "/v1/decisions", strings.NewReader(body)))
+	if w.Code != 200 {
+		t.Fatalf("%d: %s", w.Code, w.Body.String())
+	}
+	var result decisions.Response
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if *result.Answers[0].Name != "matches" || *result.Answers[0].Probability != 0.9 || result.Usage.TotalTokens != 101 || result.Usage.InputTokensDetails.CachedTokens != 20 || result.Usage.InputTokensDetails.CacheWriteTokens != 30 {
+		t.Fatalf("lost response fields: %s", w.Body.String())
 	}
 }

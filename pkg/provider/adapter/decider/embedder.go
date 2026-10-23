@@ -28,9 +28,50 @@ func (a *EmbedderAdapter) Decide(ctx context.Context, input *provider.DecisionIn
 	if err := input.Validate(); err != nil {
 		return nil, err
 	}
-	// Also accept the text/items envelopes used by existing provider callers.
+	if len(input.Assets) > 0 {
+		return nil, &provider.ProviderError{Code: 400, Message: "embedding decision adapter does not support image inputs"}
+	}
+	for _, q := range input.Questions {
+		if q.Box != nil {
+			return nil, &provider.ProviderError{
+				Code:    400,
+				Message: "embedding decision adapter does not support box questions",
+			}
+		}
+		entries := []any{q.Instructions}
+		if q.Noul != nil {
+			entries = append(entries, q.Noul.True, q.Noul.False)
+		}
+		if q.Choice != nil {
+			for _, o := range q.Choice.Options {
+				entries = append(entries, o.Description)
+			}
+		}
+		if q.Score != nil {
+			entries = append(entries, q.Score.Levels...)
+		}
+		for _, entry := range entries {
+			if parts, ok := entry.([]provider.Content); ok {
+				for _, c := range parts {
+					if c.File != nil {
+						return nil, &provider.ProviderError{
+							Code:    400,
+							Message: "embedding decision adapter does not support image inputs",
+						}
+					}
+				}
+			}
+		}
+	}
+	// Also accept the text/items envelopes and Messages used by provider callers.
 	stateValue := input.State
-	if state, ok := input.State.(map[string]any); ok && len(state) == 1 {
+	if len(input.Messages) > 0 {
+		text, err := messagesEmbeddingText(input.Messages)
+		if err != nil {
+			return nil, err
+		}
+		stateValue = text
+	} else if state, ok := input.State.(map[string]any); ok && len(state) == 1 {
 		if text, ok := state["text"].(string); ok {
 			stateValue = text
 		} else if items, ok := state["items"].([]any); ok {
@@ -64,16 +105,20 @@ func (a *EmbedderAdapter) Decide(ctx context.Context, input *provider.DecisionIn
 		// Preserve the structured representation for ordered Score rubrics. The
 		// level index is part of their meaning, unlike opaque Choice option IDs.
 		if q.Score != nil {
-			stateJSON, err := json.Marshal(input.State)
+			stateForScore := input.State
+			if len(input.Messages) > 0 {
+				stateForScore = stateValue
+			}
+			stateJSON, err := json.Marshal(stateForScore)
 			if err != nil {
 				return nil, err
 			}
 			stateIndices[qi] = addText(string(stateJSON))
 			for i, option := range options(q) {
 				criterion := map[string]any{
-					"question": q.Instructions, "answer": option.Label, "description": option.Description,
+					"question": instructionsValue(q.Instructions), "answer": option.Label, "description": option.Description,
 				}
-				if q.Score.Labels != nil {
+				if q.Score.Labels != nil && q.Score.Labels[i] != "" {
 					criterion["label"] = q.Score.Labels[i]
 				}
 				text, err := json.Marshal(criterion)
@@ -85,7 +130,7 @@ func (a *EmbedderAdapter) Decide(ctx context.Context, input *provider.DecisionIn
 			}
 			continue
 		}
-		question, err := embeddingText(q.Instructions)
+		question, err := embeddingText(instructionsValue(q.Instructions))
 		if err != nil {
 			return nil, err
 		}
@@ -231,4 +276,64 @@ func embeddingValue(value any) string {
 	default:
 		return fmt.Sprint(v)
 	}
+}
+
+func messagesEmbeddingText(messages []provider.Message) (string, error) {
+	var lines []string
+	for _, m := range messages {
+		var parts []string
+		for _, c := range m.Content {
+			if c.File != nil {
+				return "", &provider.ProviderError{
+					Code:    400,
+					Message: "embedding decision adapter does not support image inputs",
+				}
+			}
+			if c.Text != "" {
+				parts = append(parts, c.Text)
+			}
+			if c.Refusal != "" {
+				parts = append(parts, c.Refusal)
+			}
+			if c.ToolCall != nil {
+				parts = append(parts, fmt.Sprintf("%s(%s)", c.ToolCall.Name, c.ToolCall.Arguments))
+			}
+			if c.ToolResult != nil {
+				for _, p := range c.ToolResult.Parts {
+					if p.File != nil {
+						return "", &provider.ProviderError{
+							Code:    400,
+							Message: "embedding decision adapter does not support image inputs",
+						}
+					}
+					if p.Text != "" {
+						parts = append(parts, p.Text)
+					}
+				}
+			}
+		}
+		if len(parts) > 0 {
+			role := string(m.Role)
+			if role != "" {
+				lines = append(lines, role+": "+strings.Join(parts, "\n"))
+			} else {
+				lines = append(lines, strings.Join(parts, "\n"))
+			}
+		}
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+func instructionsValue(v any) any {
+	parts, ok := v.([]provider.Content)
+	if !ok {
+		return v
+	}
+	var texts []string
+	for _, c := range parts {
+		if c.Text != "" {
+			texts = append(texts, c.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
 }

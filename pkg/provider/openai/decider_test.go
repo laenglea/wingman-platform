@@ -80,7 +80,7 @@ func TestDeciderKeepsApplicationStateAsText(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if req.Input.OfString.Value != state || !strings.Contains(req.Questions[0].OfPredicate.Instructions, "Criteria") {
+		if req.Input.OfString.Value != state || !strings.Contains(req.Questions[0].OfPredicate.Instructions.OfString.Value, "Criteria") {
 			t.Fatalf("state or criteria changed: %+v", req)
 		}
 	}
