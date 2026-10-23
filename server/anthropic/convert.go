@@ -26,6 +26,8 @@ func blockCacheControl(control *CacheControlParam) *provider.CacheControl {
 	result := &provider.CacheControl{}
 	if control.TTL == "1h" {
 		result.Retention = provider.CacheRetentionExtended
+	} else if control.TTL == "5m" {
+		result.Retention = provider.CacheRetentionStandard
 	}
 	return result
 }
@@ -116,6 +118,14 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 		}
 
 		switch block.Type {
+		case "search_result":
+			parts, err := searchResultParts(path, block)
+			if err != nil {
+				return nil, err
+			}
+			for _, part := range parts {
+				content = append(content, provider.TextContent(part.Text))
+			}
 		case "text":
 			if m.Role == MessageRoleSystem {
 				scope := provider.InstructionScopeConversation
@@ -364,6 +374,12 @@ func toToolResultParts(path string, content any) ([]provider.Part, error) {
 			}
 
 			switch block.Type {
+			case "search_result":
+				result, err := searchResultParts(fmt.Sprintf("%s.%d", path, j), block)
+				if err != nil {
+					return nil, err
+				}
+				parts = append(parts, result...)
 			case "text":
 				if block.Text != "" {
 					parts = append(parts, provider.Part{Text: block.Text})
@@ -414,6 +430,17 @@ func toToolResultParts(path string, content any) ([]provider.Part, error) {
 
 		return []provider.Part{{Text: string(data)}}, nil
 	}
+}
+
+func searchResultParts(path string, block ContentBlockParam) ([]provider.Part, error) {
+	if block.SearchSource == "" || block.Title == "" || block.Content == nil {
+		return nil, fmt.Errorf("%s: search_result requires source, title and content", path)
+	}
+	parts, err := toToolResultParts(path+".content", block.Content)
+	if err != nil {
+		return nil, err
+	}
+	return append([]provider.Part{{Text: block.Title + "\n" + block.SearchSource}}, parts...), nil
 }
 
 func toJSONString(v any) (string, error) {

@@ -1029,6 +1029,11 @@ func toParts(items []InputContent) ([]provider.Part, error) {
 	var result []provider.Part
 
 	for _, c := range items {
+		if c.PromptCacheBreakpoint != nil {
+			if _, err := shared.CacheRetention(c.PromptCacheBreakpoint.TTL); err != nil {
+				return nil, err
+			}
+		}
 		switch c.Type {
 		case InputContentText, OutputContentText, "":
 			if c.Text != "" {
@@ -1104,6 +1109,11 @@ func toInputContent(items []InputContent) ([]provider.Content, error) {
 	var result []provider.Content
 
 	for _, c := range items {
+		if c.PromptCacheBreakpoint != nil {
+			if _, err := shared.CacheRetention(c.PromptCacheBreakpoint.TTL); err != nil {
+				return nil, err
+			}
+		}
 		switch c.Type {
 		case InputContentText, OutputContentText:
 			part := provider.TextContent(c.Text)
@@ -1143,7 +1153,8 @@ func inputCacheControl(breakpoint *PromptCacheBreakpoint) *provider.CacheControl
 	if breakpoint == nil {
 		return nil
 	}
-	return &provider.CacheControl{}
+	retention, _ := shared.CacheRetention(breakpoint.TTL)
+	return &provider.CacheControl{Retention: retention}
 }
 
 func toMessageRole(r MessageRole) provider.MessageRole {

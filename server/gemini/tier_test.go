@@ -21,7 +21,7 @@ type tierCompleter struct{ options *provider.CompleteOptions }
 func (c *tierCompleter) Complete(_ context.Context, _ []provider.Message, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	c.options = options
 	return func(yield func(*provider.Completion, error) bool) {
-		yield(&provider.Completion{Tier: provider.TierDefault, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.TextContent("ok")}}}, nil)
+		yield(&provider.Completion{Tier: provider.TierStandard, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.TextContent("ok")}}}, nil)
 	}
 }
 
@@ -32,8 +32,9 @@ func TestGenerateTier(t *testing.T) {
 				native string
 				want   provider.Tier
 			}{
-				{"", ""}, {"auto", ""}, {"standard", provider.TierDefault},
+				{"", ""}, {"auto", ""}, {"standard", provider.TierStandard},
 				{"flex", provider.TierFlex}, {"priority", provider.TierPriority}, {"unknown", ""},
+				{"default", ""}, {"fast", ""}, {"ultrafast", ""},
 			} {
 				t.Run(mode+"/"+field+"/"+test.native, func(t *testing.T) {
 					c := &tierCompleter{}

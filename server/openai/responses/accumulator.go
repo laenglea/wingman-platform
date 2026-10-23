@@ -243,9 +243,7 @@ func mergeUsage(dst **provider.Usage, src *provider.Usage) {
 	if src.CacheReadInputTokens > (*dst).CacheReadInputTokens {
 		(*dst).CacheReadInputTokens = src.CacheReadInputTokens
 	}
-	if src.CacheCreationInputTokens > (*dst).CacheCreationInputTokens {
-		(*dst).CacheCreationInputTokens = src.CacheCreationInputTokens
-	}
+	(*dst).MergeCacheWrites(src.CacheCreationInputTokens, src.CacheWriteTokensDetails)
 }
 
 func (s *StreamingAccumulator) reserveOutputIndex(kind streamItemKind, index int) int {

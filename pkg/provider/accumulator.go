@@ -165,9 +165,7 @@ func (a *CompletionAccumulator) Add(c Completion) {
 		if c.Usage.CacheReadInputTokens > a.usage.CacheReadInputTokens {
 			a.usage.CacheReadInputTokens = c.Usage.CacheReadInputTokens
 		}
-		if c.Usage.CacheCreationInputTokens > a.usage.CacheCreationInputTokens {
-			a.usage.CacheCreationInputTokens = c.Usage.CacheCreationInputTokens
-		}
+		a.usage.MergeCacheWrites(c.Usage.CacheCreationInputTokens, c.Usage.CacheWriteTokensDetails)
 	}
 }
 

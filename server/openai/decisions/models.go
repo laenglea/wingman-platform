@@ -2,29 +2,30 @@ package decisions
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
 // https://developers.openai.com/api/reference/resources/decisions/methods/create
 type Request struct {
-	Model     string          `json:"model"`
-	Input     json.RawMessage `json:"input"`
-	Questions []Question      `json:"questions"`
+	Model              string                     `json:"model"`
+	Input              json.RawMessage            `json:"input"`
+	Questions          []Question                 `json:"questions"`
+	PromptCacheKey     *string                    `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions *shared.PromptCacheOptions `json:"prompt_cache_options,omitempty"`
 }
 
 type Question struct {
-	Type         string   `json:"type"`
-	Name         *string  `json:"name,omitempty"`
-	Instructions *string  `json:"instructions"`
-	Choices      []Choice `json:"choices,omitempty"`
-	Levels       []Level  `json:"levels,omitempty"`
+	Type         string          `json:"type"`
+	Name         *string         `json:"name,omitempty"`
+	Instructions json.RawMessage `json:"instructions"`
+	Choices      []Choice        `json:"choices,omitempty"`
+	Levels       []Level         `json:"levels,omitempty"`
 }
 
 type Choice struct {
@@ -77,8 +78,9 @@ type Probability struct {
 type Usage struct {
 	InputTokens        int `json:"input_tokens"`
 	InputTokensDetails struct {
-		CachedTokens     int `json:"cached_tokens"`
-		CacheWriteTokens int `json:"cache_write_tokens"`
+		CachedTokens            int                             `json:"cached_tokens"`
+		CacheWriteTokens        int                             `json:"cache_write_tokens"`
+		CacheWriteTokensDetails *shared.CacheWriteTokensDetails `json:"cache_write_tokens_details,omitempty"`
 	} `json:"input_tokens_details"`
 	OutputTokens        int `json:"output_tokens"`
 	OutputTokensDetails struct {
@@ -93,11 +95,21 @@ func (r Request) ProviderInput() (*provider.DecisionInput, error) {
 		return nil, err
 	}
 	input := &provider.DecisionInput{State: r.Input}
+	if err := r.PromptCacheOptions.Validate(); err != nil {
+		return nil, err
+	}
+	input.CacheOptions = shared.CacheOptions(r.PromptCacheKey, nil, r.PromptCacheOptions)
+	if len(r.Questions) > 400 {
+		return nil, errors.New("at most 400 questions are supported")
+	}
 	for i, q := range r.Questions {
-		if q.Instructions == nil {
+		if len(q.Instructions) == 0 || bytes.Equal(bytes.TrimSpace(q.Instructions), []byte("null")) {
 			return nil, fmt.Errorf("questions[%d]: instructions is required", i)
 		}
-		question := provider.DecisionQuestion{ID: strconv.Itoa(i), Instructions: *q.Instructions}
+		if err := validateParts(q.Instructions, "question"); err != nil {
+			return nil, fmt.Errorf("questions[%d].instructions: %w", i, err)
+		}
+		question := provider.DecisionQuestion{ID: strconv.Itoa(i), Instructions: q.Instructions}
 		switch q.Type {
 		case "predicate":
 			if len(q.Choices) > 0 || len(q.Levels) > 0 {
@@ -137,71 +149,4 @@ func (r Request) ProviderInput() (*provider.DecisionInput, error) {
 		input.Questions = append(input.Questions, question)
 	}
 	return input, input.Validate()
-}
-
-func validateInput(raw json.RawMessage) error {
-	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		return errors.New("input is required")
-	}
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		return nil
-	}
-	var messages []struct {
-		Role    string          `json:"role"`
-		Type    string          `json:"type"`
-		Content json.RawMessage `json:"content"`
-	}
-	if err := json.Unmarshal(raw, &messages); err != nil || len(messages) == 0 {
-		return errors.New("input must be text or user messages")
-	}
-	images := 0
-	for _, m := range messages {
-		if m.Role != "user" || (m.Type != "" && m.Type != "message") {
-			return errors.New("only user messages are supported")
-		}
-		if len(m.Content) == 0 || bytes.Equal(bytes.TrimSpace(m.Content), []byte("null")) {
-			return errors.New("message content is required")
-		}
-		if json.Unmarshal(m.Content, &text) == nil {
-			continue
-		}
-		var parts []struct {
-			Type     string  `json:"type"`
-			Text     *string `json:"text"`
-			ImageURL string  `json:"image_url"`
-			Detail   string  `json:"detail"`
-		}
-		if json.Unmarshal(m.Content, &parts) != nil || len(parts) == 0 {
-			return errors.New("content must be text or input parts")
-		}
-		for _, p := range parts {
-			switch p.Type {
-			case "input_text":
-				if p.Text == nil {
-					return errors.New("input_text requires text")
-				}
-			case "input_image":
-				images++
-				prefix, data, ok := strings.Cut(p.ImageURL, ",")
-				if !ok || !strings.HasPrefix(prefix, "data:image/") || !strings.HasSuffix(prefix, ";base64") || data == "" {
-					return errors.New("images require a base64 image data URL")
-				}
-				if _, err := base64.StdEncoding.DecodeString(data); err != nil {
-					return errors.New("invalid image data URL")
-				}
-				switch p.Detail {
-				case "", "low", "high", "auto", "original":
-				default:
-					return errors.New("invalid image detail")
-				}
-			default:
-				return errors.New("only input_text and input_image parts are supported")
-			}
-		}
-	}
-	if images > 128 {
-		return errors.New("at most 128 images are supported")
-	}
-	return nil
 }

@@ -12,8 +12,9 @@ import (
 // after system, tools and the last user message, or, in explicit mode, only
 // after the client's breakpoints.
 type cachePolicy struct {
-	explicit bool
-	mark     func(provider.Content) bool
+	explicit  bool
+	retention provider.CacheRetention
+	mark      func(provider.Content) bool
 }
 
 func (p cachePolicy) marks(c provider.Content) bool {
@@ -24,8 +25,12 @@ func (p cachePolicy) marks(c provider.Content) bool {
 // four Converse accepts. Call marks in the order the blocks are written.
 func newCachePolicy(messages []provider.Message, options *provider.CompleteOptions) cachePolicy {
 	explicit := options != nil && options.CacheOptions != nil && options.CacheOptions.Mode == provider.CacheModeExplicit
+	retention := provider.CacheRetentionDefault
+	if options != nil && options.CacheOptions != nil {
+		retention = options.CacheOptions.Retention
+	}
 	if !explicit {
-		return cachePolicy{}
+		return cachePolicy{retention: retention}
 	}
 	total := 0
 	for _, m := range messages {
@@ -37,7 +42,7 @@ func newCachePolicy(messages []provider.Message, options *provider.CompleteOptio
 	}
 	skip := max(total-4, 0)
 	seen := 0
-	return cachePolicy{explicit: true, mark: func(c provider.Content) bool {
+	return cachePolicy{explicit: true, retention: retention, mark: func(c provider.Content) bool {
 		if c.CacheControl == nil {
 			return false
 		}
@@ -46,15 +51,23 @@ func newCachePolicy(messages []provider.Message, options *provider.CompleteOptio
 	}}
 }
 
-func cachePoint() types.CachePointBlock {
-	return types.CachePointBlock{Type: types.CachePointTypeDefault}
+func (p cachePolicy) point(control *provider.CacheControl) types.CachePointBlock {
+	retention := p.retention
+	if control != nil && control.Retention != "" {
+		retention = control.Retention
+	}
+	result := types.CachePointBlock{Type: types.CachePointTypeDefault}
+	if retention == provider.CacheRetentionExtended {
+		result.Ttl = types.CacheTTLOneHour
+	}
+	return result
 }
 
 // Bedrock's Claude translation rejects cachePoint immediately after a non-PDF
 // document. Cache the preceding prefix instead, leaving the documents intact.
 // A trailing text block or native PDF can still cache the entire message.
 // https://github.com/strands-agents/harness-sdk/issues/1966
-func appendMessageCachePoint(content []types.ContentBlock) []types.ContentBlock {
+func appendMessageCachePoint(content []types.ContentBlock, point types.CachePointBlock) []types.ContentBlock {
 	index := len(content)
 	for index > 0 {
 		document, ok := content[index-1].(*types.ContentBlockMemberDocument)
@@ -66,6 +79,6 @@ func appendMessageCachePoint(content []types.ContentBlock) []types.ContentBlock 
 	if index == 0 {
 		return content
 	}
-	var checkpoint types.ContentBlock = &types.ContentBlockMemberCachePoint{Value: cachePoint()}
+	var checkpoint types.ContentBlock = &types.ContentBlockMemberCachePoint{Value: point}
 	return slices.Insert(content, index, checkpoint)
 }

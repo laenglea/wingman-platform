@@ -9,7 +9,7 @@ import (
 
 func TestTierPreferenceAndEffectiveTier(t *testing.T) {
 	completer := &mockCompleter{responses: [][]provider.Completion{{
-		{Tier: provider.TierDefault, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.TextContent("ok")}}},
+		{Tier: provider.TierStandard, Message: &provider.Message{Role: provider.MessageRoleAssistant, Content: []provider.Content{provider.TextContent("ok")}}},
 		{Status: provider.CompletionStatusCompleted},
 	}}}
 	agent, err := New("test", WithCompleter(completer))
@@ -23,5 +23,5 @@ func TestTierPreferenceAndEffectiveTier(t *testing.T) {
 	for _, delta := range deltas {
 		acc.Add(*delta)
 	}
-	require.Equal(t, provider.TierDefault, acc.Result().Tier)
+	require.Equal(t, provider.TierStandard, acc.Result().Tier)
 }

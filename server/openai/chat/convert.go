@@ -83,6 +83,11 @@ func toMessages(s []ChatCompletionMessage) ([]provider.Message, error) {
 			}
 
 			for _, c := range m.Contents {
+				if c.PromptCacheBreakpoint != nil {
+					if _, err := shared.CacheRetention(c.PromptCacheBreakpoint.TTL); err != nil {
+						return nil, err
+					}
+				}
 				if c.Type == MessageContentTypeText && c.Text != "" {
 					result.Parts = append(result.Parts, provider.Part{Text: c.Text})
 				}
@@ -99,10 +104,16 @@ func toMessages(s []ChatCompletionMessage) ([]provider.Message, error) {
 			}
 
 			for _, c := range m.Contents {
+				if c.PromptCacheBreakpoint != nil {
+					if _, err := shared.CacheRetention(c.PromptCacheBreakpoint.TTL); err != nil {
+						return nil, err
+					}
+				}
 				if c.Type == MessageContentTypeText {
 					part := provider.TextContent(c.Text)
 					if c.PromptCacheBreakpoint != nil {
-						part.CacheControl = &provider.CacheControl{}
+						retention, _ := shared.CacheRetention(c.PromptCacheBreakpoint.TTL)
+						part.CacheControl = &provider.CacheControl{Retention: retention}
 					}
 					content = append(content, part)
 				}

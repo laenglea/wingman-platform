@@ -19,6 +19,8 @@ func cacheControl(options *provider.CacheOptions, control *provider.CacheControl
 	}
 	if retention == provider.CacheRetentionExtended {
 		result.TTL = anthropic.BetaCacheControlEphemeralTTLTTL1h
+	} else if retention == provider.CacheRetentionStandard {
+		result.TTL = anthropic.BetaCacheControlEphemeralTTLTTL5m
 	}
 	return result
 }

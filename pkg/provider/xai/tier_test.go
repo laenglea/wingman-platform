@@ -15,16 +15,20 @@ type tierTransport func(*http.Request) (*http.Response, error)
 func (f tierTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestTierMapping(t *testing.T) {
-	for _, tier := range []provider.Tier{"", provider.Tier("auto"), provider.TierDefault, provider.TierFlex, provider.TierPriority, "unknown"} {
+	for _, tier := range []provider.Tier{"", provider.Tier("auto"), provider.TierStandard, provider.TierFlex, provider.TierPriority, "unknown"} {
 		t.Run(string(tier), func(t *testing.T) {
 			client := &http.Client{Transport: tierTransport(func(r *http.Request) (*http.Response, error) {
 				var body map[string]any
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Fatal(err)
 				}
-				if tier == provider.TierDefault || tier == provider.TierPriority {
-					if body["service_tier"] != string(tier) {
-						t.Errorf("tier = %v, want %s", body["service_tier"], tier)
+				if tier == provider.TierStandard || tier == provider.TierPriority {
+					want := "priority"
+					if tier == provider.TierStandard {
+						want = "default"
+					}
+					if body["service_tier"] != want {
+						t.Errorf("tier = %v, want %s", body["service_tier"], want)
 					}
 				} else if _, exists := body["service_tier"]; exists {
 					t.Error("unsupported preference should keep backend default")

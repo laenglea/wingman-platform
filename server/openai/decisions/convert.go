@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
 // FromDecision restores caller names and typed values for native or adapted deciders.
@@ -22,6 +23,7 @@ func FromDecision(request Request, input *provider.DecisionInput, result *provid
 		response.Usage.TotalTokens = u.InputTokens + u.OutputTokens
 		response.Usage.InputTokensDetails.CachedTokens = u.CacheReadInputTokens
 		response.Usage.InputTokensDetails.CacheWriteTokens = u.CacheCreationInputTokens
+		response.Usage.InputTokensDetails.CacheWriteTokensDetails = shared.CacheWriteDetails(u.CacheWriteTokensDetails)
 		if u.ReasoningTokens != nil {
 			response.Usage.OutputTokensDetails.ReasoningTokens = *u.ReasoningTokens
 		}

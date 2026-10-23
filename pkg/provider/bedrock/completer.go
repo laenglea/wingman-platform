@@ -458,7 +458,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 					Usage: toUsage(v.Value.Usage),
 				}
 				if v.Value.ServiceTier != nil {
-					delta.Tier = provider.NormalizeTier(string(v.Value.ServiceTier.Type))
+					delta.Tier = tierFromServiceTier(v.Value.ServiceTier.Type)
 				}
 
 				if !yield(delta, nil) {
@@ -868,11 +868,7 @@ func (c *Completer) convertConverseInput(input []provider.Message, options *prov
 
 		InferenceConfig: inference,
 		OutputConfig:    output,
-	}
-	switch options.Tier {
-	case "":
-	case provider.TierDefault, provider.TierFlex, provider.TierPriority:
-		req.ServiceTier = &types.ServiceTier{Type: types.ServiceTierType(options.Tier)}
+		ServiceTier:     serviceTier(options.Tier),
 	}
 
 	fields, _ := c.converseAdditionalFields(options)
@@ -911,7 +907,7 @@ func (c *Completer) convertSystemPolicy(messages []provider.Message, cache cache
 
 			result = append(result, system)
 			if cache.marks(content) {
-				result = append(result, &types.SystemContentBlockMemberCachePoint{Value: cachePoint()})
+				result = append(result, &types.SystemContentBlockMemberCachePoint{Value: cache.point(content.CacheControl)})
 			}
 		}
 	}
@@ -923,9 +919,7 @@ func (c *Completer) convertSystemPolicy(messages []provider.Message, cache cache
 	// Add cache point after system messages for Claude models
 	if isClaudeModel(c.model) && !cache.explicit {
 		result = append(result, &types.SystemContentBlockMemberCachePoint{
-			Value: types.CachePointBlock{
-				Type: types.CachePointTypeDefault,
-			},
+			Value: cache.point(nil),
 		})
 	}
 
@@ -1003,7 +997,7 @@ func (c *Completer) convertMessagesPolicy(messages []provider.Message, cache cac
 	if isClaudeModel(c.model) && !cache.explicit && len(result) > 0 {
 		for i := len(result) - 1; i >= 0; i-- {
 			if result[i].Role == types.ConversationRoleUser {
-				result[i].Content = appendMessageCachePoint(result[i].Content)
+				result[i].Content = appendMessageCachePoint(result[i].Content, cache.point(nil))
 				break
 			}
 		}
@@ -1045,7 +1039,7 @@ func convertUserContentPolicy(m provider.Message, cache cachePolicy) ([]types.Co
 		if text := strings.TrimRight(c.Text, " \t\n\r"); text != "" {
 			content = append(content, &types.ContentBlockMemberText{Value: text})
 			if cache.marks(c) {
-				content = append(content, &types.ContentBlockMemberCachePoint{Value: cachePoint()})
+				content = append(content, &types.ContentBlockMemberCachePoint{Value: cache.point(c.CacheControl)})
 			}
 		}
 
@@ -1099,7 +1093,7 @@ func convertUserContentPolicy(m provider.Message, cache cachePolicy) ([]types.Co
 				},
 			})
 			if cache.marks(c) {
-				results = append(results, &types.ContentBlockMemberCachePoint{Value: cachePoint()})
+				results = append(results, &types.ContentBlockMemberCachePoint{Value: cache.point(c.CacheControl)})
 			}
 		}
 	}
@@ -1244,9 +1238,7 @@ func (c *Completer) convertToolConfigPolicy(tools []provider.Tool, options *prov
 	// Add cache point after tool definitions for Claude models
 	if isClaudeModel(c.model) && !cache.explicit {
 		result.Tools = append(result.Tools, &types.ToolMemberCachePoint{
-			Value: types.CachePointBlock{
-				Type: types.CachePointTypeDefault,
-			},
+			Value: cache.point(nil),
 		})
 	}
 
@@ -1480,11 +1472,25 @@ func toUsage(val *types.TokenUsage) *provider.Usage {
 	// Usage has one consistent meaning across providers.
 	totalInputTokens := inputTokens + cacheReadInputTokens + cacheWriteInputTokens
 
-	return &provider.Usage{
+	result := &provider.Usage{
 		InputTokens:  totalInputTokens,
 		OutputTokens: outputTokens,
 
 		CacheReadInputTokens:     cacheReadInputTokens,
 		CacheCreationInputTokens: cacheWriteInputTokens,
 	}
+
+	if len(val.CacheDetails) > 0 {
+		details := &provider.CacheWriteTokensDetails{}
+		for _, entry := range val.CacheDetails {
+			switch entry.Ttl {
+			case types.CacheTTLFiveMinutes:
+				details.StandardTokens += int(aws.ToInt32(entry.InputTokens))
+			case types.CacheTTLOneHour:
+				details.ExtendedTokens += int(aws.ToInt32(entry.InputTokens))
+			}
+		}
+		result.MergeCacheWrites(cacheWriteInputTokens, details)
+	}
+	return result
 }

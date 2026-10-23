@@ -31,6 +31,11 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := req.PromptCacheOptions.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
 	completer, err := h.Completer(req.Model)
 
 	if err != nil {
@@ -59,13 +64,13 @@ func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	options := &provider.CompleteOptions{
-		Tier:        provider.ParseTier(req.Tier),
+		Tier:        shared.ParseTier(req.Tier),
 		Tools:       tools,
 		ToolOptions: toToolOptions(req.ToolChoice),
 
 		MaxTokens: req.MaxOutputTokens,
 
-		CacheOptions: shared.CacheOptions(req.PromptCacheKey, req.PromptCacheRetention, req.PromptCacheOptions.mode()),
+		CacheOptions: shared.CacheOptions(req.PromptCacheKey, req.PromptCacheRetention, req.PromptCacheOptions),
 	}
 
 	if req.ParallelToolCalls != nil && !*req.ParallelToolCalls {
@@ -295,8 +300,9 @@ func responseUsage(usage *provider.Usage) *Usage {
 	return &Usage{
 		InputTokens: usage.InputTokens,
 		InputTokensDetails: &InputTokensDetails{
-			CachedTokens:     usage.CacheReadInputTokens,
-			CacheWriteTokens: usage.CacheCreationInputTokens,
+			CachedTokens:            usage.CacheReadInputTokens,
+			CacheWriteTokens:        usage.CacheCreationInputTokens,
+			CacheWriteTokensDetails: shared.CacheWriteDetails(usage.CacheWriteTokensDetails),
 		},
 
 		OutputTokens:        usage.OutputTokens,
@@ -312,8 +318,10 @@ func responseDefaults(resp *Response, req ResponsesRequest, completion *provider
 	resp.Background = false
 	resp.Store = false
 	resp.Tier = nil
-	if completion != nil && completion.Tier != "" {
-		resp.Tier = new(string(completion.Tier))
+	if completion != nil {
+		if tier := shared.ServiceTier(completion.Tier); tier != "" {
+			resp.Tier = new(tier)
+		}
 	}
 
 	resp.ParallelToolCalls = true
@@ -345,11 +353,6 @@ func responseDefaults(resp *Response, req ResponsesRequest, completion *provider
 	if req.Reasoning != nil {
 		resp.Reasoning.Effort = req.Reasoning.Effort
 		resp.Reasoning.Summary = req.Reasoning.Summary
-	}
-
-	if resp.Reasoning.Effort == nil {
-		effort := ReasoningEffortNone
-		resp.Reasoning.Effort = &effort
 	}
 
 	// A request preference or a model-name guess is not an effective mode.

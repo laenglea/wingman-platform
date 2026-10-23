@@ -93,7 +93,9 @@ type ContentBlockParam struct {
 	Text string `json:"text,omitempty"`
 
 	// For image and document blocks
-	Source *BlockSource `json:"source,omitempty"`
+	Source       *BlockSource `json:"source,omitempty"`
+	SearchSource string       `json:"-"`
+	Title        string       `json:"title,omitempty"`
 
 	// For tool_use blocks (in assistant messages)
 	ID     string       `json:"id,omitempty"`
@@ -124,6 +126,29 @@ type ContentBlockParam struct {
 type CacheControlParam struct {
 	Type string `json:"type"`
 	TTL  string `json:"ttl,omitempty"`
+}
+
+func (b *ContentBlockParam) UnmarshalJSON(data []byte) error {
+	var kind struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &kind); err != nil {
+		return err
+	}
+	type block ContentBlockParam
+	if kind.Type != "search_result" {
+		return decodeRequest(bytes.NewReader(data), (*block)(b))
+	}
+	var result struct {
+		*block
+		Source string `json:"source"`
+	}
+	result.block = (*block)(b)
+	if err := decodeRequest(bytes.NewReader(data), &result); err != nil {
+		return err
+	}
+	b.SearchSource = result.Source
+	return nil
 }
 
 // BlockSource is the source object for image and document content blocks.

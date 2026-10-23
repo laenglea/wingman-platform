@@ -68,6 +68,14 @@ tasks:
       CODEX_LIVE: '1'
     cmds:
       - go test -v -count=1 -timeout 30m ./test/codex
+
+  test:compatibility:
+    desc: Compare current API contracts against OpenAI, Anthropic, and local Wingman
+    dotenv: ['.env']
+    env:
+      API_COMPAT_LIVE: '1'
+    cmds:
+      - go test -v -count=1 -timeout 15m ./test/compatibility
   
   lgtm:
     cmds:

@@ -101,6 +101,7 @@ func (a *CompleterAdapter) Decide(ctx context.Context, input *provider.DecisionI
 	completeOptions := &provider.CompleteOptions{
 		Schema:           schema,
 		ReasoningOptions: &reasoning,
+		CacheOptions:     input.CacheOptions,
 	}
 	var acc provider.CompletionAccumulator
 	for completion, err := range a.completer.Complete(ctx, messages, completeOptions) {

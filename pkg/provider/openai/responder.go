@@ -170,8 +170,8 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 			if data.Response.Reasoning.Context != "" {
 				reasoningContext = provider.ReasoningContext(data.Response.Reasoning.Context)
 			}
-			if data.Response.ServiceTier != "" {
-				tier = provider.NormalizeTier(string(data.Response.ServiceTier))
+			if value := tierFromServiceTier(string(data.Response.ServiceTier)); value != "" {
+				tier = value
 			}
 
 			switch event := data.AsAny().(type) {
@@ -459,7 +459,7 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		return nil, err
 	}
 
-	tier := provider.ParseTier(string(options.Tier))
+	tier := serviceTier(options.Tier)
 	req := &responses.ResponseNewParams{
 		ServiceTier: responses.ResponseNewParamsServiceTier(tier),
 		Model:       r.model,
@@ -479,11 +479,14 @@ func (r *Responder) convertResponsesRequest(messages []provider.Message, options
 		if cache.Key != "" {
 			req.PromptCacheKey = openai.String(cache.Key)
 		}
-		if cache.Retention == provider.CacheRetentionExtended {
+		if cache.Retention == provider.CacheRetentionExtended && !supportsCacheBreakpoints(r.model) {
 			req.PromptCacheRetention = responses.ResponseNewParamsPromptCacheRetention24h
 		}
 		if cache.Mode == provider.CacheModeExplicit && supportsCacheBreakpoints(r.model) {
 			req.PromptCacheOptions = responses.ResponseNewParamsPromptCacheOptions{Mode: "explicit"}
+		}
+		if supportsCacheBreakpoints(r.model) {
+			req.PromptCacheOptions.Ttl = cacheTTL(cache.Retention)
 		}
 	}
 
@@ -689,7 +692,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message, freeformP
 				if c.Text != "" {
 					part := &responses.ResponseInputTextParam{Text: c.Text}
 					if c.CacheControl != nil && supportsCacheBreakpoints(r.model) {
-						part.PromptCacheBreakpoint = inputTextBreakpoint()
+						part.PromptCacheBreakpoint = inputTextBreakpoint(c.CacheControl)
 					}
 					message.Content = append(message.Content, responses.ResponseInputContentUnionParam{OfInputText: part})
 				}
@@ -710,7 +713,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message, freeformP
 				if c.Text != "" {
 					part := &responses.ResponseInputTextParam{Text: c.Text}
 					if c.CacheControl != nil && supportsCacheBreakpoints(r.model) {
-						part.PromptCacheBreakpoint = inputTextBreakpoint()
+						part.PromptCacheBreakpoint = inputTextBreakpoint(c.CacheControl)
 					}
 					message.Content = append(message.Content, responses.ResponseInputContentUnionParam{OfInputText: part})
 				}
@@ -722,7 +725,7 @@ func (r *Responder) convertResponsesInput(messages []provider.Message, freeformP
 					case isImage(c.File.ContentType):
 						part := &responses.ResponseInputImageParam{ImageURL: openai.String(url)}
 						if c.CacheControl != nil && supportsCacheBreakpoints(r.model) {
-							part.PromptCacheBreakpoint = inputImageBreakpoint()
+							part.PromptCacheBreakpoint = inputImageBreakpoint(c.CacheControl)
 						}
 						message.Content = append(message.Content, responses.ResponseInputContentUnionParam{OfInputImage: part})
 
@@ -1725,6 +1728,7 @@ func computerCallToArgs(item responses.ResponseComputerToolCall) map[string]any 
 }
 
 func toResponseUsage(usage responses.ResponseUsage) *provider.Usage {
+	cacheWrites := cacheWriteDetails(usage.InputTokensDetails.JSON.ExtraFields["cache_write_tokens_details"].Raw())
 	var reasoningTokens *int
 	if usage.OutputTokensDetails.JSON.ReasoningTokens.Valid() || usage.OutputTokensDetails.ReasoningTokens > 0 {
 		reasoningTokens = new(int(usage.OutputTokensDetails.ReasoningTokens))
@@ -1744,6 +1748,7 @@ func toResponseUsage(usage responses.ResponseUsage) *provider.Usage {
 
 		CacheReadInputTokens:     int(usage.InputTokensDetails.CachedTokens),
 		CacheCreationInputTokens: int(usage.InputTokensDetails.CacheWriteTokens),
+		CacheWriteTokensDetails:  cacheWrites,
 	}
 }
 

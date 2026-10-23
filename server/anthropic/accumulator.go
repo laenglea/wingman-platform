@@ -236,6 +236,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 
 					CacheReadInputTokens:     cacheReadInputTokens,
 					CacheCreationInputTokens: cacheCreationInputTokens,
+					CacheCreation:            cacheCreation(c.Usage),
 				},
 			},
 		}); err != nil {
