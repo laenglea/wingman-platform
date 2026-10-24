@@ -9,6 +9,28 @@ type File struct {
 
 	Content     []byte
 	ContentType string
+	// ImageDetail selects the image resolution profile when supported.
+	ImageDetail ImageDetail
+}
+
+// ImageDetail selects how much visual detail a provider uses for an image.
+type ImageDetail string
+
+const (
+	ImageDetailDefault  ImageDetail = ""
+	ImageDetailAuto     ImageDetail = "auto"
+	ImageDetailLow      ImageDetail = "low"
+	ImageDetailHigh     ImageDetail = "high"
+	ImageDetailOriginal ImageDetail = "original"
+)
+
+func (d ImageDetail) Valid() bool {
+	switch d {
+	case ImageDetailDefault, ImageDetailAuto, ImageDetailLow, ImageDetailHigh, ImageDetailOriginal:
+		return true
+	default:
+		return false
+	}
 }
 
 type Tool struct {

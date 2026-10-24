@@ -33,12 +33,15 @@ func FromDecision(request Request, input *provider.DecisionInput, result *provid
 		if a.ID != q.ID {
 			return Response{}, errors.New("decision answers must match question order")
 		}
-		value := Answer{Name: wire.Name}
+		value := Answer{ID: wire.ID, Name: wire.Name}
 		switch {
 		case a.Refusal != nil:
 			value.Type = "refusal"
-		case a.Noul != nil && wire.Type == "predicate":
-			value.Type, value.Probability = "predicate", &a.Noul.Probability
+		case a.Error != nil:
+			value.Type = "error"
+			value.Message = a.Error.Message
+		case a.Noul != nil && (wire.Type == "predicate" || wire.Type == "binary"):
+			value.Type, value.Probability = wire.Type, &a.Noul.Probability
 		case a.Choice != nil && wire.Type == "choice":
 			value.Type, value.Confidence = "choice", &a.Choice.Confidence
 			selected := false
@@ -62,8 +65,18 @@ func FromDecision(request Request, input *provider.DecisionInput, result *provid
 			}
 			value.Type, value.Score, value.Confidence = "score", &a.Score.Score, &a.Score.Confidence
 			for j, level := range wire.Levels {
-				label := level.Label
-				value.Probabilities = append(value.Probabilities, Probability{Value: float64(j), Label: &label, Probability: &a.Score.Levels[j].Probability})
+				val := any(float64(j))
+				if level.Value != nil {
+					val = *level.Value
+				} else if j < len(q.Score.Values) {
+					val = q.Score.Values[j]
+				}
+				var labelPtr *string
+				if level.Label != "" || level.Value == nil {
+					label := level.Label
+					labelPtr = &label
+				}
+				value.Probabilities = append(value.Probabilities, Probability{Value: val, Label: labelPtr, Probability: &a.Score.Levels[j].Probability})
 			}
 		default:
 			return Response{}, fmt.Errorf("question %s: invalid answer variant", strconv.Itoa(i))

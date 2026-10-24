@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/adrianliechti/wingman/pkg/jsonutil"
+	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/server/openai/shared"
 )
 
@@ -899,7 +900,8 @@ type InputContent struct {
 
 	Refusal string `json:"refusal,omitempty"`
 
-	ImageURL string `json:"image_url,omitempty"`
+	ImageURL string                `json:"image_url,omitempty"`
+	Detail   *provider.ImageDetail `json:"detail,omitempty"`
 
 	Filename string `json:"filename,omitempty"`
 	FileURL  string `json:"file_url,omitempty"`

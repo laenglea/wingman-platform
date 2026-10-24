@@ -641,6 +641,16 @@ func (r *Responder) convertResponsesInput(messages []provider.Message, freeformP
 	for _, m := range messages {
 		var controlItems []responses.ResponseInputItemUnionParam
 		for _, content := range m.Content {
+			if content.File != nil && !content.File.ImageDetail.Valid() {
+				return responses.ResponseNewParamsInputUnion{}, fmt.Errorf("invalid image detail %q", content.File.ImageDetail)
+			}
+			if content.ToolResult != nil {
+				for _, part := range content.ToolResult.Parts {
+					if part.File != nil && !part.File.ImageDetail.Valid() {
+						return responses.ResponseNewParamsInputUnion{}, fmt.Errorf("invalid image detail %q", part.File.ImageDetail)
+					}
+				}
+			}
 			if content.CompactionTrigger {
 				trigger := responses.NewResponseInputItemCompactionTriggerParam()
 				controlItems = append(controlItems, responses.ResponseInputItemUnionParam{
@@ -723,7 +733,10 @@ func (r *Responder) convertResponsesInput(messages []provider.Message, freeformP
 
 					switch {
 					case isImage(c.File.ContentType):
-						part := &responses.ResponseInputImageParam{ImageURL: openai.String(url)}
+						part := &responses.ResponseInputImageParam{
+							ImageURL: openai.String(url),
+							Detail:   responses.ResponseInputImageDetail(c.File.ImageDetail),
+						}
 						if c.CacheControl != nil && supportsCacheBreakpoints(r.model) {
 							part.PromptCacheBreakpoint = inputImageBreakpoint(c.CacheControl)
 						}
@@ -1173,6 +1186,7 @@ func toolResultOutputUnion(r *provider.ToolResult) responses.ResponseInputItemFu
 				items = append(items, responses.ResponseFunctionCallOutputItemUnionParam{
 					OfInputImage: &responses.ResponseInputImageContentParam{
 						ImageURL: openai.String(url),
+						Detail:   responses.ResponseInputImageContentDetail(p.File.ImageDetail),
 					},
 				})
 
@@ -1229,6 +1243,7 @@ func customToolResultOutputUnion(r *provider.ToolResult) responses.ResponseCusto
 				items = append(items, responses.ResponseCustomToolCallOutputOutputOutputContentListItemUnionParam{
 					OfInputImage: &responses.ResponseInputImageParam{
 						ImageURL: openai.String(url),
+						Detail:   responses.ResponseInputImageDetail(p.File.ImageDetail),
 					},
 				})
 

@@ -3,6 +3,7 @@ package typesafe
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/google/uuid"
 )
 
 var _ provider.Decider = (*Decider)(nil)
@@ -45,12 +47,19 @@ type decisionRequest struct {
 	Model     string                      `json:"model"`
 	State     any                         `json:"state"`
 	Questions map[string]decisionQuestion `json:"questions"`
+	Assets    map[string]decisionAsset    `json:"assets,omitempty"`
 }
 
 type decisionQuestion struct {
 	Type         string `json:"type"`
 	Instructions any    `json:"instructions"`
 	Criteria     any    `json:"criteria,omitempty"`
+}
+
+type decisionAsset struct {
+	Type       string `json:"type"`
+	Format     string `json:"format"`
+	DataBase64 string `json:"data_base64"`
 }
 
 type decisionResponse struct {
@@ -64,34 +73,120 @@ type decisionResponse struct {
 }
 
 type decisionAnswer struct {
-	Type          string             `json:"type"`
-	Noul          *float64           `json:"noul"`
-	Choice        *string            `json:"choice"`
-	Score         *float64           `json:"score"`
-	Confidence    *float64           `json:"confidence"`
-	Probabilities map[string]float64 `json:"probabilities"`
-	Legend        map[string]any     `json:"legend"`
+	Type          string                                       `json:"type"`
+	Noul          *float64                                     `json:"noul"`
+	Choice        *string                                      `json:"choice"`
+	Score         *float64                                     `json:"score"`
+	Confidence    *float64                                     `json:"confidence"`
+	Probabilities map[string]float64                           `json:"probabilities"`
+	Legend        map[string]any                               `json:"legend"`
+	Box           *struct{ Top, Bottom, Left, Right *float64 } `json:"box"`
+}
+
+func (a *decisionAnswer) UnmarshalJSON(data []byte) error {
+	type plain decisionAnswer
+	var decoded plain
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	if decoded.Type == "box" {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return err
+		}
+		if _, ok := fields["confidence"]; !ok {
+			return errors.New("box confidence is required (may be null)")
+		}
+	}
+	*a = decisionAnswer(decoded)
+	return nil
 }
 
 func (d *Decider) Decide(ctx context.Context, input *provider.DecisionInput) (*provider.Decision, error) {
 	if err := input.Validate(); err != nil {
 		return nil, provider.InvalidRequest(err)
 	}
-	body := decisionRequest{
-		Model: d.model, State: input.State,
-		Questions: make(map[string]decisionQuestion, len(input.Questions)),
+	assets := make(map[string]decisionAsset)
+	for key, file := range input.Assets {
+		asset, err := imageAsset(file)
+		if err != nil {
+			return nil, provider.InvalidRequest(err)
+		}
+		assets[key] = asset
 	}
+	var encodingError error
+	encodeParts := func(parts []provider.Content) any {
+		var out []any
+		for _, c := range parts {
+			if c.Text != "" || c.TextPresent {
+				out = append(out, c.Text)
+			}
+			if c.File != nil {
+				key := uuid.NewString()
+				asset, err := imageAsset(c.File)
+				if err != nil {
+					encodingError = err
+					continue
+				}
+				assets[key] = asset
+				out = append(out, key)
+			}
+		}
+		if len(out) == 1 {
+			return out[0]
+		}
+		return out
+	}
+	encodeValue := func(v any) any {
+		if parts, ok := v.([]provider.Content); ok {
+			return encodeParts(parts)
+		}
+		return v
+	}
+	state := encodeValue(input.State)
+	if len(input.Messages) > 0 {
+		var items []any
+		for _, m := range input.Messages {
+			var contents []any
+			for _, c := range m.Content {
+				if c.ToolCall != nil {
+					contents = append(contents, map[string]any{"type": "tool_call", "kind": c.ToolCall.Kind, "call_id": c.ToolCall.ID, "name": c.ToolCall.Name, "arguments": c.ToolCall.Arguments})
+					continue
+				}
+				if c.ToolResult != nil {
+					var parts []provider.Content
+					for _, part := range c.ToolResult.Parts {
+						parts = append(parts, provider.Content{Text: part.Text, File: part.File})
+					}
+					contents = append(contents, map[string]any{"type": "tool_output", "call_id": c.ToolResult.ID, "output": encodeParts(parts)})
+					continue
+				}
+				if c.Refusal != "" {
+					contents = append(contents, map[string]any{"refusal": c.Refusal})
+				}
+				if c.Text != "" || c.TextPresent || c.File != nil {
+					contents = append(contents, encodeParts([]provider.Content{c}))
+				}
+			}
+			items = append(items, map[string]any{"role": m.Role, "content": contents})
+		}
+		state = items
+	}
+	body := decisionRequest{Model: d.model, State: state, Assets: assets, Questions: make(map[string]decisionQuestion, len(input.Questions))}
 	for _, q := range input.Questions {
-		question := decisionQuestion{Instructions: q.Instructions}
+		instructions := encodeValue(q.Instructions)
+		question := decisionQuestion{Instructions: instructions}
 		switch {
 		case q.Noul != nil:
 			question.Type = "noul"
 			criteria := make(map[string]any)
 			if q.Noul.True != nil {
-				criteria["true"] = q.Noul.True
+				criteria["true"] = encodeValue(q.Noul.True)
 			}
 			if q.Noul.False != nil {
-				criteria["false"] = q.Noul.False
+				criteria["false"] = encodeValue(q.Noul.False)
 			}
 			if len(criteria) > 0 {
 				question.Criteria = criteria
@@ -100,13 +195,23 @@ func (d *Decider) Decide(ctx context.Context, input *provider.DecisionInput) (*p
 			question.Type = "choice"
 			criteria := make(map[string]any, len(q.Choice.Options))
 			for _, option := range q.Choice.Options {
-				criteria[option.Label] = option.Description
+				criteria[option.Label] = encodeValue(option.Description)
 			}
 			question.Criteria = criteria
 		case q.Score != nil:
-			question.Type, question.Criteria = "score", q.Score.Levels
+			question.Type = "score"
+			levels := make([]any, len(q.Score.Levels))
+			for i, v := range q.Score.Levels {
+				levels[i] = encodeValue(v)
+			}
+			question.Criteria = levels
+		case q.Box != nil:
+			question.Type = "box"
 		}
 		body.Questions[q.ID] = question
+	}
+	if encodingError != nil {
+		return nil, provider.InvalidRequest(encodingError)
 	}
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -115,7 +220,7 @@ func (d *Decider) Decide(ctx context.Context, input *provider.DecisionInput) (*p
 
 	var response *decisionResponse
 	for attempt := 0; ; attempt++ {
-		response, err = d.evaluate(ctx, data)
+		response, err = d.evaluate(ctx, data, len(assets) > 0 || hasBoxQuestion(input))
 		if err == nil || attempt >= d.maxRetries {
 			break
 		}
@@ -141,12 +246,15 @@ func (d *Decider) Decide(ctx context.Context, input *provider.DecisionInput) (*p
 	return response.decision(input)
 }
 
-func (d *Decider) evaluate(ctx context.Context, data []byte) (*decisionResponse, error) {
+func (d *Decider) evaluate(ctx context.Context, data []byte, images bool) (*decisionResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.endpoint, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if images {
+		req.Header.Set("TypeSafe-Danger-Zone-Images", "true")
+	}
 	if d.token != "" {
 		req.Header.Set("Authorization", "Bearer "+d.token)
 	}
@@ -230,6 +338,7 @@ func (r *decisionResponse) decision(input *provider.DecisionInput) (*provider.De
 				return nil, fmt.Errorf("question %q: invalid score answer", q.ID)
 			}
 			score := &provider.ScoreAnswer{Score: *answer.Score, Confidence: *answer.Confidence}
+			var customScore float64
 			for i := range q.Score.Levels {
 				key := strconv.Itoa(i)
 				p, ok := answer.Probabilities[key]
@@ -237,9 +346,35 @@ func (r *decisionResponse) decision(input *provider.DecisionInput) (*provider.De
 				if !ok || !exists || !probability(&p) {
 					return nil, fmt.Errorf("question %q: invalid score level %q", q.ID, key)
 				}
-				score.Levels = append(score.Levels, provider.ScoreLevel{Description: description, Probability: p})
+				val := i
+				if i < len(q.Score.Values) {
+					val = q.Score.Values[i]
+				}
+				var label string
+				if i < len(q.Score.Labels) {
+					label = q.Score.Labels[i]
+				}
+				customScore += float64(val) * p
+				score.Levels = append(score.Levels, provider.ScoreLevel{
+					Value:       val,
+					Label:       label,
+					Description: description,
+					Probability: p,
+				})
+			}
+			if len(q.Score.Values) > 0 {
+				score.Score = customScore
 			}
 			value.Score = score
+		case q.Box != nil:
+			if answer.Type != "box" || answer.Box == nil || answer.Box.Top == nil || answer.Box.Bottom == nil || answer.Box.Left == nil || answer.Box.Right == nil {
+				return nil, fmt.Errorf("question %q: invalid box answer", q.ID)
+			}
+			coords := provider.BoxCoordinates{Top: *answer.Box.Top, Bottom: *answer.Box.Bottom, Left: *answer.Box.Left, Right: *answer.Box.Right}
+			if err := coords.Validate(answer.Confidence); err != nil {
+				return nil, fmt.Errorf("question %q: %w", q.ID, err)
+			}
+			value.Box = &provider.BoxAnswer{Box: coords, Confidence: answer.Confidence}
 		}
 		result.Answers = append(result.Answers, value)
 	}
@@ -248,4 +383,26 @@ func (r *decisionResponse) decision(input *provider.DecisionInput) (*provider.De
 
 func probability(value *float64) bool {
 	return value != nil && !math.IsNaN(*value) && !math.IsInf(*value, 0) && *value >= 0 && *value <= 1
+}
+
+func imageAsset(file *provider.File) (decisionAsset, error) {
+	format := ""
+	switch file.ContentType {
+	case "image/png":
+		format = "png"
+	case "image/jpeg":
+		format = "jpeg"
+	default:
+		return decisionAsset{}, errors.New("TypeSafe assets require PNG or JPEG images")
+	}
+	return decisionAsset{Type: "image", Format: format, DataBase64: base64.StdEncoding.EncodeToString(file.Content)}, nil
+}
+
+func hasBoxQuestion(input *provider.DecisionInput) bool {
+	for _, q := range input.Questions {
+		if q.Box != nil {
+			return true
+		}
+	}
+	return false
 }

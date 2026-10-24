@@ -1041,7 +1041,7 @@ func toParts(items []InputContent) ([]provider.Part, error) {
 			}
 
 		case InputContentImage:
-			file, err := files.FromURL(c.ImageURL)
+			file, err := imageFromInputContent(c)
 			if err != nil {
 				return nil, err
 			}
@@ -1058,6 +1058,20 @@ func toParts(items []InputContent) ([]provider.Part, error) {
 	}
 
 	return result, nil
+}
+
+func imageFromInputContent(c InputContent) (*provider.File, error) {
+	if c.Detail != nil && (!c.Detail.Valid() || *c.Detail == provider.ImageDetailDefault) {
+		return nil, fmt.Errorf("invalid input_image detail %q", *c.Detail)
+	}
+	file, err := files.FromURL(c.ImageURL)
+	if err != nil {
+		return nil, err
+	}
+	if c.Detail != nil {
+		file.ImageDetail = *c.Detail
+	}
+	return file, nil
 }
 
 // fileFromInputContent decodes an input_file content part into provider.File.
@@ -1124,7 +1138,7 @@ func toInputContent(items []InputContent) ([]provider.Content, error) {
 			result = append(result, provider.RefusalContent(c.Refusal))
 
 		case InputContentImage:
-			file, err := files.FromURL(c.ImageURL)
+			file, err := imageFromInputContent(c)
 			if err != nil {
 				return nil, err
 			}

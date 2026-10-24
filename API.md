@@ -58,6 +58,8 @@ Prompt caching is on by default on every backend that supports it: the stable pr
 | `prompt_cache_retention` | String     | `24h` asks for extended cache retention where the backend offers it |
 | `prompt_cache_options` | Object       | `mode` `implicit` (default) or `explicit`; explicit caches only at `prompt_cache_breakpoint` parts |
 
+Image content parts accept `detail`: `auto`, `low`, `high`, or `original`. Responses preserves this preference for user images and images in function or custom tool outputs when forwarding to an OpenAI Responses backend. Omission keeps the backend default.
+
 Prompt caching is on by default on every backend that supports it: the stable prefix is cached automatically, as on OpenAI, and cached tokens are reported in `usage.input_tokens_details.cached_tokens`. A `prompt_cache_breakpoint` on an input content part marks the end of a reusable prefix: GPT-5.6 and later take it natively, Claude backends receive it as a cache breakpoint, and other backends keep caching implicitly.
 
 Processing tier preferences use `Tier` internally and `service_tier` on the OpenAI-compatible wire. `auto`, omission, and unknown values keep the backend's default and share the empty internal value. `default` explicitly requests standard processing. Known values map as follows; unsupported preferences are omitted:
@@ -85,21 +87,32 @@ References (checked 2026-10-16): [OpenAI Flex](https://developers.openai.com/api
 
 Evaluate shared text or inline images with ordered questions, following the
 [OpenAI Decisions format](https://developers.openai.com/api/docs/guides/decisions).
-The supported request fields are `model`, `input`, and `questions`.
+The supported request fields are `model`, `input`, `questions`,
+`prompt_cache_key`, and `prompt_cache_options`.
 `model` is optional: Wingman selects the first native decider in provider/model
 configuration order, or the first configured decision adapter alias when no
 native decider exists. Requests fail if neither is configured.
 
 | Question type | Required fields | Result |
 |---------------|-----------------|--------|
-| `predicate` | `instructions` | `probability` that the condition is true |
+| `predicate` / `binary` | `instructions` | `probability` that the condition is true |
 | `choice` | `instructions`, `choices` containing string or boolean `value` and optional `description` | `choice`, `probabilities`, `confidence` |
-| `score` | `instructions`, ordered `levels` containing `label` and optional `description` | `score`, `probabilities`, `confidence` |
+| `score` | `instructions`, ordered `levels` containing `label` (or integer `value`) and optional `description` | `score`, `probabilities`, `confidence` |
 
-Questions may include a `name`. Answers preserve question order and names;
-unnamed answers use `name: null`. A question may return `type: refusal`.
-`input` accepts a string or user messages with `input_text` and `input_image`
-parts. Images require base64 data URLs, with at most 128 images per request.
+Questions may include an `id` or `name`. Answers preserve question order, `id`,
+and `name`; unnamed answers use `name: null`. A question may return `type: refusal` or `type: error`.
+`input` accepts a string or messages (`user`, `assistant`, `developer`, `system`)
+and tool call/output items with `input_text`, `output_text`, `refusal`, `input_json`,
+and `input_image` parts. Question `instructions` also accept a string or an array
+of `input_text`, `input_json`, and `input_image` parts. Images require base64 data
+URLs or publicly accessible HTTP(S) URLs, with at most 128 images across shared
+input and question instructions, and at most 400 questions per request.
+`input_json` accepts an object or array of objects; nested keys remain ordinary data.
+
+Prompt caching supports `prompt_cache_key`, `prompt_cache_options` (`mode`: `implicit`
+or `explicit`, `ttl`: `30m` or `12h`), and `prompt_cache_breakpoint: {"mode":"explicit"}`
+on shared text and image parts. Question instructions cannot contain cache
+breakpoints. Usage includes cache reads and writes within the input token total.
 
 Configure a native OpenAI decision model:
 
@@ -719,7 +732,7 @@ curl -X POST -H "Content-Type: application/json" \
 
 Evaluate application state with typed questions using a configured native decision
 model or an explicitly enabled completion or embedding adapter. Requests and
-responses follow the [TypeSafe System One format](https://docs.typesafe.ai/api).
+responses follow the [TypeSafe System One format](https://docs.typesafe.ai/api/system-one).
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -729,13 +742,20 @@ responses follow the [TypeSafe System One format](https://docs.typesafe.ai/api).
 
 Each question has a `type`, optional `instructions`, and `criteria` as required
 for its type. Instructions and criterion descriptions may be text, structured
-JSON, or null.
+JSON, or null. Supply images in an optional `assets` map, keyed by placeholders
+used in `state`, instructions, or criteria. Each asset has `type: "image"`,
+`format: "png"`, `"jpg"`, or `"jpeg"`, and `data_base64`. The TypeSafe provider
+sets `TypeSafe-Danger-Zone-Images: true` when sending images or box questions.
+Multipart requests contain the JSON as the first part named `request` and images
+as additional named parts; assets reference these with `part` instead of
+`data_base64`. Every image part must be used by exactly one asset.
 
-| Type | Criteria | Answer |
-|------|----------|--------|
+| Type | Criteria / Options | Answer |
+|------|--------------------|--------|
 | `noul` (yes/no) | Optional object with `true` and/or `false` descriptions | `noul`: probability of yes |
 | `choice` | Object of 1–255 named options with descriptions | `choice`: selected option; `probabilities`, `confidence` |
-| `score` | Array of 2–10 ordered level descriptions | `score`: weighted level index; `legend`, `probabilities`, `confidence` |
+| `score` | Array of 1–10 ordered level descriptions | `score`: weighted level index; `legend`, `probabilities`, `confidence` |
+| `box` | Locate an object in the supplied image asset | `box`: `{top, bottom, left, right}` as fractions from 0 to 1; `confidence`: number or null |
 
 Each answer also includes its `type`.
 

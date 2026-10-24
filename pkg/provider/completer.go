@@ -193,6 +193,8 @@ type Content struct {
 	CacheControl *CacheControl
 
 	Text string
+	// JSON preserves typed decision evidence; Text holds its fallback rendering.
+	JSON string
 	// TextPresent distinguishes an explicit empty output_text part from a
 	// message-start marker that has not produced any content yet.
 	TextPresent bool
