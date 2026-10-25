@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	exasearch "github.com/adrianliechti/wingman/pkg/searcher/exa"
+	"github.com/adrianliechti/wingman/pkg/searcher/exa"
 	"github.com/adrianliechti/wingman/test/webtest"
 )
 
@@ -22,7 +22,7 @@ func TestCurrentExaProviderThroughHandler(t *testing.T) {
 			calls := 0
 			client := &http.Client{Transport: exaTransport(func(r *http.Request) (*http.Response, error) {
 				calls++
-				var body exasearch.SearchRequest
+				var body exa.SearchRequest
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Fatal(err)
 				}
@@ -34,7 +34,7 @@ func TestCurrentExaProviderThroughHandler(t *testing.T) {
 				}
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"results":[{"id":"https://example.com","url":"https://example.com","title":"Example","highlights":["Selected evidence"],"text":"Complete page"},{"url":"https://example.com/redundant","highlights":[],"text":"Redundant page"}]}`))}, nil
 			})}
-			p, err := exasearch.New("test", exasearch.WithClient(client), exasearch.WithMode(mode))
+			p, err := exa.New("test", exa.WithClient(client), exa.WithMode(mode))
 			if err != nil {
 				t.Fatal(err)
 			}

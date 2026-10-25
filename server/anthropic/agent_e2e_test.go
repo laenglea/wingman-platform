@@ -12,7 +12,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/agent/assistant"
 	"github.com/adrianliechti/wingman/pkg/agent/react"
 	"github.com/adrianliechti/wingman/pkg/provider"
-	claude "github.com/adrianliechti/wingman/pkg/provider/anthropic"
+	"github.com/adrianliechti/wingman/pkg/provider/anthropic"
 	"github.com/adrianliechti/wingman/pkg/provider/openai"
 	"github.com/stretchr/testify/require"
 )
@@ -86,7 +86,7 @@ func TestHostedSearchThenAgentToolE2E(t *testing.T) {
 					var backend provider.Completer
 					var err error
 					if backendName == "claude" {
-						backend, err = claude.NewCompleter("https://upstream.invalid", "claude-fable-5-1", claude.WithClient(client), claude.WithMaxRetries(0))
+						backend, err = anthropic.NewCompleter("https://upstream.invalid", "claude-fable-5-1", anthropic.WithClient(client), anthropic.WithMaxRetries(0))
 					} else {
 						backend, err = openai.NewResponder("https://upstream.invalid", "gpt-5.4", openai.WithClient(client), openai.WithMaxRetries(0))
 					}

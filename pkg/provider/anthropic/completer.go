@@ -43,9 +43,14 @@ func NewCompleter(url, model string, options ...Option) (*Completer, error) {
 		option(cfg)
 	}
 
+	sdkOptions, err := cfg.Options()
+	if err != nil {
+		return nil, err
+	}
+
 	return &Completer{
 		Config:   cfg,
-		messages: anthropic.NewBetaMessageService(cfg.Options()...),
+		messages: anthropic.NewBetaMessageService(sdkOptions...),
 	}, nil
 }
 

@@ -10,8 +10,8 @@ import (
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/pkg/policy/noop"
 	"github.com/adrianliechti/wingman/pkg/provider"
-	claude "github.com/adrianliechti/wingman/pkg/provider/anthropic"
-	openai "github.com/adrianliechti/wingman/pkg/provider/openai"
+	"github.com/adrianliechti/wingman/pkg/provider/anthropic"
+	"github.com/adrianliechti/wingman/pkg/provider/openai"
 	"github.com/adrianliechti/wingman/test/harness"
 )
 
@@ -34,7 +34,7 @@ func TestPortableCacheRequests(t *testing.T) {
 			var backend provider.Completer
 			var err error
 			if model == "claude-sonnet-4-6" {
-				backend, err = claude.NewCompleter(upstream.URL, model, claude.WithToken("test"), claude.WithMaxRetries(0))
+				backend, err = anthropic.NewCompleter(upstream.URL, model, anthropic.WithToken("test"), anthropic.WithMaxRetries(0))
 			} else {
 				backend, err = openai.NewResponder(upstream.URL, model, openai.WithToken("test"), openai.WithMaxRetries(0))
 			}

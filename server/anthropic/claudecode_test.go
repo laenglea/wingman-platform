@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	upstream "github.com/adrianliechti/wingman/pkg/provider/anthropic"
+	"github.com/adrianliechti/wingman/pkg/provider/anthropic"
 )
 
 // Exercise the envelope emitted by Claude Code, including advisory metadata,
@@ -35,7 +35,7 @@ func TestClaudeCodeRequestE2E(t *testing.T) {
 					t.Errorf("lost thinking retention or beta: %v, %v", edits, req.Header.Values("Anthropic-Beta"))
 				}
 			})
-			p, err := upstream.NewCompleter("https://upstream.invalid", "claude-sonnet-4-6", upstream.WithClient(client))
+			p, err := anthropic.NewCompleter("https://upstream.invalid", "claude-sonnet-4-6", anthropic.WithClient(client))
 			if err != nil {
 				t.Fatal(err)
 			}
