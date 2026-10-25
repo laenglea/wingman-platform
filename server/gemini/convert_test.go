@@ -253,4 +253,3 @@ func TestToMessagesFunctionResponseForcesUserRole(t *testing.T) {
 		t.Fatalf("messages[2] tool result = %+v, %v", result, ok)
 	}
 }
-

@@ -2,14 +2,15 @@ package compatibility_test
 
 import (
 	"fmt"
+	"net/http"
+	"strings"
+	"testing"
+
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/pkg/policy/noop"
 	ab "github.com/adrianliechti/wingman/pkg/provider/anthropic"
 	ah "github.com/adrianliechti/wingman/test/anthropic"
 	"github.com/adrianliechti/wingman/test/harness"
-	"net/http"
-	"strings"
-	"testing"
 )
 
 func TestAnthropicCitationVersions(t *testing.T) {

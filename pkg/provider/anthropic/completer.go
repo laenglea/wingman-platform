@@ -22,8 +22,8 @@ import (
 	"github.com/adrianliechti/wingman/pkg/provider/tools/texteditor"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/toolsearch"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/v2"
+	"github.com/anthropics/anthropic-sdk-go/v2/option"
 )
 
 var _ provider.Completer = (*Completer)(nil)
@@ -678,20 +678,18 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 			if !slices.Contains(req.Betas, "mid-conversation-output-config-2026-07-01") {
 				req.Betas = append(req.Betas, "mid-conversation-output-config-2026-07-01")
 			}
-			var blocks []anthropic.BetaContentBlockParamUnion
+			var blocks []anthropic.BetaSystemMessageParamContentUnion
 			for _, content := range m.Content {
 				if content.Text != "" {
-					blocks = append(blocks, anthropic.NewBetaTextBlock(content.Text))
+					blocks = append(blocks, anthropic.BetaSystemMessageParamContentUnion{OfText: &anthropic.BetaTextBlockParam{Text: content.Text}})
 				}
 				if content.Instructions != nil {
-					blocks = append(blocks, anthropic.NewBetaTextBlock(content.Instructions.Text))
+					blocks = append(blocks, anthropic.BetaSystemMessageParamContentUnion{OfText: &anthropic.BetaTextBlockParam{Text: content.Instructions.Text}})
 				}
 			}
-			if blocks == nil {
-				blocks = []anthropic.BetaContentBlockParamUnion{}
-			}
-			update := anthropic.BetaMessageParam{Role: anthropic.BetaMessageParamRoleSystem, Content: blocks}
-			update.SetExtraFields(map[string]any{"output_config": map[string]any{"effort": outputEffort(effort)}})
+			update := anthropic.NewBetaSystemMessage(anthropic.BetaSystemMessageOutputConfigParam{
+				Effort: anthropic.BetaSystemMessageOutputConfigEffort(outputEffort(effort)),
+			}, blocks...)
 			messages = append(messages, update)
 			continue
 		}
@@ -727,22 +725,21 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				break
 			}
 
-			blocks := make([]anthropic.BetaContentBlockParamUnion, len(texts))
+			blocks := make([]anthropic.BetaSystemMessageParamContentUnion, len(texts))
 			for i := range texts {
-				blocks[i] = anthropic.BetaContentBlockParamUnion{OfText: &texts[i]}
+				blocks[i] = anthropic.BetaSystemMessageParamContentUnion{OfText: &texts[i]}
 			}
 
-			message := anthropic.BetaMessageParam{
-				Role:    anthropic.BetaMessageParamRoleSystem,
+			message := anthropic.BetaSystemMessageParam{
 				Content: blocks,
 			}
 			if turnScoped {
-				message.SetExtraFields(map[string]any{"clear_at": "next_user_message"})
+				message.ClearAt = anthropic.BetaSystemMessageParamClearAtNextUserMessage
 				if !slices.Contains(req.Betas, "mid-conversation-system-clear-at-2026-08-21") {
 					req.Betas = append(req.Betas, "mid-conversation-system-clear-at-2026-08-21")
 				}
 			}
-			messages = append(messages, message)
+			messages = append(messages, anthropic.BetaMessageParam{OfSystem: &message})
 
 		case provider.MessageRoleUser:
 			// tool_result blocks must precede other content in a user message
@@ -791,10 +788,11 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 							// Responses represents hosted results as separate input
 							// items; Claude keeps them in the assistant's turn.
 							block := toolSearchResultBlock(*c.ToolResult)
-							if len(messages) > 0 && messages[len(messages)-1].Role == anthropic.BetaMessageParamRoleAssistant {
-								messages[len(messages)-1].Content = append(messages[len(messages)-1].Content, block)
+							if len(messages) > 0 && messages[len(messages)-1].OfAssistant != nil {
+								assistant := messages[len(messages)-1].OfAssistant
+								assistant.Content = append(assistant.Content, block)
 							} else {
-								messages = append(messages, anthropic.BetaMessageParam{Role: anthropic.BetaMessageParamRoleAssistant, Content: []anthropic.BetaContentBlockParamUnion{block}})
+								messages = append(messages, anthropic.BetaMessageParam{OfAssistant: &anthropic.BetaAssistantMessageParam{Content: []anthropic.BetaContentBlockParamUnion{block}}})
 							}
 							continue
 						}
@@ -965,15 +963,15 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				}
 			}
 
-			message := anthropic.BetaMessageParam{
-				Role:    anthropic.BetaMessageParamRoleAssistant,
+			message := anthropic.BetaAssistantMessageParam{
 				Content: blocks,
 			}
 
-			if len(messages) > 0 && messages[len(messages)-1].Role == message.Role {
-				messages[len(messages)-1].Content = append(messages[len(messages)-1].Content, message.Content...)
+			if len(messages) > 0 && messages[len(messages)-1].OfAssistant != nil {
+				assistant := messages[len(messages)-1].OfAssistant
+				assistant.Content = append(assistant.Content, message.Content...)
 			} else {
-				messages = append(messages, message)
+				messages = append(messages, anthropic.BetaMessageParam{OfAssistant: &message})
 			}
 		}
 	}

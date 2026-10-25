@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/v2"
 )
 
 // Keep the native wire variant inside the opaque continuation value. The shared
@@ -35,8 +35,7 @@ func compactionParam(compaction *provider.Compaction) (anthropic.BetaContentBloc
 	}
 	signature, signed := UnwrapCompactionSignature(compaction.Signature)
 	if signed {
-		// The pinned SDK predates the signed compaction wire field.
-		block.SetExtraFields(map[string]any{"signature": signature})
+		block.Signature = anthropic.String(signature)
 	} else if signature != "" {
 		block.EncryptedContent = anthropic.String(signature)
 	}

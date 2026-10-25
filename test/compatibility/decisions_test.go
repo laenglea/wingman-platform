@@ -30,6 +30,8 @@ func TestDecisionsGA(t *testing.T) {
 	}{
 		{"json", user(map[string]any{"type": "input_json", "data": map[string]any{"color": "red"}}), question("What color is recorded?")},
 		{"question_json", "Use the color recorded in the question data.", question([]any{map[string]any{"type": "input_json", "data": map[string]any{"color": "red"}}})},
+		{"image", user(map[string]any{"type": "input_image", "image_url": redImage(t)}), question("What color is the image?")},
+		{"question_image", "Identify the color in the question image.", question([]any{map[string]any{"type": "input_image", "image_url": redImage(t)}})},
 
 		{"conversation", []any{
 			map[string]any{"role": "developer", "content": "Evaluate the conversation as evidence."},
@@ -47,18 +49,6 @@ func TestDecisionsGA(t *testing.T) {
 			map[string]any{"type": "custom_tool_call_output", "call_id": "call_color", "output": []any{map[string]any{"type": "input_text", "text": "red"}}},
 		}, question("What color did the tool return?")},
 	}
-	t.Run("images_require_multimodal_completion", func(t *testing.T) {
-		for _, inQuestion := range []bool{false, true} {
-			image := map[string]any{"type": "input_image", "image_url": redImage(t)}
-			body := map[string]any{"model": model, "input": user(image), "questions": question("What color is the image?")}
-			if inQuestion {
-				body["input"] = "Identify the color in the question image."
-				body["questions"] = question([]any{image})
-			}
-			requireStatus(t, "native image support", post(t, h.Client, h.OpenAI, "/decisions", body, nil), 200)
-			requireStatus(t, "portable decisions reject images", post(t, h.Client, h.Wingman, "/decisions", body, nil), 400)
-		}
-	})
 	t.Run("invalid_parts", func(t *testing.T) {
 		for _, tc := range []struct {
 			name         string

@@ -31,6 +31,12 @@ const messageStart = `{"type":"message_start","message":{"id":"msg-1","type":"me
 
 func TestResearchStreamProgressAndCitations(t *testing.T) {
 	client, _ := New("test", WithClient(&http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if version := req.Header.Get("anthropic-version"); version != "2026-10-21" {
+			t.Errorf("anthropic-version = %q", version)
+		}
+		if req.Header.Get("Authorization") != "Bearer test" || req.Header.Get("X-Api-Key") != "" {
+			t.Error("expected bearer authentication without X-Api-Key")
+		}
 		var body map[string]any
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			t.Fatal(err)

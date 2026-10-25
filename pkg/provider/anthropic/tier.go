@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/v2"
 )
 
 func speed(tier provider.Tier) anthropic.BetaMessageNewParamsSpeed {

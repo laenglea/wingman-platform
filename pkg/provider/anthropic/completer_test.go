@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/v2"
 )
 
 func sseEvent(eventType, data string) string {
@@ -39,6 +39,12 @@ func TestCompleterStreaming(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if version := r.Header.Get("anthropic-version"); version != "2026-10-21" {
+			t.Errorf("anthropic-version = %q", version)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-key" || r.Header.Get("X-Api-Key") != "" {
+			t.Error("expected bearer authentication without X-Api-Key")
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		for _, e := range events {
 			w.Write([]byte(e))
@@ -46,7 +52,7 @@ func TestCompleterStreaming(t *testing.T) {
 	}))
 	defer server.Close()
 
-	completer, err := NewCompleter(server.URL, "claude-test")
+	completer, err := NewCompleter(server.URL, "claude-test", WithToken("test-key"))
 	if err != nil {
 		t.Fatalf("new completer: %v", err)
 	}

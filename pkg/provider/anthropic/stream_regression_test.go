@@ -136,7 +136,7 @@ func TestToolReplayPreservesJSONNumbers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := json.Marshal(req.Messages[0].Content[0].OfToolUse.Input)
+	data, err := json.Marshal(req.Messages[0].OfAssistant.Content[0].OfToolUse.Input)
 	if err != nil {
 		t.Fatal(err)
 	}
