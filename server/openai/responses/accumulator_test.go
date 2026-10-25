@@ -827,3 +827,60 @@ func TestStreamingAccumulatorSnapshotPreservesMixedItemOrder(t *testing.T) {
 		t.Fatalf("streamed order = %s, want %s", got, want)
 	}
 }
+
+// Chat-completion tool parsers (vLLM's qwen3_coder among them) emit the newline
+// after a tool call as a trailing content delta. The message item was already
+// closed when the call started, so every item reported done must reappear
+// unchanged in the final snapshot, as Responses clients verify.
+func TestStreamingAccumulatorTrailingTextAfterClosedMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		trailing string
+		items    int
+	}{
+		{name: "whitespace is dropped", trailing: "\n", items: 2},
+		{name: "text starts a new item", trailing: "\nDone.", items: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var ids messageIDs
+			var streamed []string
+			acc := NewStreamingAccumulator(func(e StreamEvent) error {
+				switch e.Type {
+				case StreamEventOutputItemDone:
+					streamed = append(streamed, "message:"+ids.get(e.MessageIndex, e.MessageID)+":"+e.Text)
+				case StreamEventFunctionCallDone:
+					streamed = append(streamed, "function_call:fc_"+e.ToolCallID+":"+e.Arguments)
+				}
+				return nil
+			})
+			for _, part := range []provider.Content{
+				{Text: "Hello.\n"},
+				provider.ToolCallContent(provider.ToolCall{ID: "call_1", Name: "search", Arguments: "{}"}),
+				{Text: tc.trailing},
+			} {
+				if err := acc.Add(provider.Completion{Message: &provider.Message{Content: []provider.Content{part}}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := acc.Complete(); err != nil {
+				t.Fatal(err)
+			}
+
+			var final []string
+			for _, item := range responseOutputs(acc.Result().Message, &ids, "completed", responseOutputOptions{}) {
+				switch item.Type {
+				case ResponseOutputTypeMessage:
+					final = append(final, "message:"+item.OutputMessage.ID+":"+item.OutputMessage.Contents[0].Text)
+				case ResponseOutputTypeFunctionCall:
+					final = append(final, "function_call:"+item.FunctionCallOutputItem.ID+":"+item.FunctionCallOutputItem.Arguments)
+				}
+			}
+			if len(final) != tc.items {
+				t.Fatalf("final items = %d, want %d: %q", len(final), tc.items, final)
+			}
+			if got, want := strings.Join(final, "\n"), strings.Join(streamed, "\n"); got != want {
+				t.Fatalf("final items:\n%s\nwant streamed done items:\n%s", got, want)
+			}
+		})
+	}
+}

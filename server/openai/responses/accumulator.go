@@ -685,15 +685,11 @@ func (s *StreamingAccumulator) closeMessage() error {
 		return nil
 	}
 
-	if s.message.streamedText.Len() == 0 && s.message.streamedRefusal.Len() == 0 {
-		return nil
-	}
-
 	s.message.messageClosed = true
 	text := s.message.streamedText.String()
 	refusal := s.message.streamedRefusal.String()
 
-	if s.message.streamedText.Len() > 0 {
+	if s.message.hasContentPart {
 		if err := s.emitEvent(StreamEvent{
 			Type:         StreamEventTextDone,
 			Text:         text,
@@ -713,7 +709,7 @@ func (s *StreamingAccumulator) closeMessage() error {
 		}
 	}
 
-	if s.message.streamedRefusal.Len() > 0 {
+	if s.message.hasRefusalPart {
 		if err := s.emitEvent(StreamEvent{
 			Type:         StreamEventRefusalDone,
 			RefusalText:  refusal,
@@ -946,70 +942,14 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 		}
 
 		if content.Refusal != "" {
-			if err := s.closeCompaction(); err != nil {
+			if err := s.addMessagePart(partRefusal, content.Refusal); err != nil {
 				return err
-			}
-
-			if s.message.streamedRefusal.Len() == 0 && s.message.streamedText.Len() == 0 {
-				s.message.refusalFirst = true
-			}
-			s.message.streamedRefusal.WriteString(content.Refusal)
-
-			if len(s.toolCalls) == 0 || s.message.id != "" {
-				if err := s.closeReasoning(); err != nil {
-					return err
-				}
-
-				if err := s.ensureMessageItem(); err != nil {
-					return err
-				}
-				if err := s.ensureMessageRefusalPart(); err != nil {
-					return err
-				}
-
-				if err := s.emitEvent(StreamEvent{
-					Type:         StreamEventRefusalDelta,
-					Delta:        content.Refusal,
-					OutputIndex:  s.message.messageOutputIndex,
-					ContentIndex: s.refusalContentIndex(),
-				}); err != nil {
-					return err
-				}
 			}
 		}
 
-		// Native message IDs identify a new item even after tool calls.
-		// Stream these messages in place so subsequent signed reasoning
-		// retains its position. ID-less trailing text is flushed at completion.
 		if content.Text != "" || content.TextPresent {
-			if err := s.closeCompaction(); err != nil {
+			if err := s.addMessagePart(partText, content.Text); err != nil {
 				return err
-			}
-
-			s.message.streamedText.WriteString(content.Text)
-
-			if len(s.toolCalls) == 0 || s.message.id != "" {
-				if err := s.closeReasoning(); err != nil {
-					return err
-				}
-
-				if err := s.ensureMessageItem(); err != nil {
-					return err
-				}
-				if err := s.ensureMessageContentPart(); err != nil {
-					return err
-				}
-
-				if content.Text != "" {
-					if err := s.emitEvent(StreamEvent{
-						Type:         StreamEventTextDelta,
-						Delta:        content.Text,
-						OutputIndex:  s.message.messageOutputIndex,
-						ContentIndex: s.textContentIndex(),
-					}); err != nil {
-						return err
-					}
-				}
 			}
 		}
 
@@ -1170,6 +1110,87 @@ func (s *StreamingAccumulator) beginMessage(id string, phase provider.MessagePha
 	return nil
 }
 
+// detachClosedMessage starts a new item for text arriving after the current
+// message was closed by a tool call. The closed item already streamed its done
+// event, so growing it would make the final snapshot disagree with the stream.
+func (s *StreamingAccumulator) detachClosedMessage() {
+	if !s.message.messageClosed {
+		return
+	}
+
+	s.message = &streamMessage{}
+	s.messages = append(s.messages, s.message)
+}
+
+type messagePart int
+
+const (
+	partText messagePart = iota
+	partRefusal
+)
+
+// addMessagePart records a streamed text or refusal delta. Without tool calls,
+// or with a native message ID, it streams in place; ID-less text after tool
+// calls is withheld and flushed at completion so items stay sequential.
+func (s *StreamingAccumulator) addMessagePart(part messagePart, delta string) error {
+	if err := s.closeCompaction(); err != nil {
+		return err
+	}
+
+	s.detachClosedMessage()
+
+	if part == partRefusal {
+		if s.message.streamedRefusal.Len() == 0 && s.message.streamedText.Len() == 0 {
+			s.message.refusalFirst = true
+		}
+		s.message.streamedRefusal.WriteString(delta)
+	} else {
+		s.message.streamedText.WriteString(delta)
+	}
+
+	if len(s.toolCalls) > 0 && s.message.id == "" {
+		return nil
+	}
+
+	if err := s.closeReasoning(); err != nil {
+		return err
+	}
+
+	return s.emitMessagePart(part, delta, true)
+}
+
+// emitMessagePart opens the message item and the part, then streams the delta.
+// present opens an explicit empty text part without a delta.
+func (s *StreamingAccumulator) emitMessagePart(part messagePart, delta string, present bool) error {
+	if delta == "" && !present {
+		return nil
+	}
+
+	if err := s.ensureMessageItem(); err != nil {
+		return err
+	}
+
+	event := StreamEvent{Delta: delta, OutputIndex: s.message.messageOutputIndex}
+
+	if part == partRefusal {
+		if err := s.ensureMessageRefusalPart(); err != nil {
+			return err
+		}
+		event.Type, event.ContentIndex = StreamEventRefusalDelta, s.refusalContentIndex()
+	} else {
+		if err := s.ensureMessageContentPart(); err != nil {
+			return err
+		}
+		event.Type, event.ContentIndex = StreamEventTextDelta, s.textContentIndex()
+	}
+
+	if delta == "" {
+		return nil
+	}
+
+	return s.emitEvent(event)
+}
+
 // nextMessage closes the current message item and starts a new one.
 func (s *StreamingAccumulator) nextMessage(id string, phase provider.MessagePhase) error {
 	if err := s.flushMessage(); err != nil {
@@ -1183,8 +1204,6 @@ func (s *StreamingAccumulator) nextMessage(id string, phase provider.MessagePhas
 }
 
 func (s *StreamingAccumulator) flushMessage() error {
-	text := s.message.streamedText.String()
-
 	if err := s.closeReasoning(); err != nil {
 		return err
 	}
@@ -1199,56 +1218,37 @@ func (s *StreamingAccumulator) flushMessage() error {
 		}
 	}
 
-	if (s.message.streamedText.Len() > 0 || s.message.streamedRefusal.Len() > 0) && !s.message.hasOutputItem {
-		if err := s.ensureMessageItem(); err != nil {
-			return err
+	if !s.message.hasOutputItem {
+		text, refusal := s.message.streamedText.String(), s.message.streamedRefusal.String()
+
+		// Tool-call parsers leak the newline after a call; it is not a message.
+		if refusal == "" && strings.TrimSpace(text) == "" {
+			s.message.streamedText.Reset()
+			return nil
 		}
 
-		emitText := func() error {
-			if s.message.streamedText.Len() == 0 {
-				return nil
-			}
-			if err := s.ensureMessageContentPart(); err != nil {
-				return err
-			}
-			return s.emitEvent(StreamEvent{
-				Type:         StreamEventTextDelta,
-				Delta:        text,
-				OutputIndex:  s.message.messageOutputIndex,
-				ContentIndex: s.textContentIndex(),
-			})
+		// The snapshot splits items by ID; without one, withheld text would
+		// fold into the message that preceded the tool calls.
+		if s.message.id == "" {
+			s.message.id = "msg_" + uuid.NewString()
 		}
-		emitRefusal := func() error {
-			if s.message.streamedRefusal.Len() == 0 {
-				return nil
-			}
-			if err := s.ensureMessageRefusalPart(); err != nil {
-				return err
-			}
-			return s.emitEvent(StreamEvent{
-				Type:         StreamEventRefusalDelta,
-				Delta:        s.message.streamedRefusal.String(),
-				OutputIndex:  s.message.messageOutputIndex,
-				ContentIndex: s.refusalContentIndex(),
-			})
-		}
-		first, second := emitText, emitRefusal
+
+		parts := []messagePart{partText, partRefusal}
 		if s.message.refusalFirst {
-			first, second = emitRefusal, emitText
+			parts[0], parts[1] = parts[1], parts[0]
 		}
-		if err := first(); err != nil {
-			return err
-		}
-		if err := second(); err != nil {
-			return err
+		for _, part := range parts {
+			delta := text
+			if part == partRefusal {
+				delta = refusal
+			}
+			if err := s.emitMessagePart(part, delta, false); err != nil {
+				return err
+			}
 		}
 	}
 
-	if err := s.closeMessage(); err != nil {
-		return err
-	}
-
-	return nil
+	return s.closeMessage()
 }
 
 func (s *StreamingAccumulator) Error(err error) error {
