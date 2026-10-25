@@ -4,6 +4,12 @@ Temperature, top-p, and top-k controls are unsupported across all endpoints; mod
 
 OpenAI-compatible endpoints. See [OpenAI API Reference](https://platform.openai.com/docs/api-reference) for full documentation.
 
+All API routes, including Anthropic, Gemini, and native routes, accept request
+compression through `Content-Encoding: gzip`, `x-gzip`, or `zstd`, for both JSON
+and multipart bodies. Only one encoding layer is accepted; unsupported or stacked
+encodings return `415`. The zstd window is limited to 8 MiB. Requests are decoded
+as a stream, preserving support for larger uploads.
+
 ## Models
 
 **Endpoints:** `GET /v1/models`, `GET /v1/models/{id}`

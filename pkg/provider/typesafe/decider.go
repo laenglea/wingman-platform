@@ -268,13 +268,19 @@ func (d *Decider) evaluate(ctx context.Context, data []byte, images bool) (*deci
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		upstream := &provider.ProviderError{Code: resp.StatusCode, Message: string(data)}
 		var envelope struct {
-			Error struct {
+			Detail json.RawMessage `json:"detail"`
+			Error  struct {
 				Message string `json:"message"`
 				Type    string `json:"type"`
 			} `json:"error"`
 		}
-		if json.Unmarshal(data, &envelope) == nil && envelope.Error.Message != "" {
-			upstream.Message, upstream.Type = envelope.Error.Message, envelope.Error.Type
+		if json.Unmarshal(data, &envelope) == nil {
+			if len(envelope.Detail) > 0 && string(envelope.Detail) != "null" {
+				detail := &APIError{Detail: envelope.Detail}
+				upstream.Message, upstream.Type, upstream.Err = detail.Error(), detail.errorType(), detail
+			} else if envelope.Error.Message != "" {
+				upstream.Message, upstream.Type = envelope.Error.Message, envelope.Error.Type
+			}
 		}
 		if upstream.Message == "" {
 			upstream.Message = fmt.Sprintf("decision API returned HTTP %d", resp.StatusCode)
