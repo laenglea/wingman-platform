@@ -5,7 +5,7 @@ import (
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/v2"
 )
 
 // The stable prefix is cached automatically on every request; extended

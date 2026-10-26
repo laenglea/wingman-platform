@@ -15,9 +15,9 @@ import (
 	"github.com/adrianliechti/wingman/pkg/guard/custom"
 	"github.com/adrianliechti/wingman/pkg/researcher"
 
-	api "go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
-	sdk "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"google.golang.org/grpc"
 )
@@ -125,11 +125,11 @@ func TestWebProviderGuardConfiguration(t *testing.T) {
 		for _, guarded := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/guarded=%v", family, guarded), func(t *testing.T) {
 				recorder := tracetest.NewSpanRecorder()
-				provider := sdk.NewTracerProvider(sdk.WithSpanProcessor(recorder))
-				previous := api.GetTracerProvider()
-				api.SetTracerProvider(provider)
+				provider := trace.NewTracerProvider(trace.WithSpanProcessor(recorder))
+				previous := otel.GetTracerProvider()
+				otel.SetTracerProvider(provider)
 				t.Cleanup(func() {
-					api.SetTracerProvider(previous)
+					otel.SetTracerProvider(previous)
 					_ = provider.Shutdown(context.Background())
 				})
 				previousClient := http.DefaultClient

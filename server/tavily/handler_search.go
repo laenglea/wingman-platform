@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/adrianliechti/wingman/pkg/searcher"
-	searchtavily "github.com/adrianliechti/wingman/pkg/searcher/tavily"
+	"github.com/adrianliechti/wingman/pkg/searcher/tavily"
 	"github.com/adrianliechti/wingman/server/web"
 	"github.com/google/uuid"
 )
@@ -58,7 +58,7 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 			web.WriteError(w, r, 400, "country is supported only with the general topic")
 			return
 		}
-		code, ok := searchtavily.CountryCode(request.Country)
+		code, ok := tavily.CountryCode(request.Country)
 		if !ok {
 			web.WriteError(w, r, 400, "unsupported country")
 			return

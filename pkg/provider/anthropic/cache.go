@@ -3,7 +3,7 @@ package anthropic
 import (
 	"github.com/adrianliechti/wingman/pkg/provider"
 
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/v2"
 )
 
 // cacheControl builds a breakpoint with the retention the client asked for:

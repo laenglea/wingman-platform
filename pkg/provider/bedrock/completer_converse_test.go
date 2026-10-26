@@ -340,4 +340,3 @@ func TestConvertConverseInput_ToolResultsPrecedeUserText(t *testing.T) {
 		t.Fatalf("tool[0] = %T %+v, want get_weather spec", req.ToolConfig.Tools[0], req.ToolConfig.Tools[0])
 	}
 }
-

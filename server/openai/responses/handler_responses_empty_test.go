@@ -70,12 +70,21 @@ func TestResponsesKeepEmptyFinalMessageAfterAsyncCall(t *testing.T) {
 				t.Fatal(err)
 			}
 			completed := false
+			itemDone := false
 			for _, event := range events {
+				if event.Event == "response.output_item.done" {
+					if item, _ := event.Data["item"].(map[string]any); item["id"] == "msg_empty" {
+						itemDone = true
+					}
+				}
 				if event.Event == "response.completed" {
 					response, _ := event.Data["response"].(map[string]any)
 					check(t, response)
 					completed = true
 				}
+			}
+			if !itemDone {
+				t.Fatal("empty message item was added but never done")
 			}
 			if !completed {
 				t.Fatal("missing completed response")

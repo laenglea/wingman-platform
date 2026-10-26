@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/v2"
 )
 
 func TestCompactionTriggerAndReplay(t *testing.T) {
@@ -30,10 +30,16 @@ func TestCompactionTriggerAndReplay(t *testing.T) {
 		if len(req.Betas) != 1 || req.Betas[0] != "compact-2026-09-04" {
 			t.Fatalf("replay beta = %v", req.Betas)
 		}
-		data, _ := json.Marshal(req.Messages[0].Content[0])
-		var replay map[string]any
+		data, _ := json.Marshal(req.Messages[0])
+		var replay struct {
+			Role    string           `json:"role"`
+			Content []map[string]any `json:"content"`
+		}
 		_ = json.Unmarshal(data, &replay)
-		if replay["signature"] != "signed-summary" || replay["content"] != "ALPHA-7" || replay["encrypted_content"] != nil {
+		if replay.Role != string(role) || len(replay.Content) != 1 {
+			t.Fatalf("replay message changed: %s", data)
+		}
+		if replay.Content[0]["signature"] != "signed-summary" || replay.Content[0]["content"] != "ALPHA-7" || replay.Content[0]["encrypted_content"] != nil {
 			t.Fatalf("signed block changed: %s", data)
 		}
 		if _, err := c.convertMessageRequest(messages, &provider.CompleteOptions{CompactionOptions: &provider.CompactionOptions{Threshold: 50000}}); err == nil {

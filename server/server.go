@@ -83,6 +83,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	mux.Use(otelhttp.NewMiddleware("http"))
 	mux.Use(handleRouteTag)
+	mux.Use(handleRequestDecompression)
 	mux.Use(web.Credentials)
 	mux.Use(s.handleAuth)
 

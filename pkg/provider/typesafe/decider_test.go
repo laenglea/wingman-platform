@@ -116,6 +116,47 @@ func TestDeciderUpstreamErrors(t *testing.T) {
 	}
 }
 
+func TestDeciderTypeSafeErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, message, kind string
+		status                    int
+	}{
+		{"string", `{"detail":"Context too long"}`, "Context too long", "", 400},
+		{"object", `{"detail":{"message":"Context too long","code":"max_tokens_exceeded","limit":32768}}`, "Context too long", "max_tokens_exceeded", 400},
+		{"object type", `{"detail":{"msg":"Slow down","type":"rate_limit_error"}}`, "Slow down", "rate_limit_error", 429},
+		{"validation", `{"detail":[{"loc":["body","state"],"msg":"Field required","type":"missing"},{"loc":["body","questions","q","criteria",0],"msg":"Invalid level","type":"value_error"}]}`, "body.state: Field required; body.questions.q.criteria.0: Invalid level", "validation_error", 422},
+		{"unknown object", `{"detail":{"reason":"unavailable"}}`, `{"reason":"unavailable"}`, "", 503},
+		{"unknown list", `{"detail":[{"unknown":true}]}`, `[{"unknown":true}]`, "validation_error", 422},
+		{"null detail", `{"detail":null,"error":{"message":"Denied","type":"auth_error"}}`, "Denied", "auth_error", 401},
+		{"plain text", "Service unavailable", "Service unavailable", "", 503},
+		{"empty", "", "decision API returned HTTP 500", "", 500},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Retry-After", "2")
+				w.WriteHeader(tc.status)
+				io.WriteString(w, tc.body)
+			}))
+			defer upstream.Close()
+			d, _ := NewDecider(upstream.URL, "jev-latest", WithMaxRetries(0))
+			_, err := d.Decide(context.Background(), choiceInput())
+			var upstreamError *provider.ProviderError
+			if !errors.As(err, &upstreamError) || upstreamError.Code != tc.status || upstreamError.Message != tc.message || upstreamError.Type != tc.kind || upstreamError.RetryAfter != 2*time.Second {
+				t.Fatalf("unexpected error: %+v", upstreamError)
+			}
+			var envelope struct {
+				Detail json.RawMessage `json:"detail"`
+			}
+			json.Unmarshal([]byte(tc.body), &envelope)
+			var detailError *APIError
+			wantDetail := len(envelope.Detail) > 0 && string(envelope.Detail) != "null"
+			if errors.As(err, &detailError) != wantDetail || wantDetail && string(detailError.Detail) != string(envelope.Detail) {
+				t.Fatalf("lost structured detail: %v", err)
+			}
+		})
+	}
+}
+
 func TestDeciderRetriesTransientErrors(t *testing.T) {
 	for _, status := range []int{401, 422, 429, 529} {
 		t.Run(http.StatusText(status), func(t *testing.T) {

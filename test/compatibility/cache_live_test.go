@@ -12,7 +12,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/policy/noop"
 	"github.com/adrianliechti/wingman/pkg/provider"
 	claude "github.com/adrianliechti/wingman/pkg/provider/anthropic"
-	openai "github.com/adrianliechti/wingman/pkg/provider/openai"
+	"github.com/adrianliechti/wingman/pkg/provider/openai"
 	"github.com/adrianliechti/wingman/test/anthropic"
 	"github.com/adrianliechti/wingman/test/harness"
 )

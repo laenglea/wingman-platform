@@ -1,8 +1,9 @@
 package responses
 
 import (
-	"github.com/adrianliechti/wingman/pkg/provider"
 	"testing"
+
+	"github.com/adrianliechti/wingman/pkg/provider"
 )
 
 func TestCacheUsageSnapshots(t *testing.T) {

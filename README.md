@@ -370,6 +370,40 @@ providers:
       - claude-opus-5-5
 ```
 
+The `anthropic` provider also selects the Anthropic SDK's Bedrock integration
+from the URL hostname. `bedrock-runtime` uses InvokeModel with streaming;
+`bedrock-mantle` uses the native Messages API. The AWS region comes from the URL.
+
+```yaml
+providers:
+  - type: anthropic
+    url: https://bedrock-runtime.eu-north-1.amazonaws.com
+    token: ${AWS_BEARER_TOKEN_BEDROCK}
+    models:
+      claude-sonnet-5-5:
+        id: eu.anthropic.claude-sonnet-5-5
+
+  - type: anthropic
+    url: https://bedrock-mantle.eu-north-1.api.aws/anthropic
+    token: ${AWS_BEARER_TOKEN_BEDROCK}
+    models:
+      claude-sonnet-5:
+        id: anthropic.claude-sonnet-5
+```
+
+For AWS endpoints, `token` is a Bedrock API key and takes precedence over
+environment credentials. If omitted, the SDK uses `AWS_BEARER_TOKEN_BEDROCK`
+or the AWS credential chain. A regular Anthropic API key is for the Anthropic
+API, not Bedrock. Model IDs and regional availability differ by endpoint; see
+the AWS cards for [Sonnet 5.5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5-5.html)
+and [Sonnet 5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html).
+The separate `bedrock` provider below uses the Converse API.
+
+Run `ANTHROPIC_BEDROCK_LIVE=1 go test -v ./pkg/provider/anthropic -run TestBedrockLive -count=1`
+to test both SDK routes with streaming. It reads `AWS_BEARER_TOKEN_BEDROCK` and
+`AWS_REGION` from the environment or `.env`; `ANTHROPIC_BEDROCK_MODEL` and
+`ANTHROPIC_MANTLE_MODEL` override the example model IDs above for other regions.
+
 
 #### Google Gemini
 
