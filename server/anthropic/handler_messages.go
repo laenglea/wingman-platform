@@ -368,7 +368,7 @@ func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request,
 
 	for completion, err := range completer.Complete(r.Context(), messages, options) {
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
+			writeError(w, http.StatusBadGateway, err)
 			return
 		}
 
@@ -376,6 +376,10 @@ func (h *Handler) handleMessagesComplete(w http.ResponseWriter, r *http.Request,
 	}
 
 	completion := acc.Result()
+	if completion.Status == provider.CompletionStatusFailed {
+		writeError(w, http.StatusBadGateway, completionFailure(completion))
+		return
+	}
 
 	result := Message{
 		ID: generateMessageID(),
@@ -517,7 +521,7 @@ func (h *Handler) handleMessagesStream(w http.ResponseWriter, r *http.Request, r
 	for completion, err := range completer.Complete(r.Context(), messages, options) {
 		if err != nil {
 			if !headersSent {
-				writeError(w, http.StatusBadRequest, err)
+				writeError(w, http.StatusBadGateway, err)
 				return
 			}
 
@@ -542,6 +546,13 @@ func (h *Handler) handleMessagesStream(w http.ResponseWriter, r *http.Request, r
 		accumulator.Error(err)
 		return
 	}
+}
+
+func completionFailure(completion *provider.Completion) error {
+	if completion.StopDetails != nil && completion.StopDetails.Type != "" {
+		return fmt.Errorf("the model stopped generating: %s", completion.StopDetails.Type)
+	}
+	return fmt.Errorf("the model stopped generating without a usable result")
 }
 
 func cacheCreation(usage *provider.Usage) *CacheCreation {
