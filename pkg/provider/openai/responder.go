@@ -103,8 +103,25 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 		var reasoningContext provider.ReasoningContext
 		var tier provider.Tier
 		var searchCallID string
+		emittedToolCalls := make(map[string]provider.ToolCall)
 
 		emit := func(content provider.Content, status provider.CompletionStatus) bool {
+			if call := content.ToolCall; call != nil && call.ID != "" {
+				seen := emittedToolCalls[call.ID]
+				seen.ID = call.ID
+				if call.Name != "" {
+					seen.Name = call.Name
+				}
+				if call.Kind != "" {
+					seen.Kind = call.Kind
+				}
+				if call.Namespace != "" {
+					seen.Namespace = call.Namespace
+				}
+				seen.Async = seen.Async || call.Async
+				seen.Arguments += call.Arguments
+				emittedToolCalls[call.ID] = seen
+			}
 			return yield(&provider.Completion{
 				ID:        responseID,
 				Model:     responseModel,
@@ -117,6 +134,29 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 					Content: []provider.Content{content},
 				},
 			}, nil)
+		}
+
+		// Done events and the terminal snapshot are authoritative even when
+		// an upstream omits argument deltas. Emit only the missing suffix.
+		reconcileToolCall := func(call provider.ToolCall, hasArguments bool) bool {
+			seen, exists := emittedToolCalls[call.ID]
+			if !exists {
+				return emit(provider.ToolCallContent(call), "")
+			}
+			if hasArguments {
+				if !strings.HasPrefix(call.Arguments, seen.Arguments) {
+					yield(nil, fmt.Errorf("openai: final arguments for tool call %s do not match streamed deltas", call.ID))
+					return false
+				}
+				call.Arguments = strings.TrimPrefix(call.Arguments, seen.Arguments)
+			} else {
+				call.Arguments = ""
+			}
+			changed := call.Arguments != "" || call.Async && !seen.Async ||
+				call.Name != "" && call.Name != seen.Name ||
+				call.Namespace != "" && call.Namespace != seen.Namespace ||
+				call.Kind != "" && call.Kind != seen.Kind
+			return !changed || emit(provider.ToolCallContent(call), "")
 		}
 
 		// A message item starts with an ID-only part; its text and refusal
@@ -270,12 +310,12 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 			case responses.ResponseOutputItemDoneEvent:
 				switch item := event.Item.AsAny().(type) {
 				case responses.ResponseFunctionToolCall:
-					if item.Async && !emit(provider.ToolCallContent(provider.ToolCall{ID: item.CallID, Async: true}), "") {
+					if !reconcileToolCall(provider.ToolCall{ID: item.CallID, Name: item.Name, Namespace: item.Namespace, Async: item.Async, Arguments: item.Arguments}, item.JSON.Arguments.Valid()) {
 						return
 					}
 
 				case responses.ResponseCustomToolCall:
-					if item.Async && !emit(provider.ToolCallContent(provider.ToolCall{ID: item.CallID, Async: true}), "") {
+					if !reconcileToolCall(provider.ToolCall{ID: item.CallID, Kind: provider.ToolKindCustom, Name: item.Name, Namespace: item.Namespace, Async: item.Async, Arguments: item.Input}, item.JSON.Input.Valid()) {
 						return
 					}
 
@@ -369,7 +409,16 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 
 			case responses.ResponseCompletedEvent:
 				for _, output := range event.Response.Output {
-					if item, ok := output.AsAny().(responses.ResponseCompactionItem); ok {
+					switch item := output.AsAny().(type) {
+					case responses.ResponseFunctionToolCall:
+						if !reconcileToolCall(provider.ToolCall{ID: item.CallID, Name: item.Name, Namespace: item.Namespace, Async: item.Async, Arguments: item.Arguments}, item.JSON.Arguments.Valid()) {
+							return
+						}
+					case responses.ResponseCustomToolCall:
+						if !reconcileToolCall(provider.ToolCall{ID: item.CallID, Kind: provider.ToolKindCustom, Name: item.Name, Namespace: item.Namespace, Async: item.Async, Arguments: item.Input}, item.JSON.Input.Valid()) {
+							return
+						}
+					case responses.ResponseCompactionItem:
 						if !yieldCompaction(item) {
 							return
 						}

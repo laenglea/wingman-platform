@@ -3,6 +3,7 @@ package responses
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"net/http"
 	"slices"
@@ -456,10 +457,19 @@ type responseOutputOptions struct {
 }
 
 func (o responseOutputOptions) kindOf(name string) provider.ToolKind {
-	if strings.HasPrefix(name, "tool_search_tool_") {
-		return provider.ToolKindToolSearch
+	kind := outputKind(name, o.Tools)
+	if kind != provider.ToolKindFunction || !strings.HasPrefix(name, "tool_search_tool_") {
+		return kind
 	}
-	return outputKind(name, o.Tools)
+	for _, tool := range o.Tools {
+		if tool.Type == ToolTypeFunction && tool.Name == name {
+			return kind
+		}
+		if tool.Type == ToolTypeNamespace && slices.ContainsFunc(tool.Tools, func(inner Tool) bool { return inner.Name == name }) {
+			return kind
+		}
+	}
+	return provider.ToolKindToolSearch
 }
 
 func (o responseOutputOptions) kind(callKind provider.ToolKind, name string) provider.ToolKind {
@@ -527,6 +537,26 @@ func responseOutputs(message *provider.Message, ids *messageIDs, status string, 
 	return output
 }
 
+func streamResponseOutputs(event StreamEvent, ids *messageIDs, status string, opts responseOutputOptions) []ResponseOutput {
+	if event.Completion == nil {
+		return []ResponseOutput{}
+	}
+	output := responseOutputs(event.Completion.Message, ids, status, opts)
+	for i, itemStatus := range event.OutputStatuses {
+		if i < len(output) && itemStatus != "" {
+			setOutputStatus(&output[i], itemStatus)
+		}
+	}
+	return output
+}
+
+func completionFailure(completion *provider.Completion) error {
+	if completion != nil && completion.StopDetails != nil && completion.StopDetails.Type != "" {
+		return errors.New("The model stopped generating: " + completion.StopDetails.Type)
+	}
+	return errors.New("The model stopped generating without a usable result.")
+}
+
 func messageOutputs(message *provider.Message, messageID, status string, opts responseOutputOptions) []ResponseOutput {
 	output := []ResponseOutput{}
 	phase := string(message.Phase)
@@ -538,7 +568,7 @@ func messageOutputs(message *provider.Message, messageID, status string, opts re
 
 	// Only the item cut short by truncation is incomplete; everything that
 	// finished before it stays completed. The truncated item is the last one.
-	incomplete := status == "incomplete"
+	incomplete := status == "incomplete" || status == "failed"
 	if incomplete {
 		status = "completed"
 	}
@@ -1363,7 +1393,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				CompletedAt: &now,
 				Status:      "completed",
 				Model:       responseModel(event.Completion, req.Model),
-				Output:      responseOutputs(event.Completion.Message, &ids, "completed", outputOpts),
+				Output:      streamResponseOutputs(event, &ids, "completed", outputOpts),
 				Usage:       responseUsage(event.Completion.Usage),
 			}
 			responseDefaults(response, req, event.Completion)
@@ -1380,7 +1410,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				CreatedAt: createdAt,
 				Status:    "incomplete",
 				Model:     responseModel(event.Completion, req.Model),
-				Output:    responseOutputs(event.Completion.Message, &ids, "incomplete", outputOpts),
+				Output:    streamResponseOutputs(event, &ids, "incomplete", outputOpts),
 				Usage:     responseUsage(event.Completion.Usage),
 			}
 			if contentFiltered(event.Completion) {
@@ -1411,12 +1441,15 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				ID:        responseID,
 				CreatedAt: createdAt,
 				Status:    "failed",
-				Model:     req.Model,
-				Output:    []ResponseOutput{},
+				Model:     responseModel(event.Completion, req.Model),
+				Output:    streamResponseOutputs(event, &ids, "failed", outputOpts),
 				Error: &ResponseError{
 					Code:    shared.ErrorTypeFromError(event.Error),
 					Message: event.Error.Error(),
 				},
+			}
+			if event.Completion != nil {
+				failResp.Usage = responseUsage(event.Completion.Usage)
 			}
 			responseDefaults(failResp, req, event.Completion)
 			if retry := provider.RetryAfterHeaderValue(provider.RetryAfterFromError(event.Error)); retry != "" {
@@ -1516,14 +1549,7 @@ func (h *Handler) handleResponsesComplete(w http.ResponseWriter, r *http.Request
 	}
 
 	if result.Status == "failed" {
-		result.Error = &ResponseError{
-			Code:    "server_error",
-			Message: "The model stopped generating without a usable result.",
-		}
-
-		if completion.StopDetails != nil && completion.StopDetails.Type != "" {
-			result.Error.Message = "The model stopped generating: " + completion.StopDetails.Type
-		}
+		result.Error = &ResponseError{Code: "server_error", Message: completionFailure(completion).Error()}
 	}
 
 	responseDefaults(&result, req, completion)

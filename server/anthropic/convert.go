@@ -567,7 +567,7 @@ func toContentBlocks(content []provider.Content) []ContentBlock {
 			result = append(result, block)
 		}
 
-		if c.Text != "" {
+		if c.Text != "" || c.TextPresent {
 			result = append(result, ContentBlock{
 				Type: "text",
 				Text: &c.Text,

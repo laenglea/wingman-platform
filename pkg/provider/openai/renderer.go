@@ -54,6 +54,8 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 	}
 
 	transparent := r.supportsTransparent()
+	var image *openai.ImagesResponse
+	var err error
 
 	if len(options.Images) == 0 {
 		params := openai.ImageGenerateParams{
@@ -79,20 +81,7 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 			params.OutputFormat = openai.ImageGenerateParamsOutputFormat(format)
 		}
 
-		image, err := r.images.Generate(ctx, params)
-
-		if err != nil {
-			return nil, convertError(err)
-		}
-
-		data, err := r.getData(ctx, image.Data[0])
-
-		if err != nil {
-			return nil, err
-		}
-
-		result.Content = data
-		result.ContentType = http.DetectContentType(data)
+		image, err = r.images.Generate(ctx, params)
 	} else {
 		var files []io.Reader
 
@@ -180,21 +169,20 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 			params.OutputFormat = openai.ImageEditParamsOutputFormat(format)
 		}
 
-		image, err := r.images.Edit(ctx, params)
-
-		if err != nil {
-			return nil, convertError(err)
-		}
-
-		data, err := r.getData(ctx, image.Data[0])
-
-		if err != nil {
-			return nil, err
-		}
-
-		result.Content = data
-		result.ContentType = http.DetectContentType(data)
+		image, err = r.images.Edit(ctx, params)
 	}
+	if err != nil {
+		return nil, convertError(err)
+	}
+	if image == nil || len(image.Data) == 0 {
+		return nil, &provider.ProviderError{Code: http.StatusBadGateway, Type: "server_error", Message: "upstream returned no images"}
+	}
+	data, err := r.getData(ctx, image.Data[0])
+	if err != nil {
+		return nil, err
+	}
+	result.Content = data
+	result.ContentType = http.DetectContentType(data)
 
 	return result, nil
 }

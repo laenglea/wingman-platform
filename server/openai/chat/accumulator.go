@@ -70,32 +70,24 @@ func NewStreamingAccumulator(model string, handler StreamEventHandler) *Streamin
 // Add processes a completion chunk and emits appropriate events
 func (s *StreamingAccumulator) Add(c provider.Completion) error {
 	s.accumulator.Add(c)
+	// Metadata can be absent from later deltas, or arrive after output starts.
+	// Once a chunk is visible, its identity must remain stable through usage.
+	if !s.streamedRole {
+		if c.ID != "" {
+			s.id = c.ID
+		}
+		if c.Model != "" {
+			s.model = c.Model
+		}
+	}
 
 	// Skip usage-only chunks (no content)
 	if c.Usage != nil && (c.Message == nil || len(c.Message.Content) == 0) {
 		return nil
 	}
 
-	chunk := &ChatCompletion{
-		Object:  "chat.completion.chunk",
-		ID:      c.ID,
-		Model:   c.Model,
-		Created: 0, // Will be set by handler
-		Choices: []ChatCompletionChoice{
-			{
-				Delta: &ChatCompletionMessage{},
-			},
-		},
-		ServiceTier: "default",
-	}
-
-	if chunk.ID == "" {
-		chunk.ID = s.id
-	}
-
-	if chunk.Model == "" {
-		chunk.Model = s.model
-	}
+	chunk := s.newChunk(ChatCompletionChoice{Delta: &ChatCompletionMessage{}})
+	chunk.ServiceTier = "default"
 
 	if c.Message != nil {
 		message := &ChatCompletionMessage{}
@@ -203,33 +195,12 @@ func (s *StreamingAccumulator) Complete(includeUsage bool) error {
 		for _, id := range s.pendingArgumentIDs() {
 			idx := s.toolCallIndices[id]
 
-			chunk := &ChatCompletion{
-				Object:  "chat.completion.chunk",
-				ID:      result.ID,
-				Model:   result.Model,
-				Created: 0, // Will be set by handler
-				Choices: []ChatCompletionChoice{
-					{
-						Delta: &ChatCompletionMessage{
-							ToolCalls: []ToolCall{
-								{
-									Index:    &idx,
-									Function: &FunctionCall{Arguments: "{}"},
-								},
-							},
-						},
-					},
+			chunk := s.newChunk(ChatCompletionChoice{
+				Delta: &ChatCompletionMessage{
+					ToolCalls: []ToolCall{{Index: &idx, Function: &FunctionCall{Arguments: "{}"}}},
 				},
-				ServiceTier: "default",
-			}
-
-			if chunk.ID == "" {
-				chunk.ID = s.id
-			}
-
-			if chunk.Model == "" {
-				chunk.Model = s.model
-			}
+			})
+			chunk.ServiceTier = "default"
 
 			if err := s.emitEvent(StreamEvent{
 				Type:  StreamEventChunk,
@@ -242,26 +213,10 @@ func (s *StreamingAccumulator) Complete(includeUsage bool) error {
 
 	// Emit finish chunk with reason
 	if s.finishReason != "" {
-		finishChunk := &ChatCompletion{
-			Object:  "chat.completion.chunk",
-			ID:      result.ID,
-			Model:   result.Model,
-			Created: 0, // Will be set by handler
-			Choices: []ChatCompletionChoice{
-				{
-					Delta:        &ChatCompletionMessage{},
-					FinishReason: &s.finishReason,
-				},
-			},
-		}
-
-		if finishChunk.ID == "" {
-			finishChunk.ID = s.id
-		}
-
-		if finishChunk.Model == "" {
-			finishChunk.Model = s.model
-		}
+		finishChunk := s.newChunk(ChatCompletionChoice{
+			Delta:        &ChatCompletionMessage{},
+			FinishReason: &s.finishReason,
+		})
 
 		if err := s.emitEvent(StreamEvent{
 			Type:       StreamEventFinish,
@@ -274,31 +229,8 @@ func (s *StreamingAccumulator) Complete(includeUsage bool) error {
 
 	// Emit usage chunk if requested and available
 	if includeUsage && result.Usage != nil {
-		usageChunk := &ChatCompletion{
-			Object:  "chat.completion.chunk",
-			ID:      result.ID,
-			Model:   result.Model,
-			Created: 0, // Will be set by handler
-			Choices: []ChatCompletionChoice{},
-			Usage: &Usage{
-				PromptTokens:     result.Usage.InputTokens,
-				CompletionTokens: result.Usage.OutputTokens,
-				TotalTokens:      result.Usage.InputTokens + result.Usage.OutputTokens,
-				PromptTokensDetails: &PromptTokensDetails{
-					CachedTokens:     result.Usage.CacheReadInputTokens,
-					CacheWriteTokens: result.Usage.CacheCreationInputTokens,
-				},
-				CompletionTokensDetails: reasoningTokenDetails(result.Usage),
-			},
-		}
-
-		if usageChunk.ID == "" {
-			usageChunk.ID = s.id
-		}
-
-		if usageChunk.Model == "" {
-			usageChunk.Model = s.model
-		}
+		usageChunk := s.newChunk()
+		usageChunk.Usage = toUsage(result.Usage)
 
 		if err := s.emitEvent(StreamEvent{
 			Type:       StreamEventUsage,
@@ -314,6 +246,19 @@ func (s *StreamingAccumulator) Complete(includeUsage bool) error {
 		Type:       StreamEventDone,
 		Completion: result,
 	})
+}
+
+func (s *StreamingAccumulator) newChunk(choices ...ChatCompletionChoice) *ChatCompletion {
+	chunk := &ChatCompletion{
+		Object:  "chat.completion.chunk",
+		ID:      s.id,
+		Model:   s.model,
+		Choices: choices,
+	}
+	if chunk.Choices == nil {
+		chunk.Choices = []ChatCompletionChoice{}
+	}
+	return chunk
 }
 
 // pendingArgumentIDs returns tool call IDs without streamed arguments,

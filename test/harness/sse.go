@@ -13,6 +13,9 @@ func ParseSSE(r io.Reader) ([]*SSEEvent, error) {
 	var events []*SSEEvent
 
 	scanner := bufio.NewScanner(r)
+	// Terminal Responses snapshots and Gemini function calls contain complete
+	// tool arguments, which routinely exceed Scanner's default 64 KiB limit.
+	scanner.Buffer(make([]byte, 4096), 32<<20)
 
 	var currentEvent string
 	var dataLines []string

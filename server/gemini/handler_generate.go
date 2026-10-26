@@ -77,6 +77,13 @@ func (h *Handler) handleStreamGenerateContent(w http.ResponseWriter, r *http.Req
 	useSSE := r.URL.Query().Get("alt") == "sse"
 
 	headersSent := false
+	defer func() {
+		// The error response is an array element too. Close the array on every
+		// exit after streaming starts, including upstream and write failures.
+		if headersSent && !useSSE {
+			w.Write([]byte("]"))
+		}
+	}()
 
 	sendHeaders := func() {
 		if headersSent {
@@ -145,10 +152,6 @@ func (h *Handler) handleStreamGenerateContent(w http.ResponseWriter, r *http.Req
 		}
 		accumulator.Error(err)
 		return
-	}
-
-	if !useSSE {
-		w.Write([]byte("]"))
 	}
 }
 

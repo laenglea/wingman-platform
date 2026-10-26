@@ -86,6 +86,8 @@ type StreamEvent struct {
 	MessagePhase      provider.MessagePhase
 	MessageIndex      int
 	TextPresent       bool
+	// Terminal snapshots preserve the status already emitted for each item.
+	OutputStatuses []string
 
 	// Incomplete marks an item or summary part finalized before generation
 	// finished (e.g. truncated by max_tokens or a cancelled stream).
@@ -146,8 +148,11 @@ type StreamingAccumulator struct {
 	tier             provider.Tier
 	reasoningContext provider.ReasoningContext
 
-	started bool
-	status  provider.CompletionStatus
+	started      bool
+	status       provider.CompletionStatus
+	stopReason   provider.StopReason
+	stopDetails  *provider.StopDetails
+	stopSequence string
 
 	message  *streamMessage
 	messages []*streamMessage
@@ -182,7 +187,8 @@ type StreamingAccumulator struct {
 
 	// Register every item when its output index is assigned so snapshots
 	// retain the stream's order, including reasoning after a message.
-	outputOrder []streamItemRef
+	outputOrder    []streamItemRef
+	outputStatuses []string
 
 	usage *provider.Usage
 }
@@ -249,6 +255,7 @@ func mergeUsage(dst **provider.Usage, src *provider.Usage) {
 func (s *StreamingAccumulator) reserveOutputIndex(kind streamItemKind, index int) int {
 	idx := len(s.outputOrder)
 	s.outputOrder = append(s.outputOrder, streamItemRef{kind: kind, index: index})
+	s.outputStatuses = append(s.outputStatuses, "")
 	return idx
 }
 
@@ -480,7 +487,7 @@ func (s *StreamingAccumulator) toolCallIncomplete(callID string) bool {
 		return true
 	}
 
-	if s.status != provider.CompletionStatusIncomplete {
+	if s.status != provider.CompletionStatusIncomplete && s.status != provider.CompletionStatusFailed {
 		return false
 	}
 
@@ -601,7 +608,7 @@ func (s *StreamingAccumulator) closeReasoning() error {
 
 	reasoningText := s.streamedReasoningText.String()
 	reasoningSummary := s.streamedReasoningSummary.String()
-	incomplete := s.status == provider.CompletionStatusIncomplete || s.contentFiltered()
+	incomplete := s.status == provider.CompletionStatusIncomplete || s.status == provider.CompletionStatusFailed || s.contentFiltered()
 
 	if s.streamedReasoningText.Len() > 0 {
 		if err := s.emitEvent(StreamEvent{
@@ -736,7 +743,7 @@ func (s *StreamingAccumulator) closeMessage() error {
 		RefusalText:  refusal,
 		RefusalFirst: s.message.refusalFirst,
 		OutputIndex:  s.message.messageOutputIndex,
-		Incomplete:   s.status == provider.CompletionStatusIncomplete || s.contentFiltered(),
+		Incomplete:   s.status == provider.CompletionStatusIncomplete || s.status == provider.CompletionStatusFailed || s.contentFiltered(),
 		MessagePhase: s.message.phase,
 	})
 }
@@ -800,6 +807,15 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 	}
 	if c.Status != "" {
 		s.status = c.Status
+	}
+	if c.StopReason != "" {
+		s.stopReason = c.StopReason
+	}
+	if c.StopDetails != nil {
+		s.stopDetails = c.StopDetails
+	}
+	if c.StopSequence != "" {
+		s.stopSequence = c.StopSequence
 	}
 	if c.Usage != nil {
 		mergeUsage(&s.usage, c.Usage)
@@ -1053,6 +1069,9 @@ func (s *StreamingAccumulator) Complete() error {
 	}
 
 	result := s.Result()
+	if s.status == provider.CompletionStatusFailed {
+		return s.Error(completionFailure(result))
+	}
 	terminalType := StreamEventResponseCompleted
 	if s.status == provider.CompletionStatusIncomplete || s.contentFiltered() {
 		terminalType = StreamEventResponseIncomplete
@@ -1253,6 +1272,7 @@ func (s *StreamingAccumulator) flushMessage() error {
 
 func (s *StreamingAccumulator) Error(err error) error {
 	_ = s.start()
+	s.status = provider.CompletionStatusFailed
 
 	if e := s.emitEvent(StreamEvent{
 		Type:  StreamEventResponseError,
@@ -1262,8 +1282,9 @@ func (s *StreamingAccumulator) Error(err error) error {
 	}
 
 	return s.emitEvent(StreamEvent{
-		Type:  StreamEventResponseFailed,
-		Error: err,
+		Type:       StreamEventResponseFailed,
+		Error:      err,
+		Completion: s.Result(),
 	})
 }
 
@@ -1326,7 +1347,7 @@ func (s *StreamingAccumulator) Result() *provider.Completion {
 
 			// A truncated call keeps its empty arguments — fabricating "{}"
 			// would disguise an aborted call as a valid zero-argument one.
-			if s.status != provider.CompletionStatusIncomplete && !s.contentFiltered() {
+			if s.status != provider.CompletionStatusIncomplete && s.status != provider.CompletionStatusFailed && !s.contentFiltered() {
 				call = provider.NormalizeToolCallArguments(call)
 			}
 
@@ -1343,12 +1364,15 @@ func (s *StreamingAccumulator) Result() *provider.Completion {
 	}
 
 	return &provider.Completion{
-		ID:        s.id,
-		Model:     s.model,
-		Status:    s.status,
-		Usage:     s.usage,
-		Reasoning: s.reasoningContext,
-		Tier:      s.tier,
+		ID:           s.id,
+		Model:        s.model,
+		Status:       s.status,
+		StopReason:   s.stopReason,
+		StopDetails:  s.stopDetails,
+		StopSequence: s.stopSequence,
+		Usage:        s.usage,
+		Reasoning:    s.reasoningContext,
+		Tier:         s.tier,
 
 		Message: &provider.Message{
 			Role:    provider.MessageRoleAssistant,
@@ -1359,6 +1383,17 @@ func (s *StreamingAccumulator) Result() *provider.Completion {
 }
 
 func (s *StreamingAccumulator) emitEvent(event StreamEvent) error {
+	switch event.Type {
+	case StreamEventOutputItemDone, StreamEventReasoningItemDone, StreamEventCompactionItemDone, StreamEventFunctionCallDone, StreamEventToolSearchResult:
+		s.outputStatuses[event.OutputIndex] = itemStatus(event.Incomplete)
+	case StreamEventResponseCompleted, StreamEventResponseIncomplete, StreamEventResponseFailed:
+		event.OutputStatuses = append([]string(nil), s.outputStatuses...)
+		for i, status := range event.OutputStatuses {
+			if status == "" {
+				event.OutputStatuses[i] = itemStatus(event.Type != StreamEventResponseCompleted)
+			}
+		}
+	}
 	event.MessageIndex = len(s.messages) - 1
 	event.MessageID = s.message.id
 	if s.handler != nil {

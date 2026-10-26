@@ -4,15 +4,72 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"iter"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/pkg/policy/noop"
 	"github.com/adrianliechti/wingman/pkg/provider"
+	"github.com/adrianliechti/wingman/test/harness"
 )
+
+func TestDeclaredToolNamesDoNotBecomeHostedSearch(t *testing.T) {
+	for _, toolType := range []ToolType{ToolTypeFunction, ToolTypeCustom} {
+		for _, namespace := range []string{"", "helpers"} {
+			for _, stream := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/namespace=%s/stream=%t", toolType, namespace, stream), func(t *testing.T) {
+					name := "tool_search_tool_regex"
+					tool := Tool{Type: toolType, Name: name, Parameters: map[string]any{"type": "object"}}
+					if namespace != "" {
+						tool = Tool{Type: ToolTypeNamespace, Name: namespace, Tools: []Tool{tool}}
+					}
+					completer := &toolSearchCompleter{reply: provider.ToolCall{ID: "call_mine", Name: name, Namespace: namespace, Arguments: `{"pattern":"weather"}`}}
+					cfg := &config.Config{Policy: noop.New()}
+					cfg.RegisterCompleter("test", completer)
+					body, _ := json.Marshal(map[string]any{"model": "test", "input": "check", "stream": stream, "tools": []Tool{{Type: ToolTypeToolSearch, Execution: "server"}, tool}})
+					rec := httptest.NewRecorder()
+					New(cfg).handleResponses(rec, httptest.NewRequest(http.MethodPost, "/responses", bytes.NewReader(body)))
+					if rec.Code != http.StatusOK {
+						t.Fatalf("HTTP %d: %s", rec.Code, rec.Body.String())
+					}
+					var result map[string]any
+					if stream {
+						events, err := harness.ParseSSE(rec.Body)
+						if err != nil {
+							t.Fatal(err)
+						}
+						for _, event := range events {
+							if event.Event == "response.completed" {
+								result = event.Data["response"].(map[string]any)
+							}
+							if strings.Contains(event.Event, "tool_search") {
+								t.Fatalf("caller tool emitted hosted search event: %s", event.Event)
+							}
+						}
+					} else if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+						t.Fatal(err)
+					}
+					output := result["output"].([]any)
+					want := "function_call"
+					if toolType == ToolTypeCustom {
+						want = "custom_tool_call"
+					}
+					if len(output) != 1 {
+						t.Fatalf("output=%v", output)
+					}
+					item := output[0].(map[string]any)
+					if item["type"] != want || item["name"] != name || namespace != "" && item["namespace"] != namespace {
+						t.Fatalf("caller tool was reclassified: %v", item)
+					}
+				})
+			}
+		}
+	}
+}
 
 // toolSearchCompleter captures what the provider sees and replies with one
 // tool_search_call so we can verify the output round-trip.

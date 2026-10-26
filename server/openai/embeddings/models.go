@@ -1,7 +1,5 @@
 package embeddings
 
-import "encoding/json"
-
 // https://platform.openai.com/docs/api-reference/embeddings/create
 type EmbeddingsRequest struct {
 	Model string `json:"model"`
@@ -10,50 +8,6 @@ type EmbeddingsRequest struct {
 
 	EncodingFormat string `json:"encoding_format,omitempty"`
 	Dimensions     *int   `json:"dimensions,omitempty"`
-}
-
-func (r *EmbeddingsRequest) UnmarshalJSON(data []byte) error {
-	type1 := struct {
-		Model string `json:"model"`
-		Input string `json:"input"`
-
-		Dimensions     *int   `json:"dimensions,omitempty"`
-		EncodingFormat string `json:"encoding_format,omitempty"`
-	}{}
-
-	if err := json.Unmarshal(data, &type1); err == nil {
-		*r = EmbeddingsRequest{
-			Model: type1.Model,
-			Input: type1.Input,
-
-			Dimensions:     type1.Dimensions,
-			EncodingFormat: type1.EncodingFormat,
-		}
-
-		return nil
-	}
-
-	type2 := struct {
-		Model string   `json:"model"`
-		Input []string `json:"input"`
-
-		Dimensions     *int   `json:"dimensions,omitempty"`
-		EncodingFormat string `json:"encoding_format,omitempty"`
-	}{}
-
-	if err := json.Unmarshal(data, &type2); err == nil {
-		*r = EmbeddingsRequest{
-			Model: type2.Model,
-			Input: type2.Input,
-
-			Dimensions:     type2.Dimensions,
-			EncodingFormat: type2.EncodingFormat,
-		}
-
-		return nil
-	}
-
-	return nil
 }
 
 // https://platform.openai.com/docs/api-reference/embeddings/object

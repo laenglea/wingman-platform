@@ -38,7 +38,7 @@ func TestTierRequestAndResponse(t *testing.T) {
 					w.Header().Set("Content-Type", "text/event-stream")
 					if chat {
 						fmt.Fprint(w, "data: {\"id\":\"c1\",\"service_tier\":\"priority\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n")
-						fmt.Fprint(w, "data: {\"id\":\"c1\",\"service_tier\":\"unknown\",\"choices\":[]}\n\n")
+						fmt.Fprint(w, "data: {\"id\":\"c1\",\"service_tier\":\"unknown\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
 						// Native Mistral usage metadata is retained by the generic adapter.
 						fmt.Fprint(w, "data: {\"id\":\"c1\",\"choices\":[],\"usage\":{\"service_tier\":\"standard\",\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n")
 					} else {

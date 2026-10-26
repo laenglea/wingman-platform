@@ -153,39 +153,11 @@ func (s *StreamingAccumulator) Complete() error {
 
 // Error emits an error response in the stream
 func (s *StreamingAccumulator) Error(err error) error {
-	code := provider.CodeFromError(err, http.StatusInternalServerError)
-
-	var status string
-	switch {
-	case code == http.StatusBadRequest:
-		status = "INVALID_ARGUMENT"
-	case code == http.StatusUnauthorized:
-		status = "UNAUTHENTICATED"
-	case code == http.StatusForbidden:
-		status = "PERMISSION_DENIED"
-	case code == http.StatusNotFound:
-		status = "NOT_FOUND"
-	case code == http.StatusTooManyRequests:
-		status = "RESOURCE_EXHAUSTED"
-	default:
-		status = "INTERNAL"
-
-		if code >= 400 && code < 500 {
-			status = "INVALID_ARGUMENT"
-		}
-	}
-
-	response := GenerateContentResponse{
+	return s.handler(GenerateContentResponse{
 		ResponseId:   s.responseID,
 		ModelVersion: s.model,
-		Error: &APIError{
-			Code:    code,
-			Status:  status,
-			Message: err.Error(),
-		},
-	}
-
-	return s.handler(response)
+		Error:        toAPIError(err, http.StatusInternalServerError),
+	})
 }
 
 // Result returns the accumulated completion
