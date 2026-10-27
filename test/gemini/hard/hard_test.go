@@ -529,49 +529,50 @@ func TestModelSwitch(t *testing.T) {
 
 	models := gemini.DefaultModels()
 
-	for i := range models {
-		from, to := models[i], models[(i+1)%len(models)]
-		if from.Name == to.Name {
-			continue
-		}
-
-		t.Run(from.Name+"→"+to.Name, func(t *testing.T) {
-			h.SkipUnlessConfigured(t, from.Name)
-			h.SkipUnlessConfigured(t, to.Name)
-
-			body := map[string]any{
-				"tools":            []any{gemini.WeatherTool},
-				"generationConfig": map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true, "thinkingLevel": "low"}},
-				"contents":         user("What's the weather in London? Use the tool."),
+	for _, from := range models {
+		for _, to := range models {
+			if from.Name == to.Name {
+				continue
 			}
 
-			first := post(t, h, target{"wingman", h.Wingman, from.Name}, body)
-			fcs := functionCalls(first)
-			if len(fcs) == 0 {
-				t.Fatalf("turn 1 on %s produced no functionCall", from.Name)
-			}
+			t.Run(from.Name+"→"+to.Name, func(t *testing.T) {
+				h.SkipUnlessConfigured(t, from.Name)
+				h.SkipUnlessConfigured(t, to.Name)
 
-			content, _ := candidate(first)["content"].(map[string]any)
-			contents := append([]any{}, body["contents"].([]any)...)
-			contents = append(contents, map[string]any{"role": "model", "parts": content["parts"]})
-
-			var responses []any
-			for _, fc := range fcs {
-				response := map[string]any{"name": fc["name"], "response": map[string]any{"result": "Sunny, 22°C"}}
-				if id, _ := fc["id"].(string); id != "" {
-					response["id"] = id
+				body := map[string]any{
+					"tools":            []any{gemini.WeatherTool},
+					"generationConfig": map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true, "thinkingLevel": "low"}},
+					"contents":         user("What's the weather in London? Use the tool and include its station verification code verbatim in your answer."),
 				}
-				responses = append(responses, map[string]any{"functionResponse": response})
-			}
-			contents = append(contents, map[string]any{"role": "user", "parts": responses})
 
-			req := gemini.WithModel(body, to.Name)
-			req["contents"] = contents
+				first := post(t, h, target{"wingman", h.Wingman, from.Name}, body)
+				fcs := functionCalls(first)
+				if len(fcs) == 0 {
+					t.Fatalf("turn 1 on %s produced no functionCall", from.Name)
+				}
 
-			if messageText(post(t, h, target{"wingman", h.Wingman, to.Name}, req)) == "" {
-				t.Errorf("turn 2 on %s produced no text", to.Name)
-			}
-		})
+				content, _ := candidate(first)["content"].(map[string]any)
+				contents := append([]any{}, body["contents"].([]any)...)
+				contents = append(contents, map[string]any{"role": "model", "parts": content["parts"]})
+
+				var responses []any
+				for _, fc := range fcs {
+					response := map[string]any{"name": fc["name"], "response": map[string]any{"result": "Sunny, 22°C. Station verification code: WM-7429-X."}}
+					if id, _ := fc["id"].(string); id != "" {
+						response["id"] = id
+					}
+					responses = append(responses, map[string]any{"functionResponse": response})
+				}
+				contents = append(contents, map[string]any{"role": "user", "parts": responses})
+
+				req := gemini.WithModel(body, to.Name)
+				req["contents"] = contents
+
+				if text := messageText(post(t, h, target{"wingman", h.Wingman, to.Name}, req)); !strings.Contains(text, "WM-7429-X") {
+					t.Errorf("turn 2 on %s lost the tool result: %q", to.Name, text)
+				}
+			})
+		}
 	}
 }
 

@@ -254,25 +254,12 @@ func (h *Handler) handleChatCompletionComplete(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	if completion.Usage != nil {
-		result.Usage = &Usage{
-			PromptTokens:     completion.Usage.InputTokens,
-			CompletionTokens: completion.Usage.OutputTokens,
-			TotalTokens:      completion.Usage.InputTokens + completion.Usage.OutputTokens,
-			PromptTokensDetails: &PromptTokensDetails{
-				CachedTokens:     completion.Usage.CacheReadInputTokens,
-				CacheWriteTokens: completion.Usage.CacheCreationInputTokens,
-			},
-			CompletionTokensDetails: reasoningTokenDetails(completion.Usage),
-		}
-	}
+	result.Usage = toUsage(completion.Usage)
 
 	writeJson(w, result)
 }
 
 func (h *Handler) handleChatCompletionStream(w http.ResponseWriter, r *http.Request, req ChatCompletionRequest, completer provider.Completer, messages []provider.Message, options *provider.CompleteOptions) {
-	includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage != nil && *req.StreamOptions.IncludeUsage
-
 	headersSent := false
 
 	sendHeaders := func() {
@@ -289,26 +276,15 @@ func (h *Handler) handleChatCompletionStream(w http.ResponseWriter, r *http.Requ
 	// Create streaming accumulator with event handler
 	accumulator := NewStreamingAccumulator(req.Model, func(event StreamEvent) error {
 		switch event.Type {
-		case StreamEventUsage:
-			if !includeUsage {
-				return nil
-			}
-
-			event.Chunk.Created = created
-			return writeEvent(w, event.Chunk)
-
-		case StreamEventChunk, StreamEventFinish:
+		case StreamEventChunk, StreamEventFinish, StreamEventUsage:
 			event.Chunk.Created = created
 			return writeEvent(w, event.Chunk)
 
 		case StreamEventDone:
-			_, _ = w.Write([]byte("data: [DONE]\n\n"))
-
-			if rc := http.NewResponseController(w); rc != nil {
-				rc.Flush()
+			if _, err := w.Write([]byte("data: [DONE]\n\n")); err != nil {
+				return err
 			}
-
-			return nil
+			return http.NewResponseController(w).Flush()
 
 		case StreamEventError:
 			return writeErrorEvent(w, event.Error)

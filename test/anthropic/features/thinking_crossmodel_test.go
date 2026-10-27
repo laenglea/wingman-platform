@@ -1,6 +1,7 @@
 package features_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/adrianliechti/wingman/test/anthropic"
@@ -15,74 +16,85 @@ import (
 func TestThinkingCrossModelToolUse(t *testing.T) {
 	h := anthropic.New(t)
 
-	pairs := [][2]string{
-		{"gpt-5.4", "claude-sonnet-4-6"},
-		{"gemini-3.8-flash", "claude-sonnet-4-6"},
-		{"claude-sonnet-4-6", "gpt-5.4"},
-		{"claude-sonnet-4-6", "gemini-3.8-flash"},
-	}
-
-	for _, pair := range pairs {
-		from, to := pair[0], pair[1]
-
-		t.Run(from+"→"+to, func(t *testing.T) {
-			h.SkipUnlessConfigured(t, from)
-			h.SkipUnlessConfigured(t, to)
-
-			turn1 := anthropic.WithModel(map[string]any{
-				"max_tokens": 4096,
-				"messages": []map[string]any{
-					{"role": "user", "content": "What's the weather in London? Use the tool."},
-				},
-				"tools":    []any{anthropic.WeatherTool},
-				"thinking": map[string]any{"type": "adaptive"},
-			}, from)
-
-			resp1 := anthropic.PostMessages(t, h, h.Wingman, turn1)
-			if resp1.StatusCode != 200 {
-				t.Fatalf("turn 1 on %s returned %d: %s", from, resp1.StatusCode, string(resp1.RawBody))
+	models := anthropic.DefaultModels()
+	for _, source := range models {
+		for _, destination := range models {
+			from, to := source.Name, destination.Name
+			if from == to {
+				continue
 			}
 
-			content, _ := resp1.Body["content"].([]any)
+			t.Run(from+"→"+to, func(t *testing.T) {
+				h.SkipUnlessConfigured(t, from)
+				h.SkipUnlessConfigured(t, to)
 
-			var toolUseID string
-			var hasThinking bool
-			for _, block := range content {
-				obj, _ := block.(map[string]any)
-				switch obj["type"] {
-				case "tool_use":
-					toolUseID, _ = obj["id"].(string)
-				case "thinking":
-					hasThinking = true
+				turn1 := anthropic.WithModel(map[string]any{
+					"max_tokens": 4096,
+					"messages": []map[string]any{
+						{"role": "user", "content": "What's the weather in London? Use the tool and include its station verification code verbatim in your answer."},
+					},
+					"tools":    []any{anthropic.WeatherTool},
+					"thinking": map[string]any{"type": "adaptive"},
+				}, from)
+
+				resp1 := anthropic.PostMessages(t, h, h.Wingman, turn1)
+				if resp1.StatusCode != 200 {
+					t.Fatalf("turn 1 on %s returned %d: %s", from, resp1.StatusCode, string(resp1.RawBody))
 				}
-			}
 
-			if toolUseID == "" {
-				t.Fatalf("turn 1 on %s produced no tool_use: %s", from, string(resp1.RawBody))
-			}
-			if !hasThinking {
-				t.Logf("turn 1 on %s produced no thinking block; replay still exercises the switch", from)
-			}
+				content, _ := resp1.Body["content"].([]any)
 
-			turn2 := anthropic.WithModel(map[string]any{
-				"max_tokens": 4096,
-				"messages": []map[string]any{
-					{"role": "user", "content": "What's the weather in London? Use the tool."},
-					{"role": "assistant", "content": content},
-					{"role": "user", "content": []map[string]any{
-						{"type": "tool_result", "tool_use_id": toolUseID, "content": "Sunny, 22°C"},
-					}},
-				},
-				"tools":    []any{anthropic.WeatherTool},
-				"thinking": map[string]any{"type": "adaptive"},
-			}, to)
+				var toolUseID string
+				var hasThinking bool
+				for _, block := range content {
+					obj, _ := block.(map[string]any)
+					switch obj["type"] {
+					case "tool_use":
+						toolUseID, _ = obj["id"].(string)
+					case "thinking":
+						hasThinking = true
+					}
+				}
 
-			resp2 := anthropic.PostMessages(t, h, h.Wingman, turn2)
-			if resp2.StatusCode != 200 {
-				t.Fatalf("turn 2 on %s returned %d: %s", to, resp2.StatusCode, string(resp2.RawBody))
-			}
+				if toolUseID == "" {
+					t.Fatalf("turn 1 on %s produced no tool_use: %s", from, string(resp1.RawBody))
+				}
+				if !hasThinking {
+					t.Logf("turn 1 on %s produced no thinking block; replay still exercises the switch", from)
+				}
 
-			anthropic.RequireTextContent(t, "wingman", resp2.Body)
-		})
+				turn2 := anthropic.WithModel(map[string]any{
+					"max_tokens": 4096,
+					"messages": []map[string]any{
+						{"role": "user", "content": "What's the weather in London? Use the tool and include its station verification code verbatim in your answer."},
+						{"role": "assistant", "content": content},
+						{"role": "user", "content": []map[string]any{
+							{"type": "tool_result", "tool_use_id": toolUseID, "content": "Sunny, 22°C. Station verification code: WM-7429-X."},
+						}},
+					},
+					"tools":    []any{anthropic.WeatherTool},
+					"thinking": map[string]any{"type": "adaptive"},
+				}, to)
+
+				resp2 := anthropic.PostMessages(t, h, h.Wingman, turn2)
+				if resp2.StatusCode != 200 {
+					t.Fatalf("turn 2 on %s returned %d: %s", to, resp2.StatusCode, string(resp2.RawBody))
+				}
+
+				anthropic.RequireTextContent(t, "wingman", resp2.Body)
+				blocks, _ := resp2.Body["content"].([]any)
+				var text string
+				for _, block := range blocks {
+					obj, _ := block.(map[string]any)
+					if obj["type"] == "text" {
+						part, _ := obj["text"].(string)
+						text += part
+					}
+				}
+				if !strings.Contains(text, "WM-7429-X") {
+					t.Errorf("turn 2 on %s lost the tool result: %q", to, text)
+				}
+			})
+		}
 	}
 }

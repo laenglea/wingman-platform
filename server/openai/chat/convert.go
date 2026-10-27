@@ -13,15 +13,24 @@ import (
 )
 
 func streamUsage(req ChatCompletionRequest) bool {
-	if req.StreamOptions == nil {
-		return false
+	return req.StreamOptions != nil && req.StreamOptions.IncludeUsage != nil && *req.StreamOptions.IncludeUsage
+}
+
+func toUsage(usage *provider.Usage) *Usage {
+	if usage == nil {
+		return nil
 	}
 
-	if req.StreamOptions.IncludeUsage == nil {
-		return false
+	return &Usage{
+		PromptTokens:     usage.InputTokens,
+		CompletionTokens: usage.OutputTokens,
+		TotalTokens:      usage.InputTokens + usage.OutputTokens,
+		PromptTokensDetails: &PromptTokensDetails{
+			CachedTokens:     usage.CacheReadInputTokens,
+			CacheWriteTokens: usage.CacheCreationInputTokens,
+		},
+		CompletionTokensDetails: reasoningTokenDetails(usage),
 	}
-
-	return *req.StreamOptions.IncludeUsage
 }
 
 func toToolOptions(v *ToolChoice) *provider.ToolOptions {

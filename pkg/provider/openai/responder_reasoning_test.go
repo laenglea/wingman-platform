@@ -59,8 +59,8 @@ func TestRequiredReasoningRequestCompatibility(t *testing.T) {
 	}
 }
 
-func TestGPT6SolAndLunaRequestCompatibility(t *testing.T) {
-	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+func TestGPT6OptionalReasoningRequestCompatibility(t *testing.T) {
+	for _, model := range []string{"gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"} {
 		t.Run(model, func(t *testing.T) {
 			messages := []provider.Message{provider.UserMessage("hi")}
 			responder, err := NewResponder("", model)

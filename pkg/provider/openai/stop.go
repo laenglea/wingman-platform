@@ -47,9 +47,9 @@ func sanitizeToolIDs(messages []provider.Message) []provider.Message {
 // the text stream is cut at the first match and the completion ends with
 // stop_sequence. The upstream stream is cancelled by the caller.
 type stopFilter struct {
-	stops  []string
-	buffer strings.Builder
-	done   bool
+	stops   []string
+	pending *provider.Content
+	done    bool
 }
 
 func newStopFilter(stops []string) *stopFilter {
@@ -64,46 +64,82 @@ func newStopFilter(stops []string) *stopFilter {
 // hit. A hit completion carries the text up to the match and the final
 // stop state; nothing must be forwarded after it.
 func (f *stopFilter) filter(c *provider.Completion) (*provider.Completion, bool) {
-	if f == nil || f.done || c == nil || c.Message == nil {
+	if f == nil || f.done || c == nil {
 		return c, false
 	}
 
-	for i, content := range c.Message.Content {
+	out := *c
+	message := provider.Message{Role: provider.MessageRoleAssistant}
+	if c.Message != nil {
+		message = *c.Message
+	}
+	var kept []provider.Content
+	flush := func() {
+		if f.pending != nil {
+			kept = append(kept, *f.pending)
+			f.pending = nil
+		}
+	}
+	for _, content := range message.Content {
+		// Do not join text across message items or non-text content blocks.
+		if content.Text == "" || (f.pending != nil && content.MessageID != "" && content.MessageID != f.pending.MessageID) {
+			flush()
+		}
 		if content.Text == "" {
+			kept = append(kept, content)
 			continue
 		}
-
-		before := f.buffer.Len()
-		f.buffer.WriteString(content.Text)
-
-		index, stop := firstStop(f.buffer.String(), f.stops)
-		if index < 0 {
-			continue
+		text := content.Text
+		if f.pending != nil {
+			text = f.pending.Text + text
+			content = *f.pending
+			f.pending = nil
 		}
-
-		f.done = true
-
-		cut := max(index-before, 0)
-
-		out := *c
-		out.Status = provider.CompletionStatusCompleted
-		out.StopReason = provider.StopReasonStopSequence
-		out.StopSequence = stop
-
-		kept := append([]provider.Content{}, c.Message.Content[:i]...)
-		if cut > 0 {
-			content.Text = content.Text[:cut]
+		if index, stop := firstStop(text, f.stops); index >= 0 {
+			f.done = true
+			out.Status = provider.CompletionStatusCompleted
+			out.StopReason = provider.StopReasonStopSequence
+			out.StopSequence = stop
+			if index > 0 {
+				content.Text = text[:index]
+				kept = append(kept, content)
+			}
+			break
+		}
+		// Keep just the suffix that could become a stop on the next delta.
+		// Already emitted text can never be removed from a client's stream.
+		keep := len(text) - f.prefixLength(text)
+		if keep < len(text) {
+			pending := content
+			pending.Text = text[keep:]
+			f.pending = &pending
+		}
+		if keep > 0 || content.TextPresent {
+			content.Text = text[:keep]
 			kept = append(kept, content)
 		}
-
-		message := *c.Message
+	}
+	if c.Status != "" || c.StopReason != "" {
+		flush()
+	}
+	if c.Message != nil || len(kept) > 0 {
 		message.Content = kept
 		out.Message = &message
-
-		return &out, true
 	}
+	return &out, f.done
+}
 
-	return c, false
+func (f *stopFilter) prefixLength(text string) int {
+	longest := 0
+	for _, stop := range f.stops {
+		for n := min(len(text), len(stop)-1); n > longest; n-- {
+			if strings.HasSuffix(text, stop[:n]) {
+				longest = n
+				break
+			}
+		}
+	}
+	return longest
 }
 
 func firstStop(text string, stops []string) (int, string) {

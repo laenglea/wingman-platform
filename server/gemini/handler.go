@@ -40,14 +40,22 @@ func writeError(w http.ResponseWriter, code int, err error) {
 		println("server error", err.Error())
 	}
 
-	code = provider.CodeFromError(err, code)
+	apiError := toAPIError(err, code)
 
 	if v := provider.RetryAfterHeaderValue(provider.RetryAfterFromError(err)); v != "" {
 		w.Header().Set("Retry-After", v)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
+	w.WriteHeader(apiError.Code)
+
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	enc.Encode(ErrorResponse{Error: apiError})
+}
+
+func toAPIError(err error, fallback int) *APIError {
+	code := provider.CodeFromError(err, fallback)
 
 	var status string
 	switch code {
@@ -73,18 +81,11 @@ func writeError(w http.ResponseWriter, code int, err error) {
 		}
 	}
 
-	resp := ErrorResponse{
-		Error: &APIError{
-			Code: code,
-
-			Status:  status,
-			Message: err.Error(),
-		},
+	return &APIError{
+		Code:    code,
+		Status:  status,
+		Message: err.Error(),
 	}
-
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	enc.Encode(resp)
 }
 
 // writeSSERetry emits an SSE "retry:" field (milliseconds) if the error

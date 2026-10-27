@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"iter"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -105,6 +106,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		// cannot be unwrapped one at a time, so buffer them per tool-call index
 		// and emit the freeform text when the choice finishes.
 		customArgs := map[int64]*strings.Builder{}
+		finished := false
 
 		for stream.Next() {
 			chunk := stream.Current()
@@ -182,6 +184,7 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				// Chat Completions has no per-block stop event — the finish
 				// reason is the only signal that arguments are complete.
 				if choice.FinishReason != "" {
+					finished = true
 					for _, index := range slices.Sorted(maps.Keys(customArgs)) {
 						input, ok := custom.UnwrapPartial(customArgs[index].String())
 
@@ -200,6 +203,9 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 				}
 
 				delta.Status = toCompletionStatus(choice.FinishReason)
+				if choice.FinishReason != "" && delta.Status == "" {
+					delta.Status = provider.CompletionStatusCompleted
+				}
 			}
 
 			if !yield(delta, nil) {
@@ -216,6 +222,14 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 			}
 			yield(nil, convertError(err))
 			return
+		}
+
+		if !finished && (stops == nil || !stops.done) {
+			yield(nil, &provider.ProviderError{
+				Code:    http.StatusBadGateway,
+				Type:    "server_error",
+				Message: "upstream stream ended before a finish reason was received",
+			})
 		}
 	}
 }
