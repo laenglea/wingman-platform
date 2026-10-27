@@ -3,6 +3,7 @@ package anthropic
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"slices"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -426,7 +427,7 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 		}
 
 		// Refusal text has no Anthropic block type; stream it as text
-		if text := content.Text + content.Refusal; text != "" {
+		if text := content.Text + content.Refusal; text != "" || content.TextPresent {
 			if s.textIndex < 0 {
 				index, err := s.startBlock(&ContentBlock{
 					Type: "text",
@@ -439,16 +440,17 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 
 				s.textIndex = index
 			}
-
-			if err := s.emitEvent(StreamEvent{
-				Type:  StreamEventContentBlockDelta,
-				Index: s.textIndex,
-				Delta: &Delta{
-					Type: "text_delta",
-					Text: text,
-				},
-			}); err != nil {
-				return err
+			if text != "" {
+				if err := s.emitEvent(StreamEvent{
+					Type:  StreamEventContentBlockDelta,
+					Index: s.textIndex,
+					Delta: &Delta{
+						Type: "text_delta",
+						Text: text,
+					},
+				}); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -558,6 +560,9 @@ func (s *StreamingAccumulator) Complete() error {
 	}
 
 	result := s.accumulator.Result()
+	if result.Status == provider.CompletionStatusFailed {
+		return completionFailure(result)
+	}
 
 	// Close all open content blocks
 	for len(s.openBlocks) > 0 {
@@ -620,6 +625,7 @@ func (s *StreamingAccumulator) Complete() error {
 
 			CacheReadInputTokens:     cacheReadInputTokens,
 			CacheCreationInputTokens: cacheCreationInputTokens,
+			CacheCreation:            cacheCreation(result.Usage),
 		},
 		Completion: result,
 	}); err != nil {
@@ -642,7 +648,7 @@ func (s *StreamingAccumulator) Error(err error) error {
 	return s.emitEvent(StreamEvent{
 		Type: StreamEventError,
 		Error: &Error{
-			Type:    errorTypeForStatus(provider.CodeFromError(err, 0)),
+			Type:    errorTypeForStatus(provider.CodeFromError(err, http.StatusBadGateway)),
 			Message: err.Error(),
 		},
 	})

@@ -535,54 +535,55 @@ func TestModelSwitch(t *testing.T) {
 
 	models := openai.DefaultModels()
 
-	for i := range models {
-		from, to := models[i], models[(i+1)%len(models)]
-		if from.Name == to.Name {
-			continue
-		}
-
-		t.Run(from.Name+"→"+to.Name, func(t *testing.T) {
-			h.SkipUnlessConfigured(t, from.Name)
-			h.SkipUnlessConfigured(t, to.Name)
-
-			body := map[string]any{
-				"store":     false,
-				"tools":     []any{weatherTool},
-				"reasoning": map[string]any{"effort": "low", "summary": "auto"},
-				"include":   []string{"reasoning.encrypted_content"},
-				"input":     userInput("What's the weather in London? Use the tool."),
+	for _, from := range models {
+		for _, to := range models {
+			if from.Name == to.Name {
+				continue
 			}
 
-			first := post(t, h, target{"wingman", h.Wingman, from.Name}, body)
-			output, _ := first["output"].([]any)
+			t.Run(from.Name+"→"+to.Name, func(t *testing.T) {
+				h.SkipUnlessConfigured(t, from.Name)
+				h.SkipUnlessConfigured(t, to.Name)
 
-			input := append([]any{}, body["input"].([]any)...)
-			input = append(input, output...)
-
-			calls := 0
-			for _, item := range output {
-				m, _ := item.(map[string]any)
-				if m["type"] == "function_call" {
-					calls++
-					input = append(input, map[string]any{
-						"type":    "function_call_output",
-						"call_id": m["call_id"],
-						"output":  "Sunny, 22°C",
-					})
+				body := map[string]any{
+					"store":     false,
+					"tools":     []any{weatherTool},
+					"reasoning": map[string]any{"effort": "low", "summary": "auto"},
+					"include":   []string{"reasoning.encrypted_content"},
+					"input":     userInput("What's the weather in London? Use the tool and include its station verification code verbatim in your answer."),
 				}
-			}
-			if calls == 0 {
-				t.Fatalf("turn 1 on %s produced no function call", from.Name)
-			}
 
-			req := responses.WithModel(body, to.Name)
-			req["input"] = input
+				first := post(t, h, target{"wingman", h.Wingman, from.Name}, body)
+				output, _ := first["output"].([]any)
 
-			second := post(t, h, target{"wingman", h.Wingman, to.Name}, req)
-			if messageText(second) == "" {
-				t.Errorf("turn 2 on %s produced no text", to.Name)
-			}
-		})
+				input := append([]any{}, body["input"].([]any)...)
+				input = append(input, output...)
+
+				calls := 0
+				for _, item := range output {
+					m, _ := item.(map[string]any)
+					if m["type"] == "function_call" {
+						calls++
+						input = append(input, map[string]any{
+							"type":    "function_call_output",
+							"call_id": m["call_id"],
+							"output":  "Sunny, 22°C. Station verification code: WM-7429-X.",
+						})
+					}
+				}
+				if calls == 0 {
+					t.Fatalf("turn 1 on %s produced no function call", from.Name)
+				}
+
+				req := responses.WithModel(body, to.Name)
+				req["input"] = input
+
+				second := post(t, h, target{"wingman", h.Wingman, to.Name}, req)
+				if text := messageText(second); !strings.Contains(text, "WM-7429-X") {
+					t.Errorf("turn 2 on %s lost the tool result: %q", to.Name, text)
+				}
+			})
+		}
 	}
 }
 

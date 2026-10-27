@@ -549,40 +549,41 @@ func TestModelSwitch(t *testing.T) {
 
 	models := openai.DefaultModels()
 
-	for i := range models {
-		from, to := models[i], models[(i+1)%len(models)]
-		if from.Name == to.Name {
-			continue
+	for _, from := range models {
+		for _, to := range models {
+			if from.Name == to.Name {
+				continue
+			}
+
+			t.Run(from.Name+"→"+to.Name, func(t *testing.T) {
+				h.SkipUnlessConfigured(t, from.Name)
+				h.SkipUnlessConfigured(t, to.Name)
+
+				body := map[string]any{
+					"tools":    []any{weatherTool},
+					"messages": user("What's the weather in London? Use the tool and include its station verification code verbatim in your answer."),
+				}
+
+				first := post(t, h, target{"wingman", h.Wingman, from.Name}, body)
+				calls := toolCalls(first)
+				if len(calls) == 0 {
+					t.Fatalf("turn 1 on %s produced no tool call", from.Name)
+				}
+
+				message, _ := choice(first)["message"].(map[string]any)
+				messages := append(append([]any{}, body["messages"].([]any)...), message)
+				for _, c := range calls {
+					messages = append(messages, map[string]any{"role": "tool", "tool_call_id": c["id"], "content": "Sunny, 22°C. Station verification code: WM-7429-X."})
+				}
+
+				req := chat.WithModel(body, to.Name)
+				req["messages"] = messages
+
+				if text := messageText(post(t, h, target{"wingman", h.Wingman, to.Name}, req)); !strings.Contains(text, "WM-7429-X") {
+					t.Errorf("turn 2 on %s lost the tool result: %q", to.Name, text)
+				}
+			})
 		}
-
-		t.Run(from.Name+"→"+to.Name, func(t *testing.T) {
-			h.SkipUnlessConfigured(t, from.Name)
-			h.SkipUnlessConfigured(t, to.Name)
-
-			body := map[string]any{
-				"tools":    []any{weatherTool},
-				"messages": user("What's the weather in London? Use the tool."),
-			}
-
-			first := post(t, h, target{"wingman", h.Wingman, from.Name}, body)
-			calls := toolCalls(first)
-			if len(calls) == 0 {
-				t.Fatalf("turn 1 on %s produced no tool call", from.Name)
-			}
-
-			message, _ := choice(first)["message"].(map[string]any)
-			messages := append(append([]any{}, body["messages"].([]any)...), message)
-			for _, c := range calls {
-				messages = append(messages, map[string]any{"role": "tool", "tool_call_id": c["id"], "content": "Sunny, 22°C"})
-			}
-
-			req := chat.WithModel(body, to.Name)
-			req["messages"] = messages
-
-			if messageText(post(t, h, target{"wingman", h.Wingman, to.Name}, req)) == "" {
-				t.Errorf("turn 2 on %s produced no text", to.Name)
-			}
-		})
 	}
 }
 

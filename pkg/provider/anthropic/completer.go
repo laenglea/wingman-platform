@@ -70,26 +70,43 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		// A paused turn (stop_reason pause_turn, raised by server tools) is
 		// passed through as the native stop reason; the caller resends the
 		// conversation to continue, as the API documents.
-		emitted, fallback := false, false
-		c.streamMessage(ctx, req, options)(func(delta *provider.Completion, err error) bool {
-			if !emitted && req.Speed == anthropic.BetaMessageNewParamsSpeedFast && fastUnavailable(err) {
-				fallback = true
-				return false
+		continuations := assistantContinuations(messages)
+		for {
+			emitted, fallback, resume := false, false, false
+			c.streamMessage(ctx, req, options, continuations)(func(delta *provider.Completion, err error) bool {
+				if !emitted && req.Speed == anthropic.BetaMessageNewParamsSpeedFast && fastUnavailable(err) {
+					fallback = true
+					return false
+				}
+				if !emitted && prefillUnsupported(err) && canContinueAssistant(req, options) {
+					resume = true
+					return false
+				}
+				if delta != nil {
+					emitted = true
+				}
+				return yield(delta, err)
+			})
+			if fallback {
+				standard := *req
+				standard.Speed = anthropic.BetaMessageNewParamsSpeedStandard
+				req = &standard
+				continue
 			}
-			if delta != nil {
-				emitted = true
+			if resume {
+				last := len(req.Messages) - 1
+				continuations = append(continuations, assistantContinuation{Message: last, Blocks: len(req.Messages[last].OfAssistant.Content)})
+				continued := *req
+				continued.Messages = append(slices.Clone(req.Messages), assistantContinuationMessage())
+				req = &continued
+				continue
 			}
-			return yield(delta, err)
-		})
-		if fallback {
-			standard := *req
-			standard.Speed = anthropic.BetaMessageNewParamsSpeedStandard
-			c.streamMessage(ctx, &standard, options)(yield)
+			return
 		}
 	}
 }
 
-func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessageNewParams, options *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
+func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessageNewParams, options *provider.CompleteOptions, continuations []assistantContinuation) iter.Seq2[*provider.Completion, error] {
 	return func(yield func(*provider.Completion, error) bool) {
 		toolAliases := provider.ToolAliases(options.Tools)
 		notes := progressNotes(req.Thinking)
@@ -117,7 +134,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 				ID: message.ID, Model: c.model,
 				Message: &provider.Message{
 					Role:    provider.MessageRoleAssistant,
-					Content: []provider.Content{provider.ReasoningContent(provider.Reasoning{Signature: message.Content[index].Signature})},
+					Content: []provider.Content{provider.ReasoningContent(provider.Reasoning{Signature: wrapContinuationSignature(message.Content[index].Signature, continuations)})},
 				},
 			}, nil)
 		}
@@ -226,7 +243,7 @@ func (c *Completer) streamMessage(ctx context.Context, req *anthropic.BetaMessag
 
 							Content: []provider.Content{
 								provider.ReasoningContent(provider.Reasoning{
-									Signature: event.Data,
+									Signature: wrapContinuationSignature(event.Data, continuations),
 									Redacted:  true,
 								}),
 							},
@@ -904,11 +921,12 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				}
 
 				if c.Reasoning != nil && c.Reasoning.Signature != "" {
+					signature, _ := unwrapContinuationSignature(c.Reasoning.Signature)
 					// Include thinking blocks for conversation continuity.
 					// Adaptive signatures carry the encrypted chain of thought,
 					// so empty text still resumes reasoning on replay.
 					if c.Reasoning.Redacted {
-						blocks = append(blocks, anthropic.NewBetaRedactedThinkingBlock(c.Reasoning.Signature))
+						blocks = append(blocks, anthropic.NewBetaRedactedThinkingBlock(signature))
 					} else {
 						// Responses-style clients replay the visible thinking as
 						// a summary part; that text is what the signature covers.
@@ -917,7 +935,7 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 							thinking = c.Reasoning.Summary
 						}
 
-						blocks = append(blocks, anthropic.NewBetaThinkingBlock(c.Reasoning.Signature, thinking))
+						blocks = append(blocks, anthropic.NewBetaThinkingBlock(signature, thinking))
 					}
 				}
 
@@ -966,6 +984,13 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 				if c.ToolResult != nil && c.ToolResult.Kind == provider.ToolKindToolSearch && c.ToolResult.Execution != "client" {
 					blocks = append(blocks, toolSearchResultBlock(*c.ToolResult))
 				}
+			}
+
+			// Filtering unsigned reasoning or unsupported content can leave an
+			// empty assistant turn. After tool results this becomes a prefill,
+			// which current Claude models reject.
+			if len(blocks) == 0 {
+				break
 			}
 
 			message := anthropic.BetaAssistantMessageParam{
@@ -1296,7 +1321,11 @@ func (c *Completer) convertMessageRequest(input []provider.Message, options *pro
 	}
 
 	if len(messages) > 0 {
-		req.Messages = messages
+		var err error
+		req.Messages, err = replayAssistantContinuations(messages, assistantContinuations(input))
+		if err != nil {
+			return nil, err
+		}
 	}
 	if triggerCompaction {
 		if len(options.Stop) > 0 || options.Schema != nil || forcesTool {
