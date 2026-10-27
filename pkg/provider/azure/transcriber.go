@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"strconv"
+	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 
@@ -52,10 +53,11 @@ func (t *Transcriber) transcribe(ctx context.Context, input provider.File, optio
 		options = new(provider.TranscribeOptions)
 	}
 
-	locales := options.Languages
+	// Without locales, Azure identifies the spoken language itself.
+	var locales []string
 
-	if len(locales) == 0 {
-		locales = []string{"en-US"}
+	for _, l := range options.Languages {
+		locales = append(locales, mapLocale(l))
 	}
 
 	definition := transcriptionDefinition{
@@ -215,6 +217,38 @@ func (t *Transcriber) transcribe(ctx context.Context, input provider.File, optio
 	}
 
 	return &transcription, nil
+}
+
+// localeMap maps the language codes Whisper clients send (ISO 639) to the
+// locale Azure transcribes for that language, one per language in Azure's
+// fast transcription locale list (api-version 2025-10-15). Where Azure offers
+// several, it's the language's most common one. "no" and "tl" are Whisper's
+// codes for Norwegian Bokmål and Filipino.
+var localeMap = map[string]string{
+	"af": "af-ZA", "am": "am-ET", "ar": "ar-EG", "as": "as-IN", "az": "az-AZ", "bg": "bg-BG",
+	"bho": "bho-IN", "bn": "bn-IN", "bs": "bs-BA", "ca": "ca-ES", "cs": "cs-CZ", "cy": "cy-GB",
+	"da": "da-DK", "de": "de-DE", "el": "el-GR", "en": "en-US", "es": "es-ES", "et": "et-EE",
+	"eu": "eu-ES", "fa": "fa-IR", "fi": "fi-FI", "fil": "fil-PH", "fr": "fr-FR", "ga": "ga-IE",
+	"gl": "gl-ES", "gu": "gu-IN", "he": "he-IL", "hi": "hi-IN", "hr": "hr-HR", "hu": "hu-HU",
+	"hy": "hy-AM", "id": "id-ID", "is": "is-IS", "it": "it-IT", "ja": "ja-JP", "jv": "jv-ID",
+	"ka": "ka-GE", "kk": "kk-KZ", "km": "km-KH", "kn": "kn-IN", "ko": "ko-KR", "lo": "lo-LA",
+	"lt": "lt-LT", "lv": "lv-LV", "mk": "mk-MK", "ml": "ml-IN", "mn": "mn-MN", "mr": "mr-IN",
+	"ms": "ms-MY", "mt": "mt-MT", "my": "my-MM", "nb": "nb-NO", "ne": "ne-NP", "nl": "nl-NL",
+	"no": "nb-NO", "or": "or-IN", "pa": "pa-IN", "pl": "pl-PL", "ps": "ps-AF", "pt": "pt-BR",
+	"ro": "ro-RO", "ru": "ru-RU", "si": "si-LK", "sk": "sk-SK", "sl": "sl-SI", "so": "so-SO",
+	"sq": "sq-AL", "sr": "sr-RS", "sv": "sv-SE", "sw": "sw-KE", "ta": "ta-IN", "te": "te-IN",
+	"th": "th-TH", "tl": "fil-PH", "tr": "tr-TR", "uk": "uk-UA", "ur": "ur-IN", "uz": "uz-UZ",
+	"vi": "vi-VN", "wuu": "wuu-CN", "yue": "yue-CN", "zh": "zh-CN", "zu": "zu-ZA",
+}
+
+// mapLocale resolves a bare language code to an Azure locale; full locales
+// such as de-CH, and codes Azure doesn't transcribe, pass through.
+func mapLocale(code string) string {
+	if locale, ok := localeMap[strings.ToLower(code)]; ok {
+		return locale
+	}
+
+	return code
 }
 
 type transcriptionDefinition struct {
