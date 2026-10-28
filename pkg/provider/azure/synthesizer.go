@@ -1,12 +1,15 @@
 package azure
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -31,20 +34,52 @@ func NewSynthesizer(endpoint, model string, options ...Option) (*Synthesizer, er
 	}, nil
 }
 
+// Synthesize streams the audio as Azure produces it. Compressed and raw
+// formats arrive incrementally; wav (RIFF) is buffered by Azure until done.
 func (s *Synthesizer) Synthesize(ctx context.Context, content string, options *provider.SynthesizeOptions) iter.Seq2[*provider.Synthesis, error] {
 	return func(yield func(*provider.Synthesis, error) bool) {
-		synthesis, err := s.synthesize(ctx, content, options)
+		resp, contentType, err := s.synthesize(ctx, content, options)
 
 		if err != nil {
 			yield(nil, err)
 			return
 		}
 
-		yield(synthesis, nil)
+		defer resp.Body.Close()
+
+		id := uuid.NewString()
+
+		buffer := make([]byte, 32*1024)
+
+		for {
+			n, err := resp.Body.Read(buffer)
+
+			if n > 0 {
+				chunk := provider.Synthesis{
+					ID:    id,
+					Model: s.model,
+
+					Content:     bytes.Clone(buffer[:n]),
+					ContentType: contentType,
+				}
+
+				if !yield(&chunk, nil) {
+					return
+				}
+			}
+
+			if err != nil {
+				if err != io.EOF {
+					yield(nil, err)
+				}
+
+				return
+			}
+		}
 	}
 }
 
-func (s *Synthesizer) synthesize(ctx context.Context, content string, options *provider.SynthesizeOptions) (*provider.Synthesis, error) {
+func (s *Synthesizer) synthesize(ctx context.Context, content string, options *provider.SynthesizeOptions) (*http.Response, string, error) {
 	if options == nil {
 		options = new(provider.SynthesizeOptions)
 	}
@@ -57,19 +92,19 @@ func (s *Synthesizer) synthesize(ctx context.Context, content string, options *p
 
 	outputFormat, contentType, err := mapFormat(options.Format)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	ssml, err := buildSSML(voice, content)
+	ssml, err := buildSSML(voice, content, options.Speed)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	endpoint := s.url + "/tts/cognitiveservices/v1"
 
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(ssml))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	req.Header.Set("Content-Type", "application/ssml+xml")
@@ -82,44 +117,69 @@ func (s *Synthesizer) synthesize(ctx context.Context, content string, options *p
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, convertError(resp)
+		defer resp.Body.Close()
+
+		err := convertError(resp)
+
+		// Azure answers unknown voices, including HD voices that aren't offered
+		// in the resource's region, with an empty 400.
+		var perr *provider.ProviderError
+		if errors.As(err, &perr) && perr.Code == http.StatusBadRequest && perr.Message == http.StatusText(http.StatusBadRequest) {
+			perr.Message = fmt.Sprintf("azure speech rejected the request; check that voice %q is available in the resource's region", voice)
+		}
+
+		return nil, "", err
 	}
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	return &provider.Synthesis{
-		ID:    uuid.NewString(),
-		Model: s.model,
-
-		Content:     data,
-		ContentType: contentType,
-	}, nil
+	return resp, contentType, nil
 }
 
-// voiceMap maps OpenAI voice aliases to Azure Dragon HD personas.
+// voiceMap maps OpenAI voice names to Azure Dragon HD voices. The speech
+// voices are matched on measured pitch, pitch range, and pace (fable keeps its
+// British accent); the realtime voices on language, accent, and presentation.
+// Locales without a Dragon HD persona use Dragon HD Omni.
 var voiceMap = map[string]string{
+	// Speech API voices
 	"alloy":   "en-US-Alloy:DragonHDLatestNeural",
-	"ash":     "en-US-Andrew:DragonHDLatestNeural",
-	"ballad":  "en-US-Brian:DragonHDLatestNeural",
-	"coral":   "en-US-Emma:DragonHDLatestNeural",
-	"echo":    "en-US-Andrew:DragonHDLatestNeural",
-	"fable":   "en-US-Brian:DragonHDLatestNeural",
+	"ash":     "en-US-Brian:DragonHDLatestNeural",
+	"ballad":  "en-US-Jimmie:DragonHDLatestNeural",
+	"cedar":   "en-US-Steffan:DragonHDLatestNeural",
+	"coral":   "en-US-Jenny:DragonHDLatestNeural",
+	"echo":    "en-US-Davis:DragonHDLatestNeural",
+	"fable":   "en-GB-Ollie:DragonHDLatestNeural",
+	"marin":   "en-US-Emma:DragonHDLatestNeural",
 	"nova":    "en-US-Nova:DragonHDLatestNeural",
-	"onyx":    "en-US-Steffan:DragonHDLatestNeural",
-	"sage":    "en-US-Andrew:DragonHDLatestNeural",
-	"shimmer": "en-US-Ava:DragonHDLatestNeural",
-	"verse":   "en-US-Brian:DragonHDLatestNeural",
-	"marin":   "en-US-Ava:DragonHDLatestNeural",
-	"cedar":   "en-US-Andrew:DragonHDLatestNeural",
+	"onyx":    "en-US-Andrew:DragonHDLatestNeural",
+	"sage":    "en-US-Tiana:DragonHDLatestNeural",
+	"shimmer": "en-US-Serena:DragonHDLatestNeural",
+	"verse":   "en-US-Tyler:DragonHDLatestNeural",
+
+	// Realtime voices
+	"beacon":   "fil-PH-Angelo:DragonHDLatestNeural",
+	"bossa":    "pt-BR-Thalita:DragonHDLatestNeural",
+	"brise":    "fr-FR-Vivienne:DragonHDLatestNeural",
+	"cinder":   "en-US-Vance:DragonHDLatestNeural",
+	"delta":    "en-US-Phoebe:DragonHDLatestNeural",
+	"flitz":    "de-DE-Florian:DragonHDLatestNeural",
+	"gleam":    "en-US-Ava:DragonHDLatestNeural",
+	"harema":   "ja-JP-Nanami:DragonHDLatestNeural",
+	"juni":     "de-DE-Katja:DragonHDOmniLatestNeural",
+	"meridian": "en-US-Adam:DragonHDLatestNeural",
+	"nira":     "en-IN-Aarti:DragonHDLatestNeural",
+	"noeul":    "ko-KR-SunHi:DragonHDLatestNeural",
+	"nuri":     "de-DE-Seraphina:DragonHDLatestNeural",
+	"quartz":   "en-AU-Natasha:DragonHDOmniLatestNeural",
+	"ripple":   "en-AU-William:DragonHDOmniLatestNeural",
+	"shida":    "ja-JP-Masaru:DragonHDLatestNeural",
+	"sillage":  "fr-FR-Remy:DragonHDLatestNeural",
+	"stone":    "en-IE-Connor:DragonHDOmniLatestNeural",
+	"tempo":    "pt-BR-Macerio:DragonHDLatestNeural",
+	"vesper":   "en-GB-Ryan:DragonHDLatestNeural",
+	"willow":   "en-IE-Emily:DragonHDOmniLatestNeural",
 }
 
 func mapVoice(voice string) string {
@@ -135,7 +195,12 @@ func mapVoice(voice string) string {
 	return voice
 }
 
-func buildSSML(voice, text string) (string, error) {
+type ssmlProsody struct {
+	Rate string `xml:"rate,attr"`
+	Text string `xml:",chardata"`
+}
+
+func buildSSML(voice, text string, speed *float32) (string, error) {
 	// Extract lang from voice name (e.g. "en-US-JennyNeural" -> "en-US")
 	lang := "en-US"
 	parts := strings.SplitN(voice, "-", 3)
@@ -149,8 +214,9 @@ func buildSSML(voice, text string) (string, error) {
 		XMLNS   string   `xml:"xmlns,attr"`
 		Lang    string   `xml:"xml:lang,attr"`
 		Voice   struct {
-			Name string `xml:"name,attr"`
-			Text string `xml:",chardata"`
+			Name    string       `xml:"name,attr"`
+			Text    string       `xml:",chardata"`
+			Prosody *ssmlProsody `xml:"prosody,omitempty"`
 		} `xml:"voice"`
 	}{
 		Version: "1.0",
@@ -158,7 +224,16 @@ func buildSSML(voice, text string) (string, error) {
 		Lang:    lang,
 	}
 	document.Voice.Name = voice
-	document.Voice.Text = text
+
+	// Rate is a multiplier of the voice's natural pace; Azure clamps it to 0.5–2.
+	if speed != nil && *speed > 0 && *speed != 1 {
+		document.Voice.Prosody = &ssmlProsody{
+			Rate: strconv.FormatFloat(float64(*speed), 'f', -1, 32),
+			Text: text,
+		}
+	} else {
+		document.Voice.Text = text
+	}
 
 	data, err := xml.Marshal(document)
 	return string(data), err
@@ -170,7 +245,7 @@ func mapFormat(format string) (string, string, error) {
 	case "", "mp3":
 		return "audio-24khz-160kbitrate-mono-mp3", "audio/mpeg", nil
 	case "opus":
-		return "ogg-24khz-16bit-mono-opus", "audio/ogg", nil
+		return "ogg-24khz-16bit-mono-opus", "audio/opus", nil
 	case "wav":
 		return "riff-24khz-16bit-mono-pcm", "audio/wav", nil
 	case "pcm":

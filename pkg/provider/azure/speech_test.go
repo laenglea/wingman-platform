@@ -1,6 +1,7 @@
 package azure
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -39,6 +40,7 @@ func TestSynthesizeResourceRequest(t *testing.T) {
 		options      *provider.SynthesizeOptions
 		voice        string
 		lang         string
+		rate         string
 		outputFormat string
 		contentType  string
 	}{
@@ -60,11 +62,21 @@ func TestSynthesizeResourceRequest(t *testing.T) {
 		{
 			name: "OpenAI alias uses HD", options: &provider.SynthesizeOptions{Voice: "ALLOY", Format: "OPUS"},
 			voice: "en-US-Alloy:DragonHDLatestNeural", lang: "en-US",
-			outputFormat: "ogg-24khz-16bit-mono-opus", contentType: "audio/ogg",
+			outputFormat: "ogg-24khz-16bit-mono-opus", contentType: "audio/opus",
 		},
 		{
 			name: "Omni voice passes through", options: &provider.SynthesizeOptions{Voice: "de-DE-Conrad:DragonHDOmniLatestNeural"},
 			voice: "de-DE-Conrad:DragonHDOmniLatestNeural", lang: "de-DE",
+			outputFormat: "audio-24khz-160kbitrate-mono-mp3", contentType: "audio/mpeg",
+		},
+		{
+			name: "speed sets prosody rate", options: &provider.SynthesizeOptions{Voice: "nova", Speed: ptr(float32(1.5))},
+			voice: "en-US-Nova:DragonHDLatestNeural", lang: "en-US", rate: "1.5",
+			outputFormat: "audio-24khz-160kbitrate-mono-mp3", contentType: "audio/mpeg",
+		},
+		{
+			name: "default speed adds no prosody", options: &provider.SynthesizeOptions{Speed: ptr(float32(1))},
+			voice: "en-US-Ava:DragonHDLatestNeural", lang: "en-US",
 			outputFormat: "audio-24khz-160kbitrate-mono-mp3", contentType: "audio/mpeg",
 		},
 		{
@@ -90,8 +102,12 @@ func TestSynthesizeResourceRequest(t *testing.T) {
 					XMLName xml.Name
 					Lang    string `xml:"http://www.w3.org/XML/1998/namespace lang,attr"`
 					Voices  []struct {
-						Name string `xml:"name,attr"`
-						Text string `xml:",chardata"`
+						Name    string `xml:"name,attr"`
+						Text    string `xml:",chardata"`
+						Prosody []struct {
+							Rate string `xml:"rate,attr"`
+							Text string `xml:",chardata"`
+						} `xml:"prosody"`
 					} `xml:"voice"`
 				}
 				if err := xml.NewDecoder(req.Body).Decode(&document); err != nil {
@@ -100,8 +116,15 @@ func TestSynthesizeResourceRequest(t *testing.T) {
 				if document.XMLName.Space != "http://www.w3.org/2001/10/synthesis" || document.XMLName.Local != "speak" || document.Lang != tt.lang {
 					t.Errorf("unexpected SSML root: %+v", document)
 				}
-				if len(document.Voices) != 1 || document.Voices[0].Name != tt.voice || document.Voices[0].Text != input {
-					t.Errorf("SSML did not preserve voice and plain text: %+v", document.Voices)
+				if len(document.Voices) != 1 || document.Voices[0].Name != tt.voice {
+					t.Fatalf("SSML did not preserve voice: %+v", document.Voices)
+				}
+				if voice := document.Voices[0]; tt.rate == "" {
+					if voice.Text != input || len(voice.Prosody) != 0 {
+						t.Errorf("SSML did not preserve plain text: %+v", voice)
+					}
+				} else if voice.Text != "" || len(voice.Prosody) != 1 || voice.Prosody[0].Rate != tt.rate || voice.Prosody[0].Text != input {
+					t.Errorf("SSML did not wrap text in prosody rate %s: %+v", tt.rate, voice)
 				}
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("audio bytes"))}, nil
 			})}
@@ -124,6 +147,75 @@ func TestSynthesizeResourceRequest(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSynthesizeStreamsChunks(t *testing.T) {
+	audio := bytes.Repeat([]byte("0123456789"), 10_000)
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(audio))}, nil
+	})}
+	synthesizer, err := NewSynthesizer("https://speech.test", "azure-tts", WithClient(client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content []byte
+	ids := map[string]bool{}
+	chunks := 0
+	for result, err := range synthesizer.Synthesize(context.Background(), "Hello", &provider.SynthesizeOptions{Format: "pcm"}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		chunks++
+		ids[result.ID] = true
+		if result.ContentType != "audio/pcm" || result.Model != "azure-tts" {
+			t.Errorf("unexpected chunk: %+v", result)
+		}
+		content = append(content, result.Content...)
+	}
+	if chunks < 2 || len(ids) != 1 || !bytes.Equal(content, audio) {
+		t.Fatalf("chunks = %d, ids = %d, bytes = %d; want several chunks of one synthesis with all %d bytes", chunks, len(ids), len(content), len(audio))
+	}
+}
+
+func TestSynthesizeExplainsEmptyBadRequest(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusBadRequest, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}
+	synthesizer, err := NewSynthesizer("https://speech.test", "azure-tts", WithClient(client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for result, err := range synthesizer.Synthesize(context.Background(), "Hello", &provider.SynthesizeOptions{Voice: "en-US-Nobody:DragonHDLatestNeural"}) {
+		if result != nil || provider.CodeFromError(err, 0) != http.StatusBadRequest || !strings.Contains(err.Error(), `"en-US-Nobody:DragonHDLatestNeural" is available`) {
+			t.Fatalf("result = %v, error = %v; want a 400 naming the voice", result, err)
+		}
+	}
+}
+
+func TestOpenAIVoicesMapToDistinctHDVoices(t *testing.T) {
+	voices := []string{
+		"alloy", "ash", "ballad", "cedar", "coral", "echo", "fable", "marin", "nova", "onyx", "sage", "shimmer", "verse",
+		"beacon", "bossa", "brise", "cinder", "delta", "flitz", "gleam", "harema", "juni", "meridian", "nira", "noeul",
+		"nuri", "quartz", "ripple", "shida", "sillage", "stone", "tempo", "vesper", "willow",
+	}
+	seen := map[string]string{}
+	for _, voice := range voices {
+		mapped := mapVoice(voice)
+		if !strings.Contains(mapped, ":DragonHD") {
+			t.Errorf("%s maps to %q, want a Dragon HD voice", voice, mapped)
+		}
+		if other, ok := seen[mapped]; ok {
+			t.Errorf("%s and %s both map to %s", voice, other, mapped)
+		}
+		seen[mapped] = voice
+	}
+	if len(voiceMap) != len(voices) {
+		t.Errorf("voiceMap has %d entries, want %d", len(voiceMap), len(voices))
+	}
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }
 
 func TestSynthesizeRejectsUnsupportedFormatsBeforeRequest(t *testing.T) {
@@ -229,5 +321,50 @@ func TestTranscribeResourceRequest(t *testing.T) {
 	}
 	if results != 1 {
 		t.Fatalf("results = %d", results)
+	}
+}
+
+func TestTranscribeLocales(t *testing.T) {
+	for _, tt := range []struct {
+		languages []string
+		locales   string
+	}{
+		{nil, `{}`},
+		{[]string{"de"}, `{"locales":["de-DE"]}`},
+		{[]string{"EN"}, `{"locales":["en-US"]}`},
+		{[]string{"pt", "no"}, `{"locales":["pt-BR","nb-NO"]}`},
+		{[]string{"bn", "tl", "yue"}, `{"locales":["bn-IN","fil-PH","yue-CN"]}`},
+		{[]string{"de-CH"}, `{"locales":["de-CH"]}`},
+		{[]string{"be"}, `{"locales":["be"]}`},
+	} {
+		t.Run(strings.Join(tt.languages, ","), func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if err := req.ParseMultipartForm(1 << 20); err != nil {
+					t.Fatal(err)
+				}
+				if got := req.MultipartForm.Value["definition"]; len(got) != 1 || got[0] != tt.locales {
+					t.Errorf("definition = %v, want %s", got, tt.locales)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"combinedPhrases":[{"text":"Hallo"}]}`))}, nil
+			})}
+			transcriber, err := NewTranscriber("https://speech.test", "azure-stt", WithClient(client))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, err := range transcriber.Transcribe(context.Background(), provider.File{Name: "hello.wav", Content: []byte("audio")}, &provider.TranscribeOptions{Languages: tt.languages}) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestWhisperLanguagesMapToLocales(t *testing.T) {
+	// Whisper's languages, minus Belarusian and Māori, which Azure doesn't transcribe.
+	for _, code := range strings.Fields("af ar hy az bs bg ca zh hr cs da nl en et fi fr gl de el he hi hu is id it ja kn kk ko lv lt mk ms mr ne no fa pl pt ro ru sr sk sl es sw sv tl ta th tr uk ur vi cy") {
+		if _, ok := localeMap[code]; !ok {
+			t.Errorf("no locale for %s", code)
+		}
 	}
 }
