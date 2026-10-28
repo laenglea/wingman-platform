@@ -26,8 +26,8 @@ func accumulateStream(t *testing.T, events []string, options *provider.CompleteO
 		wire.WriteString(": keepalive\n\n\n")
 		wire.WriteString(sseEvent(metadata.Type, event))
 	}
-	client := &http.Client{Transport: lifecycleTransport(func(*http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire.String()))}, nil
+	client := &http.Client{Transport: lifecycleTransport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Request: r, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire.String()))}, nil
 	})}
 	c, err := NewCompleter("http://anthropic.test", "claude-test", WithClient(client), WithMaxRetries(0))
 	if err != nil {

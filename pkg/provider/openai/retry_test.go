@@ -33,7 +33,10 @@ func TestResponderFailedRetryAdvice(t *testing.T) {
 		{"server failure", "server_error", `{"Retry-After":"8"}`, "unavailable", 502, 8 * time.Second},
 		{"missing code", "", `{"Retry-After":"8"}`, "unavailable", 502, 8 * time.Second},
 		{"terminal classification preserved", "invalid_prompt", `{"Retry-After":"8"}`, "invalid prompt", 400, 8 * time.Second},
-		{"quota classification preserved", "insufficient_quota", `{"Retry-After":"8"}`, "quota exhausted", 400, 8 * time.Second},
+		{"quota classification preserved", "insufficient_quota", `{"Retry-After":"8"}`, "quota exhausted", 429, 8 * time.Second},
+		{"quota has no invented retry", "credit_balance_exhausted", `{}`, "quota exhausted", 429, 0},
+		{"context window is a request error", "context_length_exceeded", `{}`, "context too long", 400, 0},
+		{"unknown failure", "future_server_failure", `{}`, "unknown failure", 502, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			message, _ := json.Marshal(tc.message)
@@ -73,6 +76,43 @@ func TestConvertStreamErrorRetryHeaders(t *testing.T) {
 	got := convertError(err)
 	if provider.RetryAfterFromError(got) != 9*time.Second || provider.CodeFromError(got, 0) != 429 || !errors.Is(got, err) {
 		t.Fatalf("converted error = %#v", got)
+	}
+}
+
+func TestResponderStandaloneErrorEvent(t *testing.T) {
+	for _, tc := range []struct {
+		code   string
+		status int
+		retry  time.Duration
+	}{
+		{"rate_limit_exceeded", 429, defaultRateLimitRetry},
+		{"slow_down", 429, defaultRateLimitRetry},
+		{"server_is_overloaded", 503, 0},
+		{"project_spend_limit_exceeded", 429, 0},
+		{"invalid_prompt", 400, 0},
+		{"context_length_exceeded", 400, 0},
+		{"future_error", 502, 0},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			client := &http.Client{Transport: responderLifecycleTransport(func(r *http.Request) (*http.Response, error) {
+				data := `event: error` + "\ndata: " + `{"type":"error","sequence_number":0,"code":"` + tc.code + `","message":"Request failed","param":null}` + "\n\n"
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(data)), Request: r}, nil
+			})}
+			responder, err := NewResponder("http://upstream.test", "test", WithClient(client), WithMaxRetries(0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var failure error
+			for _, err := range responder.Complete(t.Context(), []provider.Message{provider.UserMessage("Go")}, nil) {
+				if err != nil {
+					failure = err
+					break
+				}
+			}
+			if failure == nil || provider.CodeFromError(failure, 0) != tc.status || failure.Error() != "Request failed" || provider.RetryAfterFromError(failure) != tc.retry {
+				t.Fatalf("error=%#v", failure)
+			}
+		})
 	}
 }
 

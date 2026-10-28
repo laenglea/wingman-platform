@@ -105,6 +105,8 @@ func newProviderError(errType, errCode, message string, statusCode int, retryAft
 	rateLimited := isRateLimitError(errType, errCode)
 	if rateLimited {
 		statusCode = http.StatusTooManyRequests
+	} else if errType == "service_unavailable_error" || errCode == "server_is_overloaded" {
+		statusCode = http.StatusServiceUnavailable
 	}
 
 	// Prefer the upstream `code` (e.g. "insufficient_quota",
@@ -114,11 +116,12 @@ func newProviderError(errType, errCode, message string, statusCode int, retryAft
 		t = errType
 	}
 
-	if retryAfter <= 0 {
+	quotaLimited := isQuotaError(errType) || isQuotaError(errCode)
+	if retryAfter <= 0 && !quotaLimited {
 		retryAfter = parseRetryFromMessage(message)
 	}
 
-	if retryAfter <= 0 && rateLimited {
+	if retryAfter <= 0 && rateLimited && !quotaLimited {
 		retryAfter = defaultRateLimitRetry
 	}
 
@@ -139,8 +142,12 @@ func newProviderError(errType, errCode, message string, statusCode int, retryAft
 // "429" or Azure-specific innererror codes like "RateLimitReached" /
 // "TokensRateLimit" / "RequestRateLimit".
 func isRateLimitError(errType, errCode string) bool {
+	if isQuotaError(errType) || isQuotaError(errCode) {
+		return true
+	}
 	switch strings.ToLower(errType) {
 	case "too_many_requests",
+		"rate_limit_error",
 		"rate_limit_exceeded",
 		"requests",
 		"tokens":
@@ -149,6 +156,7 @@ func isRateLimitError(errType, errCode string) bool {
 
 	switch strings.ToLower(errCode) {
 	case "rate_limit_exceeded",
+		"slow_down",
 		"rate_limit_reached",
 		"insufficient_quota",
 		"too_many_requests",
@@ -161,6 +169,16 @@ func isRateLimitError(errType, errCode string) bool {
 		return true
 	}
 
+	return false
+}
+
+// Billing and spend limits also use 429, but waiting does not restore access.
+func isQuotaError(code string) bool {
+	switch strings.ToLower(code) {
+	case "insufficient_quota", "credit_balance_exhausted", "organization_spend_limit_exceeded",
+		"project_spend_limit_exceeded", "organization_usage_limit_exceeded":
+		return true
+	}
 	return false
 }
 
@@ -252,17 +270,21 @@ func parseRetryAfter(h http.Header) time.Duration {
 // (emitted via response.failed streaming events) to an HTTP status code.
 // See: https://platform.openai.com/docs/api-reference/responses-streaming/response/failed
 func statusCodeFromResponseErrorCode(code string) int {
-	switch code {
-	case "rate_limit_exceeded":
+	if isRateLimitError("", code) {
 		return http.StatusTooManyRequests
-	case "server_error", "vector_store_timeout":
-		return http.StatusBadGateway
-	case "":
-		return http.StatusBadGateway
-	default:
-		// All other documented codes are request-payload issues
-		// (invalid_prompt, invalid_image, image_too_large, etc.)
+	}
+	switch code {
+	case "server_is_overloaded", "service_unavailable_error":
+		return http.StatusServiceUnavailable
+	// context_length_exceeded is undocumented here but sent in practice.
+	case "invalid_prompt", "context_length_exceeded", "data_residency_mismatch", "bio_policy", "misalignment_policy_violation",
+		"invalid_image", "invalid_image_format", "invalid_base64_image", "invalid_image_url",
+		"image_too_large", "image_too_small", "image_parse_error", "image_content_policy_violation",
+		"invalid_image_mode", "image_file_too_large", "unsupported_image_media_type",
+		"empty_image_file", "failed_to_download_image", "image_file_not_found":
 		return http.StatusBadRequest
+	default:
+		return http.StatusBadGateway
 	}
 }
 

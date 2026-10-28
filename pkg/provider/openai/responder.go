@@ -434,6 +434,11 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 				emitStatus(status, toResponseUsage(event.Response.Usage))
 				return
 
+			case responses.ResponseErrorEvent:
+				retryAfter := parseRetryHeaders(json.RawMessage(event.JSON.ExtraFields["headers"].Raw()))
+				yield(nil, newProviderError("", event.Code, event.Message, statusCodeFromResponseErrorCode(event.Code), retryAfter, nil))
+				return
+
 			case responses.ResponseFailedEvent:
 				errCode := string(event.Response.Error.Code)
 
@@ -449,8 +454,6 @@ func (r *Responder) Complete(ctx context.Context, messages []provider.Message, o
 				retryAfter := parseRetryHeaders(json.RawMessage(event.Response.Error.JSON.ExtraFields["headers"].Raw()))
 				statusCode := statusCodeFromResponseErrorCode(errCode)
 				providerErr := newProviderError("", errCode, msg, statusCode, retryAfter, nil)
-				// Keep the Responses error classifications, including terminal failures.
-				providerErr.Code = statusCode
 				yield(nil, providerErr)
 				return
 

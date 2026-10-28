@@ -271,7 +271,11 @@ func TestErrorAfterFinishReasonIsNotSuccess(t *testing.T) {
 				})
 				status, _, raw := post(t, local, p.path, p.body)
 				if !stream {
-					requireStatus(t, status, 502, raw)
+					want := http.StatusBadGateway
+					if p.name == "gemini" {
+						want = http.StatusInternalServerError
+					}
+					requireStatus(t, status, want, raw)
 					return
 				}
 				requireStatus(t, status, 200, raw)

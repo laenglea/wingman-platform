@@ -4,13 +4,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/pkg/provider/tools/custom"
 	"google.golang.org/genai/interactions/models/interactions"
+	"google.golang.org/genproto/googleapis/rpc/code"
 )
 
 type interactionStep struct {
@@ -114,7 +114,7 @@ func (s *interactionState) event(event interactions.InteractionSSEEvent) (*provi
 		return s.finish(status, interaction.Usage), nil
 	case event.ErrorEvent != nil:
 		err := event.ErrorEvent.Error
-		return nil, interactionProviderError(fmt.Errorf("gemini: %s", value(err.GetMessage())), http.StatusBadGateway, value(err.GetCode()), value(err.GetMessage()), "")
+		return nil, interactionProviderError(fmt.Errorf("gemini: %s", value(err.GetMessage())), 0, value(err.GetCode()), value(err.GetMessage()), "", nil)
 	case event.IsUnknown():
 		return nil, fmt.Errorf("gemini: unsupported interaction event: %s", event.UnknownRaw)
 	}
@@ -183,7 +183,9 @@ func (s *interactionState) start(index int, step interactions.Step) (*provider.C
 			}
 		}
 		if err := step.ModelOutputStep.Error; err != nil && value(err.Code) != 0 {
-			s.modelError(err)
+			if failure := s.modelError(err); failure != nil {
+				return nil, failure
+			}
 			delta.Status, delta.StopReason, delta.StopDetails = s.status, s.stopReason, s.details
 		}
 	default:
@@ -333,7 +335,7 @@ func (s *interactionState) finish(status string, usage *interactions.Usage) *pro
 	return delta
 }
 
-func (s *interactionState) modelError(err *interactions.Status) {
+func (s *interactionState) modelError(err *interactions.Status) error {
 	s.status = provider.CompletionStatusFailed
 	s.details = &provider.StopDetails{Type: strconv.Itoa(value(err.Code)), Explanation: value(err.Message)}
 	for _, detail := range err.Details {
@@ -348,7 +350,16 @@ func (s *interactionState) modelError(err *interactions.Status) {
 		s.details.Type = "refusal"
 	} else if value(err.Code) == 11 {
 		s.status, s.stopReason = provider.CompletionStatusIncomplete, provider.StopReasonMaxTokens
+	} else {
+		// Model output errors use google.rpc.Code numbers, not HTTP codes.
+		errType := code.Code(value(err.Code)).String()
+		message := value(err.Message)
+		if message == "" {
+			message = "gemini: model request failed"
+		}
+		return &provider.ProviderError{Code: statusCodeFromErrorType(errType), Type: errType, Message: message, RetryAfter: retryFromDetails(err.Details)}
 	}
+	return nil
 }
 
 func toCompletionUsage(usage *interactions.Usage) *provider.Usage {
