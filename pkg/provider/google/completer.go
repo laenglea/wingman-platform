@@ -85,6 +85,9 @@ func (c *Completer) Complete(ctx context.Context, messages []provider.Message, o
 		for stream.Next() {
 			delta, err := state.event(stream.Value().Data)
 			if err != nil {
+				if upstream, ok := errors.AsType[*provider.ProviderError](err); ok && response.HTTPMeta.Response != nil {
+					upstream.RetryAfter = max(upstream.RetryAfter, parseRetryAfter(response.HTTPMeta.Response.Header))
+				}
 				yield(nil, err)
 				return
 			}

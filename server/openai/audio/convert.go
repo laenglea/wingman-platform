@@ -221,6 +221,7 @@ func writeErrorEvent(w http.ResponseWriter, err error) {
 	writeEvent(w, shared.ErrorResponse{
 		Error: shared.Error{
 			Type:    shared.ErrorTypeFromError(err),
+			Code:    provider.TypeFromError(err),
 			Message: err.Error(),
 		},
 	})

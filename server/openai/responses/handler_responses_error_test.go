@@ -53,6 +53,53 @@ func TestResponseFailedIncludesRetryHeaders(t *testing.T) {
 	t.Fatal("no response.failed event")
 }
 
+func TestResponseFailedErrorCodes(t *testing.T) {
+	for _, tc := range []struct {
+		typ    string
+		status int
+		want   string
+	}{
+		{"invalid_image", 400, "invalid_image"},
+		{"server_is_overloaded", 503, "server_error"},
+		{"overloaded_error", 529, "server_error"},
+		{"insufficient_quota", 429, "insufficient_quota"},
+		{"credit_balance_exhausted", 429, "insufficient_quota"},
+		{"throttlingException", 429, "rate_limit_exceeded"},
+		{"context_length_exceeded", 400, "context_length_exceeded"},
+		{"UNAVAILABLE", 503, "server_error"},
+	} {
+		t.Run(tc.typ, func(t *testing.T) {
+			cfg := &config.Config{Policy: noop.New()}
+			cfg.RegisterCompleter(errorTestModel, midStreamErrCompleter{err: &provider.ProviderError{Code: tc.status, Type: tc.typ, Message: "failed"}})
+			rec := httptest.NewRecorder()
+			New(cfg).handleResponses(rec, httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(`{"model":"`+errorTestModel+`","stream":true,"input":"x"}`)))
+			events, err := harness.ParseSSE(rec.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seenError, seenFailed := false, false
+			for _, event := range events {
+				switch event.Event {
+				case "error":
+					seenError = true
+					if event.Data["code"] != tc.typ {
+						t.Fatalf("provider code lost: %v", event.Data)
+					}
+				case "response.failed":
+					seenFailed = true
+					failure := event.Data["response"].(map[string]any)["error"].(map[string]any)
+					if failure["code"] != tc.want {
+						t.Fatalf("invalid response error code: %v", failure)
+					}
+				}
+			}
+			if !seenError || !seenFailed {
+				t.Fatal("missing error events")
+			}
+		})
+	}
+}
+
 func (c midStreamErrCompleter) Complete(_ context.Context, _ []provider.Message, _ *provider.CompleteOptions) iter.Seq2[*provider.Completion, error] {
 	return func(yield func(*provider.Completion, error) bool) {
 		if !yield(&provider.Completion{

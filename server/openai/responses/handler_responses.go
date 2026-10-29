@@ -1427,7 +1427,10 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 		case StreamEventResponseError:
 			shared.WriteSSERetry(w, event.Error)
 
-			code := shared.ErrorTypeFromError(event.Error)
+			code := provider.TypeFromError(event.Error)
+			if code == "" {
+				code = shared.ErrorTypeFromError(event.Error)
+			}
 
 			return writeEvent(w, "error", ResponseErrorEvent{
 				Type:           "error",
@@ -1444,7 +1447,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				Model:     responseModel(event.Completion, req.Model),
 				Output:    streamResponseOutputs(event, &ids, "failed", outputOpts),
 				Error: &ResponseError{
-					Code:    shared.ErrorTypeFromError(event.Error),
+					Code:    responseErrorCode(event.Error),
 					Message: event.Error.Error(),
 				},
 			}

@@ -19,9 +19,15 @@ func convertError(err error) error {
 
 	if errors.As(err, &apierr) {
 		message, errType := extractAnthropicErrorInfo(apierr)
+		code := apierr.StatusCode
+		if code < 400 {
+			// SSE and Bedrock EventStream errors carry the successful stream's
+			// HTTP status, not the status of the failure inside that stream.
+			code = statusCodeFromErrorType(errType)
+		}
 
 		provErr := &provider.ProviderError{
-			Code:    apierr.StatusCode,
+			Code:    code,
 			Type:    errType,
 			Message: message,
 			Err:     err,
@@ -38,9 +44,8 @@ func convertError(err error) error {
 	return err
 }
 
-// extractAnthropicErrorInfo pulls the clean error.message and error.type out
-// of the SDK's raw JSON body (shape: {"error":{"type":"rate_limit_error",
-// "message":"..."}}). The SDK's Error.Error() string includes the HTTP
+// extractAnthropicErrorInfo reads Anthropic's nested error envelope or Bedrock's
+// top-level message and exception type. The SDK's Error.Error() includes the HTTP
 // method, URL, status, Request-ID, and the raw body — too noisy to surface
 // as-is to API clients. Falls back to apierr.Error() if parsing fails.
 func extractAnthropicErrorInfo(apierr *anthropic.Error) (message, errType string) {
@@ -48,7 +53,10 @@ func extractAnthropicErrorInfo(apierr *anthropic.Error) (message, errType string
 
 	if raw != "" {
 		var payload struct {
-			Error struct {
+			Message string `json:"message"`
+			Code    string `json:"code"`
+			Type    string `json:"__type"`
+			Error   struct {
 				Type    string `json:"type"`
 				Message string `json:"message"`
 			} `json:"error"`
@@ -57,6 +65,25 @@ func extractAnthropicErrorInfo(apierr *anthropic.Error) (message, errType string
 		if err := json.Unmarshal([]byte(raw), &payload); err == nil {
 			message = strings.TrimSpace(payload.Error.Message)
 			errType = strings.TrimSpace(payload.Error.Type)
+			if message == "" {
+				message = strings.TrimSpace(payload.Message)
+			}
+			if errType == "" {
+				if apierr.Response != nil {
+					errType = strings.TrimSpace(apierr.Response.Header.Get("X-Amzn-Errortype"))
+				}
+				if errType == "" {
+					errType = strings.TrimSpace(payload.Code)
+				}
+				if errType == "" {
+					errType = strings.TrimSpace(payload.Type)
+				}
+				// AWS exception identifiers can have a namespace and URL suffix.
+				errType, _, _ = strings.Cut(errType, ":")
+				if _, name, ok := strings.Cut(errType, "#"); ok {
+					errType = name
+				}
+			}
 		}
 	}
 
@@ -65,6 +92,39 @@ func extractAnthropicErrorInfo(apierr *anthropic.Error) (message, errType string
 	}
 
 	return message, errType
+}
+
+// statusCodeFromErrorType supplies a failure status for an in-stream error.
+// Unknown types remain upstream failures, allowing new provider errors without
+// accidentally treating them as successful responses or invalid user input.
+func statusCodeFromErrorType(errType string) int {
+	switch strings.ToLower(errType) {
+	case "invalid_request_error", "validationexception":
+		return http.StatusBadRequest
+	case "authentication_error":
+		return http.StatusUnauthorized
+	case "billing_error":
+		return http.StatusPaymentRequired
+	case "permission_error", "accessdeniedexception":
+		return http.StatusForbidden
+	case "not_found_error", "resourcenotfoundexception":
+		return http.StatusNotFound
+	case "conflict_error", "conflictexception":
+		return http.StatusConflict
+	case "request_too_large":
+		return http.StatusRequestEntityTooLarge
+	case "rate_limit_error", "throttlingexception":
+		return http.StatusTooManyRequests
+	case "overloaded_error":
+		return 529
+	case "serviceunavailableexception":
+		return http.StatusServiceUnavailable
+	case "timeout_error", "modeltimeoutexception":
+		// Match the native Bedrock provider's upstream timeout classification.
+		return http.StatusGatewayTimeout
+	default:
+		return http.StatusBadGateway
+	}
 }
 
 // parseRetryAfter parses Retry-After (seconds, float, HTTP-date).

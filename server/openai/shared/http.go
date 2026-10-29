@@ -38,8 +38,8 @@ func errorTypeFromCode(code int) string {
 		return "conflict_error"
 	case code == http.StatusTooManyRequests:
 		return "rate_limit_exceeded"
-	case code == http.StatusServiceUnavailable:
-		return "overloaded_error"
+	case code == http.StatusServiceUnavailable || code == 529:
+		return "service_unavailable_error"
 	case code >= 500:
 		return "server_error"
 	case code >= 400:
@@ -52,6 +52,9 @@ func errorTypeFromCode(code int) string {
 func WriteError(w http.ResponseWriter, code int, err error) {
 	// Use real status code from upstream provider if available
 	code = provider.CodeFromError(err, code)
+	if code == 529 {
+		code = http.StatusServiceUnavailable
+	}
 
 	// Propagate Retry-After from upstream
 	if v := provider.RetryAfterHeaderValue(provider.RetryAfterFromError(err)); v != "" {

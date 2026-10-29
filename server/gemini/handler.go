@@ -2,8 +2,11 @@ package gemini
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -55,7 +58,10 @@ func writeError(w http.ResponseWriter, code int, err error) {
 }
 
 func toAPIError(err error, fallback int) *APIError {
-	code := provider.CodeFromError(err, fallback)
+	code := fallback
+	if upstream, ok := errors.AsType[*provider.ProviderError](err); ok && upstream.Code >= 400 {
+		code = upstream.Code
+	}
 
 	var status string
 	switch code {
@@ -71,21 +77,48 @@ func toAPIError(err error, fallback int) *APIError {
 	case http.StatusNotFound:
 		status = "NOT_FOUND"
 
+	case http.StatusConflict:
+		status = "ABORTED"
+
 	case http.StatusTooManyRequests:
 		status = "RESOURCE_EXHAUSTED"
+	case 499:
+		status = "CANCELLED"
+	case http.StatusNotImplemented:
+		status = "UNIMPLEMENTED"
+	case http.StatusServiceUnavailable, 529:
+		code, status = http.StatusServiceUnavailable, "UNAVAILABLE"
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
+		code, status = http.StatusGatewayTimeout, "DEADLINE_EXCEEDED"
 	default:
+		if code >= 500 {
+			code = http.StatusInternalServerError
+		}
 		status = "INTERNAL"
 
 		if code >= 400 && code < 500 {
 			status = "INVALID_ARGUMENT"
 		}
 	}
+	// Several Google canonical statuses share an HTTP code. Preserve these
+	// distinctions when supplied by a Google provider, never foreign type names.
+	switch upstreamType := provider.TypeFromError(err); {
+	case code == 400 && (upstreamType == "FAILED_PRECONDITION" || upstreamType == "OUT_OF_RANGE"),
+		code == 409 && upstreamType == "ALREADY_EXISTS",
+		code == 500 && (upstreamType == "UNKNOWN" || upstreamType == "DATA_LOSS"):
+		status = upstreamType
+	}
 
-	return &APIError{
+	result := &APIError{
 		Code:    code,
 		Status:  status,
 		Message: err.Error(),
 	}
+	if delay := provider.RetryAfterFromError(err); delay > 0 {
+		seconds := strings.TrimRight(strings.TrimRight(fmt.Sprintf("%d.%09d", delay/time.Second, delay%time.Second), "0"), ".")
+		result.Details = []map[string]any{{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": seconds + "s"}}
+	}
+	return result
 }
 
 // writeSSERetry emits an SSE "retry:" field (milliseconds) if the error
