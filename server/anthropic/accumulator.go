@@ -1,7 +1,7 @@
 package anthropic
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"slices"
@@ -41,7 +41,8 @@ type StreamEvent struct {
 	DeltaUsage   *DeltaUsage
 
 	// For error events
-	Error *Error
+	Error     *Error
+	RequestID string
 
 	// The accumulated completion (available on final events)
 	Completion *provider.Completion
@@ -83,8 +84,9 @@ type StreamingAccumulator struct {
 	lastToolCallID string
 
 	// Usage tracking
-	inputTokens  int
-	outputTokens int
+	inputTokens          int
+	outputTokens         int
+	initialCacheCreation *CacheCreation
 }
 
 // NewStreamingAccumulator creates a new StreamingAccumulator with an event handler
@@ -209,12 +211,20 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 	// Emit message_start on first add
 	if !s.started {
 		s.started = true
+		s.initialCacheCreation = cacheCreation(c.Usage)
 
 		// Get input tokens from first chunk if available
-		inputTokens := 0
+		inputTokens, outputTokens := 0, 0
+		var serviceTier, inferenceGeo string
+		var outputTokensDetails *OutputTokensDetails
 		var cacheReadInputTokens, cacheCreationInputTokens int
 		if c.Usage != nil {
 			inputTokens = anthropicInputTokens(c.Usage)
+			outputTokens = c.Usage.OutputTokens
+			serviceTier, inferenceGeo = c.Usage.ServiceTier, c.Usage.InferenceGeo
+			if c.Usage.ReasoningTokens != nil {
+				outputTokensDetails = &OutputTokensDetails{ThinkingTokens: *c.Usage.ReasoningTokens}
+			}
 			s.inputTokens = inputTokens
 			cacheReadInputTokens = c.Usage.CacheReadInputTokens
 			cacheCreationInputTokens = c.Usage.CacheCreationInputTokens
@@ -233,11 +243,15 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 				Usage: Usage{
 					Speed:        speedFromTier(c.Tier),
 					InputTokens:  inputTokens,
-					OutputTokens: 0,
+					OutputTokens: outputTokens,
+					ServiceTier:  serviceTier,
+					InferenceGeo: inferenceGeo,
+
+					OutputTokensDetails: outputTokensDetails,
 
 					CacheReadInputTokens:     cacheReadInputTokens,
 					CacheCreationInputTokens: cacheCreationInputTokens,
-					CacheCreation:            cacheCreation(c.Usage),
+					CacheCreation:            s.initialCacheCreation,
 				},
 			},
 		}); err != nil {
@@ -342,12 +356,16 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			}
 		}
 
-		if content.Reasoning != nil && !content.Reasoning.Redacted && (content.Reasoning.Text != "" || content.Reasoning.Summary != "" || content.Reasoning.Signature != "") {
+		var reasoningText, reasoningSummary string
+		if content.Reasoning != nil {
+			reasoningText, reasoningSummary = content.Reasoning.Text(), content.Reasoning.SummaryText()
+		}
+		if content.Reasoning != nil && !content.Reasoning.Redacted && (reasoningText != "" || reasoningSummary != "" || content.Reasoning.Signature != "") {
 			reasoning := content.Reasoning
 			// Gemini can deliver an opaque signature after the answer text.
 			// Keep that text open until the signature block is complete so
 			// block-oriented clients finish on the answer, not empty thinking.
-			lateSignature := s.thinkingIndex < 0 && s.textIndex >= 0 && reasoning.Text == "" && reasoning.Summary == "" && reasoning.Signature != ""
+			lateSignature := s.thinkingIndex < 0 && s.textIndex >= 0 && reasoningText == "" && reasoningSummary == "" && reasoning.Signature != ""
 			preserveText := -1
 			if lateSignature {
 				preserveText = s.textIndex
@@ -383,9 +401,9 @@ func (s *StreamingAccumulator) Add(c provider.Completion) error {
 			}
 
 			// OpenAI-backed reasoning arrives as Summary deltas with empty Text
-			if thinking := reasoning.Text; thinking != "" || reasoning.Summary != "" {
+			if thinking := reasoningText; thinking != "" || reasoningSummary != "" {
 				if thinking == "" {
-					thinking = reasoning.Summary
+					thinking = reasoningSummary
 				}
 
 				if err := s.emitEvent(StreamEvent{
@@ -613,6 +631,12 @@ func (s *StreamingAccumulator) Complete() error {
 	if s.stopReason == StopReasonStopSequence {
 		messageDelta.StopSequence = &result.StopSequence
 	}
+	// Anthropic sends the breakdown at message_start. Repeat it only when a
+	// backend reports new information later, so final usage can reconstruct it.
+	creation := cacheCreation(result.Usage)
+	if creation != nil && s.initialCacheCreation != nil && *creation == *s.initialCacheCreation {
+		creation = nil
+	}
 
 	if err := s.emitEvent(StreamEvent{
 		Type:         StreamEventMessageDelta,
@@ -625,7 +649,7 @@ func (s *StreamingAccumulator) Complete() error {
 
 			CacheReadInputTokens:     cacheReadInputTokens,
 			CacheCreationInputTokens: cacheCreationInputTokens,
-			CacheCreation:            cacheCreation(result.Usage),
+			CacheCreation:            creation,
 		},
 		Completion: result,
 	}); err != nil {
@@ -645,12 +669,11 @@ func (s *StreamingAccumulator) Complete() error {
 
 // Error emits an error event
 func (s *StreamingAccumulator) Error(err error) error {
+	failure := responseError(provider.CodeFromError(err, http.StatusBadGateway), err)
 	return s.emitEvent(StreamEvent{
-		Type: StreamEventError,
-		Error: &Error{
-			Type:    errorTypeForStatus(provider.CodeFromError(err, http.StatusBadGateway)),
-			Message: err.Error(),
-		},
+		Type:      StreamEventError,
+		Error:     &failure,
+		RequestID: errorRequestID(err),
 	})
 }
 

@@ -1,7 +1,7 @@
 package tokens
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"strings"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -104,8 +104,8 @@ func contentTokens(model string, family Family, anthropicServed bool, content pr
 		return fileTokens(model, family, anthropicServed, content.File)
 
 	case content.Reasoning != nil:
-		return textForFamily(family, content.Reasoning.Text) +
-			textForFamily(family, content.Reasoning.Summary)
+		return textForFamily(family, content.Reasoning.Text()) +
+			textForFamily(family, content.Reasoning.SummaryText())
 
 	case content.ToolCall != nil:
 		return textForFamily(family, content.ToolCall.Name) +

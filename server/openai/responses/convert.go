@@ -2,7 +2,8 @@ package responses
 
 import (
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"mime"
 	"path"
@@ -142,14 +143,15 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 				continue
 			}
 
-			r := provider.Reasoning{
-				ID:        item.InputReasoning.ID,
-				Signature: item.InputReasoning.EncryptedContent,
+			signature, redacted, err := parseReasoningEncryptedContent(item.InputReasoning.EncryptedContent)
+			if err != nil {
+				return nil, err
 			}
+			r := provider.Reasoning{ID: item.InputReasoning.ID, Signature: signature, Redacted: redacted}
 
 			for _, part := range item.InputReasoning.Summary {
 				if part.Type == "summary_text" {
-					r.Summary += part.Text
+					r.Summary = append(r.Summary, provider.Part{Index: len(r.Summary), Text: part.Text})
 				}
 			}
 
@@ -162,13 +164,13 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 				if err := json.Unmarshal(item.InputReasoning.Content, &parts); err == nil {
 					for _, part := range parts {
 						if part.Type == "reasoning_text" {
-							r.Text += part.Text
+							r.Content = append(r.Content, provider.Part{Index: len(r.Content), Text: part.Text})
 						}
 					}
 				}
 			}
 
-			if r.Signature == "" && r.Summary == "" && r.Text == "" {
+			if r.Signature == "" && r.SummaryText() == "" && r.Text() == "" {
 				continue
 			}
 
@@ -261,17 +263,13 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 			flushResults()
 
 			call := item.InputApplyPatchCall
-			args, _ := json.Marshal(map[string]any{
-				"type": call.Operation.Type,
-				"path": call.Operation.Path,
-				"diff": call.Operation.Diff,
-			})
+			args := (texteditor.Operation{Type: call.Operation.Type, Path: call.Operation.Path, Diff: call.Operation.Diff}).Args()
 
 			pendingCalls = append(pendingCalls, provider.ToolCallContent(provider.ToolCall{
 				ID:        call.CallID,
 				Kind:      provider.ToolKindTextEditor,
 				Name:      "apply_patch",
-				Arguments: string(args),
+				Arguments: args,
 			}))
 
 		case InputItemTypeApplyPatchCallOutput:
@@ -440,7 +438,7 @@ func toMessages(items []InputItem, instructions string) ([]provider.Message, err
 
 			payload, _ := json.Marshal(map[string]any{
 				"type":   string(item.Type),
-				"output": json.RawMessage(output.Output),
+				"output": jsontext.Value(output.Output),
 			})
 
 			pendingResults = append(pendingResults, provider.ToolResultContent(provider.ToolResult{
@@ -920,16 +918,16 @@ func shellOutputType(tools []Tool) ResponseOutputType {
 
 // shellLocalEnvironment is the environment for shell calls executed by the
 // client, the only mode wingman supports.
-var shellLocalEnvironment = json.RawMessage(`{"type":"local"}`)
+var shellLocalEnvironment = jsontext.Value(`{"type":"local"}`)
 
 // emptyShellAction is the placeholder action for a call whose commands are
 // not yet known (output_item.added) or were lost to truncation.
-func emptyShellAction(itemType ResponseOutputType) json.RawMessage {
+func emptyShellAction(itemType ResponseOutputType) jsontext.Value {
 	if itemType == ResponseOutputTypeLocalShellCall {
-		return json.RawMessage(`{"type":"exec","command":[]}`)
+		return jsontext.Value(`{"type":"exec","command":[]}`)
 	}
 
-	return json.RawMessage(`{"commands":[]}`)
+	return jsontext.Value(`{"commands":[]}`)
 }
 
 // toolCallToShellCall converts a shell ToolCall of any dialect to a
@@ -967,13 +965,13 @@ func toolCallToToolSearchCall(call provider.ToolCall, status string) *ToolSearch
 		CallID:    call.ID,
 		Status:    status,
 		Execution: call.Execution,
-		Arguments: json.RawMessage("{}"),
+		Arguments: jsontext.Value("{}"),
 	}
 	if item.Execution == "" {
 		item.Execution = "server"
 	}
 	if call.Arguments != "" {
-		item.Arguments = json.RawMessage(call.Arguments)
+		item.Arguments = jsontext.Value(call.Arguments)
 	}
 	return item
 }

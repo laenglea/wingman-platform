@@ -3,7 +3,8 @@ package realtime
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"net/http/httptest"
 	"slices"
@@ -23,6 +24,31 @@ import (
 // deliberately use a semantic fake rather than a fake OpenAI upstream: this is
 // the protocol contract every native provider (OpenAI, Gemini Live, Nova Sonic)
 // must satisfy after translation.
+
+func TestSessionUsageDoesNotCreateResponse(t *testing.T) {
+	upstream := newFakeRealtime()
+	conn := openTestRealtime(t, upstream)
+	assertEventType(t, readWireEvent(t, conn), "session.created")
+	assertEventType(t, readWireEvent(t, conn), "conversation.created")
+	writeWireEvent(t, conn, map[string]any{"type": "response.create"})
+	waitSignal(t, upstream.session.responded, "response.create")
+
+	for _, id := range []string{"resp_first", "resp_after_tool"} {
+		upstream.session.emit(provider.RealtimeEvent{Type: provider.RealtimeEventUsage, Usage: &provider.RealtimeUsage{InputTokens: 12, OutputTokens: 3}})
+		emitAudioResponse(upstream.session, id, "item_"+id, "content_"+id, "Hello.")
+		trace := readThrough(t, conn, "response.done")
+		if countEvents(trace, "response.created") != 1 {
+			t.Fatal("session usage created an extra response")
+		}
+		response := findEvent(t, trace, "response.done")["response"].(map[string]any)
+		if response["id"] != id || response["status"] != "completed" {
+			t.Fatalf("response = %#v", response)
+		}
+		if total := response["usage"].(map[string]any)["total_tokens"]; total != float64(5) {
+			t.Fatalf("response usage = %v, want 5 (excluding session usage)", total)
+		}
+	}
+}
 
 func TestWingmanChatRealtimeNormalAndMixedInputContract(t *testing.T) {
 	upstream := newFakeRealtime()
@@ -333,6 +359,33 @@ func TestRealtimeProviderDiagnosticErrorIsNotExposed(t *testing.T) {
 	}
 }
 
+type rejectingRealtime struct{ *fakeRealtime }
+
+func (rejectingRealtime) Connect(context.Context, *provider.RealtimeOptions) (provider.RealtimeSession, error) {
+	return nil, &provider.ProviderError{Code: 429, Type: "insufficient_quota", Message: "monthly budget exhausted", Err: provider.ErrRejected}
+}
+
+func TestRealtimeRejectedConnectionEndsSession(t *testing.T) {
+	conn := openTestRealtime(t, rejectingRealtime{newFakeRealtime()})
+	assertEventType(t, readWireEvent(t, conn), "session.created")
+	assertEventType(t, readWireEvent(t, conn), "conversation.created")
+
+	writeWireEvent(t, conn, map[string]any{"type": "response.create", "event_id": "evt_1"})
+
+	event := readWireEvent(t, conn)
+	assertEventType(t, event, "error")
+	apiError := event["error"].(map[string]any)
+	if apiError["type"] != "insufficient_quota" || apiError["code"] != "insufficient_quota" || apiError["message"] != "monthly budget exhausted" || apiError["event_id"] != "evt_1" {
+		t.Fatalf("error = %v", apiError)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := conn.ReadMessage(); err == nil || strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("session stayed open after a rejected connection: %v", err)
+	}
+}
+
 func TestRealtimeFailedResponseAndMetadataContract(t *testing.T) {
 	upstream := newFakeRealtime()
 	conn := openTestRealtime(t, upstream)
@@ -489,7 +542,7 @@ func TestRealtimeAudioFormatParsing(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := parseAudioFormat(json.RawMessage(test.raw), current)
+			got, err := parseAudioFormat(jsontext.Value(test.raw), current)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -502,7 +555,7 @@ func TestRealtimeAudioFormatParsing(t *testing.T) {
 		})
 	}
 
-	invalid, err := parseAudioFormat(json.RawMessage(`{"type":"audio/pcm","rate":16000}`), current)
+	invalid, err := parseAudioFormat(jsontext.Value(`{"type":"audio/pcm","rate":16000}`), current)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +577,7 @@ func TestRealtimeToolChoiceParsing(t *testing.T) {
 		{`{"type":"function","name":"weather"}`, "", true},
 	}
 	for _, test := range tests {
-		got, err := parseToolChoice(json.RawMessage(test.raw))
+		got, err := parseToolChoice(jsontext.Value(test.raw))
 		if (err != nil) != test.wantErr {
 			t.Errorf("parseToolChoice(%s) error = %v, wantErr %v", test.raw, err, test.wantErr)
 		}
@@ -535,22 +588,22 @@ func TestRealtimeToolChoiceParsing(t *testing.T) {
 }
 
 func TestRealtimeTruncationAndMetadataParsing(t *testing.T) {
-	truncation, err := parseTruncation(json.RawMessage(`"auto"`))
+	truncation, err := parseTruncation(jsontext.Value(`"auto"`))
 	if err != nil || truncation != nil {
 		t.Fatalf("auto truncation = %#v, %v; want nil, nil", truncation, err)
 	}
-	if _, err := parseTruncation(json.RawMessage(`{"type":"retention_ratio","retention_ratio":1.1}`)); err == nil {
+	if _, err := parseTruncation(jsontext.Value(`{"type":"retention_ratio","retention_ratio":1.1}`)); err == nil {
 		t.Fatal("out-of-range retention ratio was accepted")
 	}
 
-	metadata, err := parseMetadata(json.RawMessage(`{"request":"weather"}`))
+	metadata, err := parseMetadata(jsontext.Value(`{"request":"weather"}`))
 	if err != nil || metadata["request"] != "weather" {
 		t.Fatalf("metadata = %#v, %v", metadata, err)
 	}
-	if _, err := parseMetadata(json.RawMessage(`{"request":42}`)); err == nil {
+	if _, err := parseMetadata(jsontext.Value(`{"request":42}`)); err == nil {
 		t.Fatal("non-string metadata value was accepted")
 	}
-	if _, err := parseMetadata(json.RawMessage(`{"request":"` + strings.Repeat("x", 513) + `"}`)); err == nil {
+	if _, err := parseMetadata(jsontext.Value(`{"request":"` + strings.Repeat("x", 513) + `"}`)); err == nil {
 		t.Fatal("oversized metadata value was accepted")
 	}
 }
@@ -565,7 +618,7 @@ func TestRealtimeSessionRejectsIgnoredFields(t *testing.T) {
 		`{"type":"realtime","audio":{"input":{"transcription":{"model":"gpt-live-transcribe","keywords":["Wingman"]}}}}`,
 	} {
 		config := newSessionConfig(newFakeRealtime().Defaults())
-		if err := config.apply(json.RawMessage(raw)); err == nil || !strings.Contains(err.Error(), "not supported") {
+		if err := config.apply(jsontext.Value(raw)); err == nil || !strings.Contains(err.Error(), "not supported") {
 			t.Errorf("session %s error = %v, want explicit unsupported-field error", raw, err)
 		}
 	}
@@ -1005,6 +1058,6 @@ func assertCompletedResponse(t *testing.T, event map[string]any, outputCount int
 }
 
 func formatTrace(events []map[string]any) string {
-	data, _ := json.MarshalIndent(events, "", "  ")
+	data, _ := json.Marshal(events, jsontext.WithIndent("  "), json.Deterministic(true))
 	return string(data)
 }

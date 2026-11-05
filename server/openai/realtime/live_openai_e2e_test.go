@@ -5,7 +5,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -403,6 +404,31 @@ func appendLivePCM(t *testing.T, name string, conn *websocket.Conn, audio []byte
 	}
 }
 
+// streamLivePCM paces PCM16LE/24 kHz/mono input and supplies trailing silence
+// for providers using automatic activity detection.
+func streamLivePCM(t *testing.T, name string, conn *websocket.Conn, audio []byte) {
+	t.Helper()
+	const frameBytes = 1536 // 32 ms at PCM16LE/24 kHz/mono.
+	for offset := 0; offset < len(audio); offset += frameBytes {
+		end := min(offset+frameBytes, len(audio))
+		writeLive(t, name, conn, map[string]any{
+			"type": "input_audio_buffer.append", "audio": base64.StdEncoding.EncodeToString(audio[offset:end]),
+		})
+		time.Sleep(32 * time.Millisecond)
+	}
+	streamLiveSilence(t, name, conn, 2*time.Second)
+}
+
+func streamLiveSilence(t *testing.T, name string, conn *websocket.Conn, duration time.Duration) {
+	t.Helper()
+	const frameBytes = 1536
+	encoded := base64.StdEncoding.EncodeToString(make([]byte, frameBytes))
+	for elapsed := time.Duration(0); elapsed < duration; elapsed += 32 * time.Millisecond {
+		writeLive(t, name, conn, map[string]any{"type": "input_audio_buffer.append", "audio": encoded})
+		time.Sleep(32 * time.Millisecond)
+	}
+}
+
 func writeLive(t *testing.T, name string, conn *websocket.Conn, event any) {
 	t.Helper()
 	if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
@@ -497,7 +523,7 @@ func validateLiveTrace(t *testing.T, label string, events []map[string]any) {
 			assertLiveString(t, label, event, "item_id")
 			assertLiveString(t, label, event, "call_id")
 			assertLiveString(t, label, event, "name")
-			if arguments, ok := event["arguments"].(string); !ok || !json.Valid([]byte(arguments)) {
+			if arguments, ok := event["arguments"].(string); !ok || !jsontext.Value([]byte(arguments)).IsValid() {
 				t.Errorf("%s: function arguments are not valid JSON: %v", label, event["arguments"])
 			}
 		case "response.output_item.done":
@@ -678,7 +704,7 @@ func assertLiveObjectWithString(t *testing.T, label string, event map[string]any
 }
 
 func formatLiveTrace(events []map[string]any) string {
-	data, _ := json.MarshalIndent(events, "", "  ")
+	data, _ := json.Marshal(events, jsontext.WithIndent("  "), json.Deterministic(true))
 	return string(data)
 }
 

@@ -4,7 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 
@@ -74,6 +74,7 @@ func toMessage(c Content, pendingCallIDs map[string][]string) (*provider.Message
 	case c.Role == "model":
 		role = provider.MessageRoleAssistant
 	default:
+		//lint:ignore ST1005 Preserve the client-facing Gemini error text.
 		return nil, fmt.Errorf("Please use a valid role: user, model.")
 	}
 
@@ -92,7 +93,7 @@ func toMessage(c Content, pendingCallIDs map[string][]string) (*provider.Message
 
 		if part.Thought {
 			content = append(content, provider.ReasoningContent(provider.Reasoning{
-				Text:      part.Text,
+				Content:   provider.TextParts(part.Text),
 				Signature: sig,
 			}))
 			continue
@@ -258,7 +259,8 @@ func toJSONString(v any) (string, error) {
 		return s, nil
 	}
 
-	data, err := json.Marshal(v)
+	// These bytes become conversation text; their order must survive replay.
+	data, err := json.Marshal(v, json.Deterministic(true))
 	if err != nil {
 		return "", err
 	}
@@ -321,9 +323,9 @@ func toContent(content []provider.Content) *Content {
 	for i, c := range content {
 		if c.Reasoning != nil {
 			beforeCall := i+1 < len(content) && content[i+1].ToolCall != nil
-			text := c.Reasoning.Text
+			text := c.Reasoning.Text()
 			if text == "" {
-				text = c.Reasoning.Summary
+				text = c.Reasoning.SummaryText()
 			}
 
 			if text == "" {

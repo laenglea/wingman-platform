@@ -1,11 +1,61 @@
 package features_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/adrianliechti/wingman/test/anthropic"
 	"github.com/adrianliechti/wingman/test/harness"
 )
+
+// Exercise the Claude Code path through every configured provider, including
+// models whose native reasoning API is not Anthropic's thinking API.
+func TestSignedThinkingReplayWithoutDisplay(t *testing.T) {
+	h := anthropic.New(t)
+	for _, model := range anthropic.DefaultModels() {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", model.Name, stream), func(t *testing.T) {
+				h.SkipUnlessConfigured(t, model.Name)
+				history := []any{map[string]any{"role": "user", "content": harness.ReasoningPrompt}}
+				body := map[string]any{
+					"model": model.Name, "max_tokens": 4096, "stream": stream,
+					"thinking":      map[string]any{"type": "adaptive", "display": "omitted"},
+					"output_config": map[string]any{"effort": "high"}, "messages": history,
+				}
+				output := postLiveOutput(t, h.Client, h.Wingman, "messages", body)
+				signed := false
+				for _, raw := range output {
+					block := raw.(map[string]any)
+					if block["type"] != "thinking" {
+						continue
+					}
+					if signature, _ := block["signature"].(string); signature != "" {
+						signed = true
+					}
+					if strings.HasPrefix(model.Name, "gpt-") && block["thinking"] != "" {
+						t.Fatal("OpenAI returned summary text despite display=omitted")
+					}
+				}
+				if !signed {
+					t.Fatal("no signed thinking to replay")
+				}
+				body["messages"] = append(history, map[string]any{"role": "assistant", "content": output}, map[string]any{"role": "user", "content": "Verify all four congruences and repeat only the integer, without digit separators."})
+				answer := postLiveOutput(t, h.Client, h.Wingman, "messages", body)
+				var text strings.Builder
+				for _, raw := range answer {
+					block := raw.(map[string]any)
+					if block["type"] == "text" {
+						text.WriteString(block["text"].(string))
+					}
+				}
+				if !strings.Contains(text.String(), "2425") {
+					t.Fatalf("replay lost the answer: %q", text.String())
+				}
+			})
+		}
+	}
+}
 
 // TestThinkingRoundTripHTTP exercises a pure thinking round-trip with no
 // tool calls in between. Anthropic enforces that any thinking_block returned
@@ -28,8 +78,7 @@ func TestThinkingRoundTripHTTP(t *testing.T) {
 			turn1 := map[string]any{
 				"max_tokens": 16000,
 				"thinking": map[string]any{
-					"type":          "enabled",
-					"budget_tokens": 5000,
+					"type": "adaptive",
 				},
 				"output_config": map[string]any{"effort": "high"},
 				"messages": []map[string]any{
@@ -53,8 +102,7 @@ func TestThinkingRoundTripHTTP(t *testing.T) {
 				return map[string]any{
 					"max_tokens": 16000,
 					"thinking": map[string]any{
-						"type":          "enabled",
-						"budget_tokens": 5000,
+						"type": "adaptive",
 					},
 					"output_config": map[string]any{"effort": "high"},
 					"messages": []map[string]any{

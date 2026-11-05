@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -237,6 +238,15 @@ func (s *openAISession) handleClientEvent(ctx context.Context, data []byte) erro
 	}
 
 	if err != nil {
+		// A refused provider connection, such as an exhausted budget, cannot
+		// succeed later in this session.
+		if errors.Is(err, provider.ErrRejected) {
+			code := provider.TypeFromError(err)
+			if werr := s.writeTypedError(event.EventID, code, code, err.Error(), ""); werr != nil {
+				return werr
+			}
+			return err
+		}
 		return s.writeError(event.EventID, "invalid_request", err.Error(), "type")
 	}
 
@@ -380,7 +390,7 @@ func (s *openAISession) clearAudio(ctx context.Context) error {
 	return nil
 }
 
-func (s *openAISession) createConversationItem(ctx context.Context, data json.RawMessage, previousItemID string) error {
+func (s *openAISession) createConversationItem(ctx context.Context, data jsontext.Value, previousItemID string) error {
 	var item conversationItem
 	if err := json.Unmarshal(data, &item); err != nil {
 		return errors.New("conversation item is invalid")
@@ -493,11 +503,11 @@ func (s *openAISession) forgetItem(itemID string) {
 	delete(s.itemPrevious, itemID)
 }
 
-func (s *openAISession) createResponse(ctx context.Context, data json.RawMessage) error {
+func (s *openAISession) createResponse(ctx context.Context, data jsontext.Value) error {
 	var nextOutputModalities []string
 	var nextResponseMetadata map[string]string
 	if len(data) > 0 && string(data) != "null" && string(data) != "{}" {
-		var fields map[string]json.RawMessage
+		var fields map[string]jsontext.Value
 		if err := json.Unmarshal(data, &fields); err != nil {
 			return errors.New("response configuration is invalid")
 		}

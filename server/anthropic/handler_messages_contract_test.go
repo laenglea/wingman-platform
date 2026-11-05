@@ -2,7 +2,7 @@ package anthropic
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"iter"
@@ -17,6 +17,7 @@ import (
 	"github.com/adrianliechti/wingman/pkg/policy/noop"
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/test/harness"
+
 	claude "github.com/anthropics/anthropic-sdk-go/v2"
 )
 
@@ -59,7 +60,7 @@ func TestMessagesStreamContract(t *testing.T) {
 		return messagesContractChunk(provider.Content{MessageID: id, Text: value})
 	}
 	thinking := func(id, summary, signature string) provider.Completion {
-		return messagesContractChunk(provider.ReasoningContent(provider.Reasoning{ID: id, Summary: summary, Signature: signature}))
+		return messagesContractChunk(provider.ReasoningContent(provider.Reasoning{ID: id, Summary: provider.TextParts(summary), Signature: signature}))
 	}
 	tool := func(id, name, args string) provider.Completion {
 		return messagesContractChunk(provider.ToolCallContent(provider.ToolCall{ID: id, Name: name, Arguments: args}))
@@ -83,7 +84,7 @@ func TestMessagesStreamContract(t *testing.T) {
 		{"fragmented tool", []provider.Completion{tool("call_1", "lookup", `{"city":`), tool("call_1", "", `"Bern"}`)}, []string{"tool_use"}, StopReasonToolUse},
 		{"interleaved tools", []provider.Completion{tool("call_1", "lookup", `{"city":`), tool("call_2", "clock", `{"zone":`), tool("call_1", "", `"Bern"}`), tool("call_2", "", `"UTC"}`)}, []string{"tool_use", "tool_use"}, StopReasonToolUse},
 		{"zero argument tool", []provider.Completion{tool("call_1", "ping", "")}, []string{"tool_use"}, StopReasonToolUse},
-		{"reasoning and tool in one chunk", []provider.Completion{messagesContractChunk(provider.ReasoningContent(provider.Reasoning{ID: "rs_1", Summary: "Plan", Signature: "sig_1"}), provider.ToolCallContent(provider.ToolCall{ID: "call_1", Name: "ping", Arguments: `{}`}))}, []string{"thinking", "tool_use"}, StopReasonToolUse},
+		{"reasoning and tool in one chunk", []provider.Completion{messagesContractChunk(provider.ReasoningContent(provider.Reasoning{ID: "rs_1", Summary: provider.TextParts("Plan"), Signature: "sig_1"}), provider.ToolCallContent(provider.ToolCall{ID: "call_1", Name: "ping", Arguments: `{}`}))}, []string{"thinking", "tool_use"}, StopReasonToolUse},
 		{"caller tool named like hosted tool", []provider.Completion{tool("call_1", "tool_search_tool_regex", `{"pattern":"x"}`)}, []string{"tool_use"}, StopReasonToolUse},
 		{"empty token limit", []provider.Completion{{Status: provider.CompletionStatusIncomplete}}, nil, StopReasonMaxTokens},
 		{"truncated tool", []provider.Completion{tool("call_1", "lookup", `{"city":`), {Status: provider.CompletionStatusIncomplete}}, []string{"tool_use"}, StopReasonMaxTokens},

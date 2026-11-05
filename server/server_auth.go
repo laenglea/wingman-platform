@@ -1,10 +1,11 @@
 package server
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"strings"
 
+	"github.com/adrianliechti/wingman/pkg/budget"
 	"github.com/adrianliechti/wingman/pkg/otel"
 	"github.com/adrianliechti/wingman/server/web"
 )
@@ -26,6 +27,10 @@ func (s *Server) handleAuth(next http.Handler) http.Handler {
 		if !authorized {
 			writeUnauthorized(w, r)
 			return
+		}
+
+		if s.Budget != nil {
+			ctx = budget.WithAdmission(ctx)
 		}
 
 		otel.Label(ctx, otel.EndUserAttrs(ctx)...)
@@ -67,5 +72,5 @@ func writeUnauthorized(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 
-	json.NewEncoder(w).Encode(body)
+	json.MarshalWrite(w, body)
 }

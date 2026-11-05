@@ -4,7 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 
@@ -185,7 +185,7 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 			id, signature := decodeSignature(block.Signature)
 
 			r := provider.Reasoning{
-				Text:      block.Thinking,
+				Content:   provider.TextParts(block.Thinking),
 				Signature: signature,
 			}
 
@@ -193,7 +193,7 @@ func toMessage(index int, m MessageParam) (*provider.Message, error) {
 			// the summary, and replayed content parts would be rejected.
 			if id != "" {
 				r.ID = id
-				r.Text, r.Summary = "", block.Thinking
+				r.Content, r.Summary = nil, provider.TextParts(block.Thinking)
 			}
 
 			content = append(content, provider.ReasoningContent(r))
@@ -422,7 +422,7 @@ func toToolResultParts(path string, content any) ([]provider.Part, error) {
 		return parts, nil
 
 	default:
-		data, err := json.Marshal(v)
+		data, err := json.Marshal(v, json.Deterministic(true))
 
 		if err != nil {
 			return nil, err
@@ -452,7 +452,8 @@ func toJSONString(v any) (string, error) {
 		return s, nil
 	}
 
-	data, err := json.Marshal(v)
+	// These bytes become conversation text; their order must survive replay.
+	data, err := json.Marshal(v, json.Deterministic(true))
 
 	if err != nil {
 		return "", err
@@ -535,16 +536,16 @@ func toContentBlocks(content []provider.Content) []ContentBlock {
 	result := make([]ContentBlock, 0, len(content))
 
 	for _, c := range content {
-		if c.Reasoning != nil && (c.Reasoning.Text != "" || c.Reasoning.Summary != "" || c.Reasoning.Signature != "") {
+		if c.Reasoning != nil && (c.Reasoning.Text() != "" || c.Reasoning.SummaryText() != "" || c.Reasoning.Signature != "") {
 			if c.Reasoning.Redacted {
 				result = append(result, ContentBlock{
 					Type: "redacted_thinking",
 					Data: c.Reasoning.Signature,
 				})
 			} else {
-				thinking := c.Reasoning.Text
+				thinking := c.Reasoning.Text()
 				if thinking == "" {
-					thinking = c.Reasoning.Summary
+					thinking = c.Reasoning.SummaryText()
 				}
 
 				result = append(result, ContentBlock{
@@ -717,7 +718,7 @@ func generateID(length int) string {
 func serverToolUseMarker(block ContentBlockParam) string {
 	input, _ := block.Input.(map[string]any)
 	if input == nil {
-		if data, err := json.Marshal(block.Input); err == nil {
+		if data, err := json.Marshal(block.Input, json.Deterministic(true)); err == nil {
 			return fmt.Sprintf("[%s: %s]", block.Name, string(data))
 		}
 		return fmt.Sprintf("[%s]", block.Name)
@@ -730,7 +731,7 @@ func serverToolUseMarker(block ContentBlockParam) string {
 		return fmt.Sprintf("[%s: %s]", block.Name, u)
 	}
 
-	data, _ := json.Marshal(input)
+	data, _ := json.Marshal(input, json.Deterministic(true))
 	return fmt.Sprintf("[%s: %s]", block.Name, string(data))
 }
 

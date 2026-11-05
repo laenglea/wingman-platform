@@ -3,12 +3,14 @@ package google
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
+	"io"
 	"net/http"
 	"reflect"
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+
 	"google.golang.org/genai/interactions/models/interactions"
 )
 
@@ -21,8 +23,23 @@ func TestComplete_InteractionRequest(t *testing.T) {
 		if r.Header.Get("x-goog-api-key") != "test-token" {
 			t.Error("missing authentication")
 		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(data, &request); err != nil {
 			t.Error(err)
+		}
+		var wire struct {
+			GenerationConfig map[string]any `json:"generation_config"`
+		}
+		if err := json.Unmarshal(data, &wire); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"temperature", "top_p"} {
+			if _, present := wire.GenerationConfig[name]; present {
+				t.Errorf("sampling parameter %s must be omitted", name)
+			}
 		}
 		interactionEvents(createdEvent, completedEvent)(w, r)
 	}
@@ -34,7 +51,7 @@ func TestComplete_InteractionRequest(t *testing.T) {
 		provider.SystemMessage("You are helpful."), provider.SystemMessage("Be brief."),
 		provider.UserMessage("question"),
 		{Role: provider.MessageRoleAssistant, Content: []provider.Content{
-			provider.ReasoningContent(provider.Reasoning{Summary: "thinking", Signature: "Ev8BAA=="}),
+			provider.ReasoningContent(provider.Reasoning{Summary: provider.TextParts("thinking"), Signature: "Ev8BAA=="}),
 			provider.ToolCallContent(provider.ToolCall{ID: "c1", Name: "lookup", Namespace: "weather", Arguments: `{"city":"Zurich"}`}),
 		}},
 		{Role: provider.MessageRoleUser, Content: []provider.Content{provider.ToolResultContent(provider.ToolResult{
@@ -62,9 +79,6 @@ func TestComplete_InteractionRequest(t *testing.T) {
 	config := request.GenerationConfig
 	if value(config.MaxOutputTokens) != 1024 || !reflect.DeepEqual(config.StopSequences, []string{"STOP"}) || value(config.ThinkingLevel) != interactions.ThinkingLevelHigh || value(config.ThinkingSummaries) != interactions.ThinkingSummariesAuto {
 		t.Fatalf("configuration lost: %+v", config)
-	}
-	if config.Temperature != nil || config.TopP != nil {
-		t.Fatal("Gemini sampling parameters must be omitted")
 	}
 	if config.ToolChoice == nil || value(config.ToolChoice.ToolChoiceType) != interactions.ToolChoiceTypeValidated || len(request.Tools) != 1 || value(request.Tools[0].Function.Name) != "weather_lookup" {
 		t.Fatalf("tools lost: %+v", request.Tools)
@@ -130,7 +144,7 @@ func TestConvertInteraction_ThinkingAndToolChoice(t *testing.T) {
 
 func TestConvertMessages_PreservesInterleavingAndLegacyIDs(t *testing.T) {
 	messages := []provider.Message{{Role: provider.MessageRoleAssistant, Content: []provider.Content{
-		provider.TextContent("first "), provider.ReasoningContent(provider.Reasoning{Summary: "think", Signature: "opaque_signature"}),
+		provider.TextContent("first "), provider.ReasoningContent(provider.Reasoning{Summary: provider.TextParts("think"), Signature: "opaque_signature"}),
 		provider.ToolCallContent(provider.ToolCall{ID: "c1::lookup::Ev8BAA==", Name: "lookup", Arguments: `{}`}), provider.TextContent(" last"),
 	}}, provider.ToolMessage("c1::lookup::Ev8BAA==", "ok")}
 	steps, err := convertMessages(messages)
@@ -151,7 +165,7 @@ func TestConvertMessages_PreservesNumericArgumentsAndTextResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := json.Marshal(steps[1].FunctionCallStep.Arguments)
+	encoded, err := json.Marshal(steps[1].FunctionCallStep.Arguments, json.Deterministic(true))
 	if err != nil || string(encoded) != `{"decimal":0.1234567890123456789,"id":9007199254740993}` {
 		t.Fatalf("tool argument precision lost: %s (%v)", encoded, err)
 	}
@@ -170,7 +184,7 @@ func TestConvertMessages_UnsignedToolTurns(t *testing.T) {
 		}},
 		provider.ToolMessage("c1", "ok"), provider.ToolMessage("c2", "ok"),
 		{Role: provider.MessageRoleAssistant, Content: []provider.Content{
-			provider.ReasoningContent(provider.Reasoning{Summary: "foreign reasoning"}),
+			provider.ReasoningContent(provider.Reasoning{Summary: provider.TextParts("foreign reasoning")}),
 			provider.ToolCallContent(provider.ToolCall{ID: "c3", Name: "lookup", Arguments: `{}`}),
 		}},
 	})
@@ -191,7 +205,7 @@ func TestConvertMessages_ThoughtPrecedesUnsignedText(t *testing.T) {
 		provider.UserMessage("inspect"),
 		provider.AssistantMessage("Checking history."),
 		{Role: provider.MessageRoleAssistant, Content: []provider.Content{
-			provider.ReasoningContent(provider.Reasoning{Summary: "Run the history command."}),
+			provider.ReasoningContent(provider.Reasoning{Summary: provider.TextParts("Run the history command.")}),
 			provider.ToolCallContent(provider.ToolCall{ID: "c1", Name: "lookup", Arguments: `{}`}),
 		}},
 		provider.ToolMessage("c1", "ok"),
@@ -246,5 +260,16 @@ func TestInteractionState_StatusUpdateCarriesUsage(t *testing.T) {
 	}
 	if delta.Usage == nil || delta.Usage.InputTokens != 12 || delta.Usage.OutputTokens != 8 || delta.Usage.ReasoningTokens == nil || *delta.Usage.ReasoningTokens != 3 || delta.Usage.CacheReadInputTokens != 4 {
 		t.Fatalf("status_update usage lost: %+v", delta.Usage)
+	}
+}
+
+func TestConvertInteraction_DisableParallelTools(t *testing.T) {
+	for _, choice := range []provider.ToolChoice{"", provider.ToolChoiceAuto, provider.ToolChoiceAny, provider.ToolChoiceNone} {
+		for _, tools := range [][]provider.Tool{nil, {{Kind: provider.ToolKindFunction, Name: "lookup"}}} {
+			_, err := convertInteraction("gemini-test", nil, &provider.CompleteOptions{Tools: tools, ToolOptions: &provider.ToolOptions{Choice: choice, DisableParallelToolCalls: true}})
+			if err != nil {
+				t.Errorf("choice=%q tools=%d: error=%v", choice, len(tools), err)
+			}
+		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -100,7 +101,7 @@ func TestCompleterTextItemsFollowBlocks(t *testing.T) {
 		for _, part := range message.Content {
 			switch {
 			case part.Reasoning != nil:
-				parts = append(parts, "reasoning:"+part.Reasoning.Text)
+				parts = append(parts, "reasoning:"+part.Reasoning.Text())
 			case part.ToolCall != nil:
 				parts = append(parts, "call:"+part.ToolCall.ID)
 			case part.Text != "":

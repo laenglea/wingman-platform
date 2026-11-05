@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+
 	"github.com/google/uuid"
 )
 
@@ -49,8 +50,24 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 		Model: r.model,
 	}
 
-	if len(options.Images) == 0 {
-		data, err := r.generate(ctx, input)
+	// The edit endpoint takes a single image and no mask, so a mask cannot be
+	// honored or emulated; a markup is composited onto that image.
+	if options.Mask != nil {
+		return nil, &provider.ProviderError{
+			Code:    http.StatusBadRequest,
+			Type:    "invalid_request_error",
+			Message: "mask is not supported by xAI image models",
+		}
+	}
+
+	prompt, images, err := provider.EmulateEditGuides(input, options.Images, nil, options.Markup)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(images) == 0 {
+		data, err := r.generate(ctx, prompt)
 
 		if err != nil {
 			return nil, err
@@ -59,7 +76,7 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 		result.Content = data
 		result.ContentType = http.DetectContentType(data)
 	} else {
-		data, err := r.edit(ctx, input, options.Images)
+		data, err := r.edit(ctx, prompt, images)
 
 		if err != nil {
 			return nil, err
@@ -75,8 +92,8 @@ func (r *Renderer) Render(ctx context.Context, input string, options *provider.R
 type generateRequest struct {
 	Model          string `json:"model"`
 	Prompt         string `json:"prompt"`
-	N              int    `json:"n,omitempty"`
-	ResponseFormat string `json:"response_format,omitempty"`
+	N              int    `json:"n,omitzero"`
+	ResponseFormat string `json:"response_format,omitzero"`
 }
 
 type imageResponse struct {
@@ -84,8 +101,8 @@ type imageResponse struct {
 }
 
 type imageData struct {
-	URL     string `json:"url,omitempty"`
-	B64JSON string `json:"b64_json,omitempty"`
+	URL     string `json:"url,omitzero"`
+	B64JSON string `json:"b64_json,omitzero"`
 }
 
 func (r *Renderer) generate(ctx context.Context, prompt string) ([]byte, error) {
@@ -113,7 +130,7 @@ type editRequest struct {
 	Model          string     `json:"model"`
 	Prompt         string     `json:"prompt"`
 	Image          imageInput `json:"image"`
-	ResponseFormat string     `json:"response_format,omitempty"`
+	ResponseFormat string     `json:"response_format,omitzero"`
 }
 
 type imageInput struct {
@@ -191,7 +208,7 @@ func (r *Renderer) do(ctx context.Context, url string, body any, result any) err
 		}
 	}
 
-	return json.NewDecoder(resp.Body).Decode(result)
+	return json.UnmarshalRead(resp.Body, result)
 }
 
 func (r *Renderer) getData(ctx context.Context, image imageData) ([]byte, error) {

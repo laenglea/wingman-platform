@@ -3,7 +3,8 @@ package responses
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"iter"
 	"net/http"
 	"net/http/httptest"
@@ -72,7 +73,7 @@ func TestResponsesPreserveReasoningMetadata(t *testing.T) {
 				}
 				var result *Response
 				if stream {
-					for _, line := range strings.Split(rec.Body.String(), "\n") {
+					for line := range strings.SplitSeq(rec.Body.String(), "\n") {
 						data, ok := strings.CutPrefix(line, "data: ")
 						if !ok {
 							continue
@@ -115,8 +116,8 @@ func TestResponsesPreserveReasoningMetadata(t *testing.T) {
 }
 
 func TestResponsesPreserveReasoningStatus(t *testing.T) {
-	reasoning := provider.ReasoningContent(provider.Reasoning{ID: "rs_1", Summary: "First summary"})
-	secondReasoning := provider.ReasoningContent(provider.Reasoning{ID: "rs_2", Summary: "Second summary"})
+	reasoning := provider.ReasoningContent(provider.Reasoning{ID: "rs_1", Summary: provider.TextParts("First summary")})
+	secondReasoning := provider.ReasoningContent(provider.Reasoning{ID: "rs_2", Summary: provider.TextParts("Second summary")})
 
 	cases := []struct {
 		name    string
@@ -181,19 +182,19 @@ func TestResponsesPreserveReasoningStatus(t *testing.T) {
 				var result *response
 				added := make(map[string]string)
 				done := make(map[string]string)
-				summaryDone := make(map[string]json.RawMessage)
+				summaryDone := make(map[string]jsontext.Value)
 				if stream {
-					for _, line := range strings.Split(rec.Body.String(), "\n") {
+					for line := range strings.SplitSeq(rec.Body.String(), "\n") {
 						data, ok := strings.CutPrefix(line, "data: ")
 						if !ok {
 							continue
 						}
 						var event struct {
-							Type     string          `json:"type"`
-							ItemID   string          `json:"item_id"`
-							Status   json.RawMessage `json:"status"`
-							Item     outputItem      `json:"item"`
-							Response *response       `json:"response"`
+							Type     string         `json:"type"`
+							ItemID   string         `json:"item_id"`
+							Status   jsontext.Value `json:"status"`
+							Item     outputItem     `json:"item"`
+							Response *response      `json:"response"`
 						}
 						if err := json.Unmarshal([]byte(data), &event); err != nil {
 							t.Fatalf("unmarshal event: %v", err)

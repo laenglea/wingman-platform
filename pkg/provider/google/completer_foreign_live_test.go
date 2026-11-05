@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/adrianliechti/wingman/pkg/provider"
+
 	"github.com/joho/godotenv"
 )
 
@@ -50,7 +51,7 @@ func TestComplete_LiveUnsignedToolReplay(t *testing.T) {
 			provider.UserMessage("Call lookup then reply with DONE."),
 			provider.AssistantMessage("Checking history."),
 			{Role: provider.MessageRoleAssistant, Content: []provider.Content{
-				provider.ReasoningContent(provider.Reasoning{Summary: "Run the lookup tool."}),
+				provider.ReasoningContent(provider.Reasoning{Summary: provider.TextParts("Run the lookup tool.")}),
 				provider.ToolCallContent(provider.ToolCall{ID: "call_foreign", Name: "lookup", Arguments: `{}`}),
 			}},
 			provider.ToolMessage("call_foreign", "success"),

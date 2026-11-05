@@ -1,7 +1,8 @@
 package anthropic
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,6 +45,20 @@ func accumulateStream(t *testing.T, events []string, options *provider.CompleteO
 }
 
 const regressionMessageStart = `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-test","content":[],"usage":{"input_tokens":3,"output_tokens":0}}}`
+
+func TestStreamPreservesExecutionMetadata(t *testing.T) {
+	result, err := accumulateStream(t, []string{
+		`{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-test","content":[],"usage":{"input_tokens":18,"output_tokens":7,"service_tier":"standard","inference_geo":"global","speed":"standard"}}}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}`,
+		`{"type":"message_stop"}`,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u := result.Usage; u == nil || u.OutputTokens != 10 || u.ServiceTier != "standard" || u.InferenceGeo != "global" {
+		t.Fatalf("lost execution metadata across partial usage updates: %+v", u)
+	}
+}
 
 func TestStreamToolInputAtBlockStop(t *testing.T) {
 	for _, tc := range []struct {
@@ -119,7 +134,7 @@ func TestStreamThinkingSignaturesStayWithTheirBlock(t *testing.T) {
 			}
 			for i, want := range []string{"first thought", "second thought"} {
 				r := content[i].Reasoning
-				if r.ID != "" || r.Summary != "" || r.Text != want || r.Signature != fmt.Sprintf("SIG_%d", i+1) {
+				if r.ID != "" || r.SummaryText() != "" || r.Text() != want || r.Signature != fmt.Sprintf("SIG_%d", i+1) {
 					t.Errorf("block %d: %+v", i, r)
 				}
 			}
@@ -140,7 +155,7 @@ func TestToolReplayPreservesJSONNumbers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got, want map[string]json.RawMessage
+	var got, want map[string]jsontext.Value
 	_ = json.Unmarshal(data, &got)
 	_ = json.Unmarshal([]byte(arguments), &want)
 	for key, value := range want {

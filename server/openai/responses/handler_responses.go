@@ -2,7 +2,7 @@ package responses
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"maps"
 	"net/http"
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/adrianliechti/wingman/pkg/jsonutil"
 	"github.com/adrianliechti/wingman/pkg/policy"
 	"github.com/adrianliechti/wingman/pkg/provider"
 	"github.com/adrianliechti/wingman/server/openai/shared"
@@ -20,9 +21,7 @@ import (
 func (h *Handler) handleResponses(w http.ResponseWriter, r *http.Request) {
 	var req ResponsesRequest
 
-	decoder := json.NewDecoder(r.Body)
-	decoder.UseNumber()
-	if err := decoder.Decode(&req); err != nil {
+	if err := jsonutil.UnmarshalRead(r.Body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -554,6 +553,7 @@ func completionFailure(completion *provider.Completion) error {
 	if completion != nil && completion.StopDetails != nil && completion.StopDetails.Type != "" {
 		return errors.New("The model stopped generating: " + completion.StopDetails.Type)
 	}
+	//lint:ignore ST1005 Preserve the client-facing Responses error text.
 	return errors.New("The model stopped generating without a usable result.")
 }
 
@@ -576,32 +576,15 @@ func messageOutputs(message *provider.Message, messageID, status string, opts re
 	for _, content := range message.Content {
 		if opts.IncludeReasoning {
 			r := content.Reasoning
-			if r != nil && (r.ID != "" || r.Text != "" || r.Summary != "" || r.Signature != "") {
+			if r != nil && (r.ID != "" || r.Text() != "" || r.SummaryText() != "" || r.Signature != "") {
 				id := r.ID
 				if id == "" {
 					id = "rs_" + uuid.NewString()
 				}
 
-				rText, rSummary := r.Text, r.Summary
-				if opts.IncludeSummary && rText != "" && rSummary == "" {
-					rText, rSummary = "", rText
-				}
-
-				item := &ReasoningOutputItem{
-					ID:               id,
-					Type:             "reasoning",
-					Status:           status,
-					Summary:          []ReasoningOutputSummary{},
-					Content:          []ReasoningOutputContentPart{},
-					EncryptedContent: r.Signature,
-				}
-
-				if rSummary != "" {
-					item.Summary = append(item.Summary, ReasoningOutputSummary{Type: "summary_text", Text: rSummary})
-				}
-				if rText != "" {
-					item.Content = append(item.Content, ReasoningOutputContentPart{Type: "reasoning_text", Text: rText})
-				}
+				projected := reasoningForOutput(*r, opts.IncludeSummary)
+				projected.ID = id
+				item := reasoningOutputItem(projected, status)
 
 				output = append(output, ResponseOutput{
 					Type:                ResponseOutputTypeReasoning,
@@ -1002,7 +985,7 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 						CallID:    event.ToolCallID,
 						Status:    "in_progress",
 						Execution: execution,
-						Arguments: json.RawMessage("{}"),
+						Arguments: jsontext.Value("{}"),
 					},
 				})
 
@@ -1322,28 +1305,9 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 				return nil
 			}
 
-			item := &ReasoningOutputItem{
-				ID:     event.ReasoningID,
-				Type:   "reasoning",
-				Status: itemStatus(event.Incomplete),
+			item := reasoningOutputItem(provider.Reasoning{ID: event.ReasoningID, Content: event.ReasoningContentParts, Summary: event.ReasoningSummaryParts,
+				Signature: event.ReasoningSignature, Redacted: event.ReasoningRedacted}, itemStatus(event.Incomplete))
 
-				Summary: []ReasoningOutputSummary{},
-				Content: []ReasoningOutputContentPart{},
-
-				EncryptedContent: event.ReasoningSignature,
-			}
-			if event.ReasoningSummary != "" {
-				item.Summary = append(item.Summary, ReasoningOutputSummary{
-					Type: "summary_text",
-					Text: event.ReasoningSummary,
-				})
-			}
-			if event.ReasoningText != "" {
-				item.Content = append(item.Content, ReasoningOutputContentPart{
-					Type: "reasoning_text",
-					Text: event.ReasoningText,
-				})
-			}
 			return writeEvent(w, "response.output_item.done", ReasoningOutputItemDoneEvent{
 				Type:           "response.output_item.done",
 				SequenceNumber: nextSeq(),
@@ -1545,6 +1509,20 @@ func (h *Handler) handleResponsesComplete(w http.ResponseWriter, r *http.Request
 			Tools:            req.Tools,
 		}),
 		Usage: responseUsage(completion.Usage),
+	}
+
+	if completion.Status == provider.CompletionStatusRefused || completion.Status == provider.CompletionStatusFailed {
+		for i := range result.Output {
+			item := &result.Output[i]
+			switch item.Type {
+			case ResponseOutputTypeFunctionCall, ResponseOutputTypeCustomToolCall, ResponseOutputTypeApplyPatchCall, ResponseOutputTypeComputerCall, ResponseOutputTypeShellCall, ResponseOutputTypeLocalShellCall:
+				setOutputStatus(item, "incomplete")
+			case ResponseOutputTypeToolSearchCall:
+				if callerOwned(provider.ToolKindToolSearch, item.ToolSearchCallItem.Execution) {
+					setOutputStatus(item, "incomplete")
+				}
+			}
+		}
 	}
 
 	if result.Status == "completed" {

@@ -1,11 +1,9 @@
 package anthropic
 
 import (
-	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/adrianliechti/wingman/config"
 	"github.com/adrianliechti/wingman/pkg/provider"
@@ -29,11 +27,13 @@ func (h *Handler) Attach(r chi.Router) {
 }
 
 func writeJson(w http.ResponseWriter, v any) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("encode response: %w", err))
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	enc.Encode(v)
+	w.Write(data)
 }
 
 func writeError(w http.ResponseWriter, code int, err error) {
@@ -44,43 +44,37 @@ func writeError(w http.ResponseWriter, code int, err error) {
 	if v := provider.RetryAfterHeaderValue(provider.RetryAfterFromError(err)); v != "" {
 		w.Header().Set("Retry-After", v)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
+	requestID := errorRequestID(err)
+	if requestID != "" {
+		w.Header().Set("Request-Id", requestID)
+	}
 
 	resp := ErrorResponse{
 		Type: "error",
 
-		Error: Error{
-			Type:    errorTypeForStatus(code),
-			Message: err.Error(),
-		},
+		Error:     responseError(code, err),
+		RequestID: requestID,
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	enc.Encode(resp)
+	data, encodeErr := json.Marshal(resp)
+	if encodeErr != nil {
+		code = http.StatusInternalServerError
+		data = []byte(`{"type":"error","error":{"type":"api_error","message":"could not encode error response"}}`)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(data)
 }
 
 func writeEvent(w http.ResponseWriter, eventType string, v any) error {
-	rc := http.NewResponseController(w)
-
-	var data bytes.Buffer
-	enc := json.NewEncoder(&data)
-	enc.SetEscapeHTML(false)
-	enc.Encode(v)
-
-	event := strings.TrimSpace(data.String())
-
-	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, event); err != nil {
+	data, err := json.Marshal(v)
+	if err != nil {
 		return err
 	}
-
-	if err := rc.Flush(); err != nil {
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, data); err != nil {
 		return err
 	}
-
-	return nil
+	return http.NewResponseController(w).Flush()
 }
 
 // writeSSERetry emits an SSE "retry:" field (milliseconds) if the error
