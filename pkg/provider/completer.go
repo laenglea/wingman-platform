@@ -301,6 +301,7 @@ type CompleteOptions struct {
 	OutputOptions    *OutputOptions
 	Schema           *Schema
 
+	TruncationOptions *TruncationOptions
 	CompactionOptions *CompactionOptions
 	CacheOptions      *CacheOptions
 }
@@ -343,6 +344,7 @@ type Completion struct {
 	StopReason   StopReason
 	StopDetails  *StopDetails
 	StopSequence string
+	EndTurn      *bool
 
 	Message *Message
 
@@ -458,6 +460,18 @@ type CompactionOptions struct {
 	Trigger   bool
 	Threshold int
 }
+
+type TruncationOptions struct {
+	Mode TruncationMode
+}
+
+type TruncationMode string
+
+const (
+	TruncationModeDefault  TruncationMode = ""
+	TruncationModeAuto     TruncationMode = "auto"
+	TruncationModeDisabled TruncationMode = "disabled"
+)
 
 type CacheOptions struct {
 	Key       string
