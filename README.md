@@ -31,7 +31,7 @@ The platform integrates with a wide range of LLM providers:
 
 **Media Processing:**
 - Image generation: OpenAI DALL-E, Google Gemini, xAI
-- Speech-to-text: OpenAI Whisper, Mistral, Azure Speech
+- Speech-to-text: OpenAI Whisper, Mistral, Azure Speech, Microsoft MAI-Transcribe (realtime)
 - Text-to-speech: OpenAI TTS, Azure Speech, xAI
 
 ### Document Processing & RAG
@@ -168,6 +168,8 @@ providers:
     models:
       - gpt-6-astra
       - gpt-6.1-sol
+      - gpt-6.2-astra
+      - gpt-6.2-sol
       - gpt-6.1-terra
       - gpt-6-sol
       - gpt-6-luna
@@ -326,6 +328,13 @@ WebSocket session so pending transcripts and usage can finish on the original
 stream. Dedicated transcription and translation models never become the
 default conversational model, including when configured under an alias.
 
+Turn detection is passed through to the provider. A session that sets
+`turn_detection` (an object, or `null` to commit turns manually) gets exactly
+that; one that leaves it unset keeps the model's own default. Until the client
+sets it, `session.updated` reports the default the model declares, or
+`server_vad` for services that decide themselves, such as OpenAI's
+transcription models and MAI-Transcribe.
+
 #### OpenAI Platform
 
 https://platform.openai.com/docs/api-reference
@@ -338,6 +347,8 @@ providers:
     models:
       - gpt-6-astra
       - gpt-6.1-sol
+      - gpt-6.2-astra
+      - gpt-6.2-sol
       - gpt-6.1-terra
       - gpt-6-sol
       - gpt-6-luna
@@ -351,7 +362,13 @@ providers:
       - tts-1-hd
 ```
 
-GPT-6.1 Sol uses `gpt-6.1-sol`. The `openai` provider uses the Responses API upstream, including for tool calls received through Wingman's Chat Completions and Anthropic endpoints. Reasoning defaults to `medium`; `low`, `high`, `xhigh`, and `max` are also supported. Wingman maps `none` and `minimal` to `low`. OpenAI's Chat Completions endpoint supports this model only without tools. See the [official model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
+GPT-6.2 Astra and GPT-6.2 Sol use `gpt-6.2-astra` and `gpt-6.2-sol`. Both accept text and image input and produce text, with a 1,050,000-token context window and up to 128,000 output tokens. See the [Astra model documentation](https://developers.openai.com/api/docs/models/gpt-6.2-astra) and [Sol model documentation](https://developers.openai.com/api/docs/models/gpt-6.2-sol).
+
+The `openai` provider uses the Responses API upstream, including for tool calls received through Wingman's Chat Completions and Anthropic endpoints. For GPT-6.2 Astra, GPT-6.2 Sol, GPT-6 Astra, and GPT-6.1 Sol, Wingman maps `none` and `minimal` to `low`. Supported efforts are `low`, `medium`, `high`, `xhigh`, and `max`. Direct OpenAI tool calling requires the Responses API for these models. See the [GPT-6.2 migration guide](https://developers.openai.com/api/docs/guides/latest-model/gpt-6.2-astra#migration-quickstart).
+
+Set `service_tier` to `ultrafast` to request Ultrafast on GPT-6.2. Wingman reports the service tier returned by OpenAI. [OpenAI Ultrafast guide](https://developers.openai.com/api/docs/guides/ultrafast-mode)
+
+For multi-turn Responses requests, replay prior output items in order, including encrypted reasoning items, and append new input. GPT-6.2 can discard replayed reasoning when earlier messages or tools change. Wingman returns OpenAI's removal reasons in `input_transformations` when available. To adjust reasoning effort while keeping the original request settings, append a `configuration_update` input item. Wingman keeps supported `additional_tools` declarations at their original input position on native GPT-6.2 Responses requests. Other backends receive the supported tools in their request-wide list. See the [OpenAI guide to preserving the request prefix](https://developers.openai.com/api/docs/guides/keep-prefix-unchanged).
 
 GPT-6.1 Terra uses `gpt-6.1-terra` through the same Responses API integration. Reasoning supports `none`, `low`, `medium` (default), `high`, `xhigh`, and `max`. Wingman preserves `none` and maps `minimal` to `low`. Tool calling requires the Responses API. See the [official model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-terra).
 
@@ -381,6 +398,27 @@ providers:
       text-embedding-ada-002:
         id: text-embedding-ada-002
 ```
+
+
+#### Microsoft Foundry (MAI-Transcribe Streaming)
+
+https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe-2-streaming-realtime
+
+Realtime transcription with `MAI-Transcribe-2-Streaming` (public preview) over Foundry's OpenAI Realtime–style WebSocket API. Deploy the model on a Foundry resource in a supported region and point an `openai` provider at the resource's `/mai/v1` path:
+
+```yaml
+providers:
+  - type: openai
+    url: https://YOUR_RESOURCE.services.ai.azure.com/mai/v1
+    token: ${AZURE_MAI_API_KEY}
+
+    models:
+      - MAI-Transcribe-2-Streaming # the deployment name
+```
+
+Clients open `/v1/realtime?intent=transcription` and select the model with `session.update`; Wingman sends the key in the `api-key` header. The model has no server-side turn detection: leave `turn_detection` unset or `null`, and send `input_audio_buffer.commit` at pauses or at the end of the recording to finalize an item. Deltas stream before the commit. MAI's provisional `intermediate` transcripts are not forwarded. Input audio is PCM16 at 24 kHz. A session lasts at most one hour, and its settings are fixed once audio starts.
+
+Wingman detects the model as `realtime` from `-streaming` in its name. A deployment with another name needs `type: realtime` in the model mapping, and its `id` must contain `transcribe` for Wingman to open a transcription session upstream.
 
 
 #### Anthropic
